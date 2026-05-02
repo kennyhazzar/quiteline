@@ -173,13 +173,20 @@ export function absoluteAvatarUrl(avatarUrl?: string): string {
   return `${BASE}${avatarUrl}`
 }
 
+export async function fetchCurrentIdentity(token: string): Promise<Identity> {
+  const res = await fetch(`${BASE}/v1/me/identity`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
 export async function upsertIdentity(input: {
   userId: string
   displayName: string
   identityPublicKey: string
   token: string
 }): Promise<Identity> {
-  const res = await fetch(`${BASE}/v1/zk/identities/${encodeURIComponent(input.userId)}`, {
+  const res = await fetch(`${BASE}/v1/chat/identities/${encodeURIComponent(input.userId)}`, {
     method: 'PUT',
     headers: authHeaders(input.token),
     body: JSON.stringify({
@@ -191,14 +198,14 @@ export async function upsertIdentity(input: {
 }
 
 export async function fetchIdentity(userId: string, token: string): Promise<Identity> {
-  const res = await fetch(`${BASE}/v1/zk/identities/${encodeURIComponent(userId)}`, {
+  const res = await fetch(`${BASE}/v1/chat/identities/${encodeURIComponent(userId)}`, {
     headers: authHeaders(token),
   })
   return readJSON(res)
 }
 
 export async function touchIdentity(userId: string, token: string): Promise<Identity> {
-  const res = await fetch(`${BASE}/v1/zk/identities/${encodeURIComponent(userId)}/last-seen`, {
+  const res = await fetch(`${BASE}/v1/chat/identities/${encodeURIComponent(userId)}/last-seen`, {
     method: 'PUT',
     headers: authHeaders(token),
     body: JSON.stringify({}),
@@ -212,7 +219,7 @@ export async function createRoom(input: {
   members: string[]
   token: string
 }): Promise<Room> {
-  const res = await fetch(`${BASE}/v1/zk/rooms`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms`, {
     method: 'POST',
     headers: authHeaders(input.token),
     body: JSON.stringify({
@@ -224,8 +231,8 @@ export async function createRoom(input: {
   return readJSON(res)
 }
 
-export async function fetchRooms(userId: string, token: string): Promise<{ rooms: Room[] }> {
-  const res = await fetch(`${BASE}/v1/zk/rooms?userId=${encodeURIComponent(userId)}`, {
+export async function fetchRooms(token: string): Promise<{ rooms: Room[] }> {
+  const res = await fetch(`${BASE}/v1/chat/rooms`, {
     headers: authHeaders(token),
   })
   return readJSON(res)
@@ -236,7 +243,7 @@ export async function leaveRoom(input: {
   userId: string
   token: string
 }): Promise<void> {
-  const res = await fetch(`${BASE}/v1/zk/rooms/${encodeURIComponent(input.roomId)}/members/${encodeURIComponent(input.userId)}`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/members/${encodeURIComponent(input.userId)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${input.token}` },
   })
@@ -248,7 +255,7 @@ export async function leaveRoom(input: {
 }
 
 export async function fetchMessages(roomId: string, token: string): Promise<{ messages: EncryptedMessage[] }> {
-  const res = await fetch(`${BASE}/v1/zk/rooms/${encodeURIComponent(roomId)}/messages`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(roomId)}/messages`, {
     headers: authHeaders(token),
   })
   return readJSON(res)
@@ -263,7 +270,7 @@ export async function sendEncryptedMessage(input: {
   keyId: string
   token: string
 }): Promise<EncryptedMessage> {
-  const res = await fetch(`${BASE}/v1/zk/rooms/${encodeURIComponent(input.roomId)}/messages`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages`, {
     method: 'POST',
     headers: authHeaders(input.token),
     body: JSON.stringify({
@@ -283,7 +290,7 @@ export async function uploadEncryptedFile(input: {
 }): Promise<FileUploadResponse> {
   const form = new FormData()
   form.append('file', input.blob, 'encrypted.bin')
-  const res = await fetch(`${BASE}/v1/zk/files`, {
+  const res = await fetch(`${BASE}/v1/chat/files`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${input.token}` },
     body: form,
@@ -295,7 +302,7 @@ export async function downloadEncryptedFile(input: {
   token: string
   fileId: string
 }): Promise<Blob> {
-  const res = await fetch(`${BASE}/v1/zk/files/${encodeURIComponent(input.fileId)}`, {
+  const res = await fetch(`${BASE}/v1/chat/files/${encodeURIComponent(input.fileId)}`, {
     headers: { Authorization: `Bearer ${input.token}` },
   })
   if (!res.ok) {

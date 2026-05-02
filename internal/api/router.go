@@ -66,6 +66,9 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("PUT /v1/me/avatar", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleUploadAvatar(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/me/identity", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleCurrentIdentity(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/me/sessions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleListSessions(w, r, deps)
 	}))
@@ -91,28 +94,59 @@ func New(deps Dependencies) http.Handler {
 		}
 		handleUpsertIdentity(w, r, deps)
 	}))
+	mux.HandleFunc("PUT /v1/chat/identities/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(strings.Trim(r.URL.Path, "/"), "/last-seen") {
+			handleTouchIdentity(w, r, deps)
+			return
+		}
+		handleUpsertIdentity(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/zk/identities/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleGetIdentity(w, r, deps)
+	}))
+	mux.HandleFunc("GET /v1/chat/identities/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleGetIdentity(w, r, deps)
 	}))
 	mux.HandleFunc("GET /v1/zk/rooms", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleListRooms(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/chat/rooms", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleListRooms(w, r, deps)
+	}))
 	mux.HandleFunc("POST /v1/zk/rooms", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleCreateRoom(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/chat/rooms", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleCreateRoom(w, r, deps)
 	}))
 	mux.HandleFunc("GET /v1/zk/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/chat/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
 	mux.HandleFunc("POST /v1/zk/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/chat/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
 	mux.HandleFunc("DELETE /v1/zk/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
+	mux.HandleFunc("DELETE /v1/chat/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
 	mux.HandleFunc("POST /v1/zk/files", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
 		handleUploadEncryptedFile(w, r, deps)
 	}))
+	mux.HandleFunc("POST /v1/chat/files", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleUploadEncryptedFile(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/zk/files/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleDownloadEncryptedFile(w, r, deps)
+	}))
+	mux.HandleFunc("GET /v1/chat/files/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleDownloadEncryptedFile(w, r, deps)
 	}))
 	mux.HandleFunc("POST /v1/topics/", func(w http.ResponseWriter, r *http.Request) {
@@ -347,6 +381,37 @@ func handleUserAvatar(w http.ResponseWriter, r *http.Request, deps Dependencies)
 	_, _ = io.Copy(w, reader)
 }
 
+func handleCurrentIdentity(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	identity, err := ensureCurrentIdentity(r.Context(), deps, principalFromContext(r.Context()))
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, identity)
+}
+
+func ensureCurrentIdentity(ctx context.Context, deps Dependencies, principal auth.Principal) (zk.Identity, error) {
+	if principal.UserID == "" {
+		return zk.Identity{}, zk.ErrBadRequest
+	}
+	current, err := deps.Auth.PrincipalFor(ctx, principal)
+	if err != nil {
+		current = principal
+	}
+	displayName := strings.TrimSpace(current.DisplayName)
+	if displayName == "" {
+		displayName = strings.TrimSpace(current.Username)
+	}
+	if displayName == "" {
+		displayName = current.UserID
+	}
+	return deps.ZKStore.UpsertIdentity(ctx, zk.Identity{
+		UserID:            current.UserID,
+		DisplayName:       displayName,
+		IdentityPublicKey: "account:" + current.UserID,
+	})
+}
+
 func allowedAvatarMimeType(mimeType string) bool {
 	switch mimeType {
 	case "image/jpeg", "image/png", "image/webp":
@@ -388,10 +453,14 @@ func handlePublish(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 }
 
 func handleUpsertIdentity(w http.ResponseWriter, r *http.Request, deps Dependencies) {
-	userID := strings.TrimPrefix(r.URL.Path, "/v1/zk/identities/")
-	userID = strings.Trim(userID, "/")
+	userID := identityIDFromPath(r.URL.Path)
 	if userID == "" {
 		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	principal := principalFromContext(r.Context())
+	if principal.UserID == "" || userID != principal.UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
 
@@ -415,8 +484,7 @@ func handleUpsertIdentity(w http.ResponseWriter, r *http.Request, deps Dependenc
 }
 
 func handleGetIdentity(w http.ResponseWriter, r *http.Request, deps Dependencies) {
-	userID := strings.TrimPrefix(r.URL.Path, "/v1/zk/identities/")
-	userID = strings.Trim(userID, "/")
+	userID := identityIDFromPath(r.URL.Path)
 	if userID == "" {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -431,7 +499,7 @@ func handleGetIdentity(w http.ResponseWriter, r *http.Request, deps Dependencies
 }
 
 func handleTouchIdentity(w http.ResponseWriter, r *http.Request, deps Dependencies) {
-	userID := strings.TrimPrefix(r.URL.Path, "/v1/zk/identities/")
+	userID := identityIDFromPath(r.URL.Path)
 	userID = strings.TrimSuffix(strings.Trim(userID, "/"), "/last-seen")
 	userID = strings.Trim(userID, "/")
 	if userID == "" {
@@ -458,7 +526,7 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request, deps Dependencies)
 	room, err := deps.ZKStore.CreateRoom(r.Context(), zk.Room{
 		RoomID:  req.RoomID,
 		Name:    req.Name,
-		Members: req.Members,
+		Members: []string{principalFromContext(r.Context()).UserID},
 	})
 	if err != nil {
 		writeStoreError(w, err)
@@ -468,7 +536,7 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request, deps Dependencies)
 }
 
 func handleListRooms(w http.ResponseWriter, r *http.Request, deps Dependencies) {
-	rooms, err := deps.ZKStore.ListRooms(r.Context(), r.URL.Query().Get("userId"))
+	rooms, err := deps.ZKStore.ListRooms(r.Context(), principalFromContext(r.Context()).UserID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
@@ -508,7 +576,11 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 }
 
 func handleLeaveRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, userID string) {
-	if err := deps.ZKStore.LeaveRoom(r.Context(), roomID, userID); err != nil {
+	if userID != "" && userID != principalFromContext(r.Context()).UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if err := deps.ZKStore.LeaveRoom(r.Context(), roomID, principalFromContext(r.Context()).UserID); err != nil {
 		writeStoreError(w, err)
 		return
 	}
@@ -534,7 +606,7 @@ func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 
 	msg, err := deps.ZKStore.AppendMessage(r.Context(), zk.EncryptedMessage{
 		RoomID:     roomID,
-		SenderID:   req.SenderID,
+		SenderID:   principalFromContext(r.Context()).UserID,
 		Ciphertext: req.Ciphertext,
 		Nonce:      req.Nonce,
 		Algorithm:  req.Algorithm,
@@ -579,7 +651,7 @@ func handleUploadEncryptedFile(w http.ResponseWriter, r *http.Request, deps Depe
 }
 
 func handleDownloadEncryptedFile(w http.ResponseWriter, r *http.Request, deps Dependencies) {
-	fileID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/zk/files/"), "/")
+	fileID := fileIDFromPath(r.URL.Path)
 	if fileID == "" || strings.ContainsAny(fileID, " \t\r\n") {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
@@ -611,8 +683,14 @@ func topicFromPath(path string) (string, bool) {
 }
 
 func zkRoomSubroute(path string) (string, string, bool) {
-	const prefix = "/v1/zk/rooms/"
-	if !strings.HasPrefix(path, prefix) {
+	prefix := ""
+	for _, candidate := range []string{"/v1/zk/rooms/", "/v1/chat/rooms/"} {
+		if strings.HasPrefix(path, candidate) {
+			prefix = candidate
+			break
+		}
+	}
+	if prefix == "" {
 		return "", "", false
 	}
 	rest := strings.Trim(strings.TrimPrefix(path, prefix), "/")
@@ -621,6 +699,24 @@ func zkRoomSubroute(path string) (string, string, bool) {
 		return "", "", false
 	}
 	return roomID, tail, true
+}
+
+func identityIDFromPath(path string) string {
+	for _, prefix := range []string{"/v1/zk/identities/", "/v1/chat/identities/"} {
+		if strings.HasPrefix(path, prefix) {
+			return strings.Trim(strings.TrimPrefix(path, prefix), "/")
+		}
+	}
+	return ""
+}
+
+func fileIDFromPath(path string) string {
+	for _, prefix := range []string{"/v1/zk/files/", "/v1/chat/files/"} {
+		if strings.HasPrefix(path, prefix) {
+			return strings.Trim(strings.TrimPrefix(path, prefix), "/")
+		}
+	}
+	return ""
 }
 
 func memberSubroute(tail string) (string, bool) {

@@ -34,6 +34,7 @@ import {
   absoluteAvatarUrl,
   AuthError,
   fetchAccountSessions,
+  fetchCurrentIdentity,
   createRoom,
   downloadEncryptedFile,
   fetchIdentity,
@@ -49,7 +50,6 @@ import {
   touchIdentity,
   uploadAvatar,
   uploadEncryptedFile,
-  upsertIdentity,
   type AuthSession,
   type AccountSession,
   type EncryptedMessage,
@@ -61,13 +61,11 @@ import {
 import { compressAvatar } from '@/lib/avatar'
 import { useI18n } from '@/lib/i18n'
 import {
-  createLocalIdentity,
   createRoomSecret,
   decryptFile,
   decryptMessage,
   encryptFile,
   encryptMessage,
-  type LocalIdentity,
   type PlainMessage,
 } from '@/lib/crypto'
 
@@ -89,7 +87,6 @@ type RealtimeEvent =
 
 type CallState = 'idle' | 'calling' | 'ringing' | 'connected'
 
-const IDENTITY_KEY = 'zk.identity.v1'
 const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'
 const SESSION_KEY = 'zk.session.v1'
 const MAX_FILE_BYTES = 100 * 1024 * 1024
@@ -133,7 +130,7 @@ export default function MessengerPage() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [identity, setIdentity] = useState<LocalIdentity | null>(null)
+  const [identity, setIdentity] = useState<Identity | null>(null)
   const [displayName, setDisplayName] = useState('')
   const [roomName, setRoomName] = useState('')
   const [roomSecret, setRoomSecret] = useState('')
@@ -176,8 +173,8 @@ export default function MessengerPage() {
 
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 5000 })
   const rooms = useQuery({
-    queryKey: ['zk-rooms', identity?.userId, session?.accessToken],
-    queryFn: () => fetchRooms(identity?.userId ?? '', session?.accessToken ?? ''),
+    queryKey: ['chat-rooms', identity?.userId, session?.accessToken],
+    queryFn: () => fetchRooms(session?.accessToken ?? ''),
     enabled: Boolean(identity && session),
     refetchInterval: 3000,
     refetchOnMount: 'always',
@@ -192,7 +189,7 @@ export default function MessengerPage() {
     refetchOnWindowFocus: true,
   })
   const history = useQuery({
-    queryKey: ['zk-messages', activeRoomID, session?.accessToken],
+    queryKey: ['chat-messages', activeRoomID, session?.accessToken],
     queryFn: () => fetchMessages(activeRoomID, session?.accessToken ?? ''),
     enabled: Boolean(activeRoomID && session),
     refetchInterval: activeRoomID ? 3000 : false,
@@ -205,7 +202,7 @@ export default function MessengerPage() {
     [rooms.data?.rooms, activeRoomID],
   )
   const memberIdentities = useQuery({
-    queryKey: ['zk-identities', activeRoomID, activeRoom?.members, session?.accessToken],
+    queryKey: ['chat-identities', activeRoomID, activeRoom?.members, session?.accessToken],
     queryFn: async () => {
       if (!activeRoom || !session) return [] as Identity[]
       const identities = await Promise.all(
@@ -283,10 +280,9 @@ export default function MessengerPage() {
 
   function loadAccountLocalState(target: AuthSession) {
     const accountId = accountStorageID(target)
-    const savedIdentity = accountId ? readStoredJSON<LocalIdentity>(accountScopedKey(IDENTITY_KEY, accountId)) : null
     const savedSecrets = accountId ? readStoredJSON<Record<string, string>>(accountScopedKey(ROOM_SECRETS_KEY, accountId)) : null
 
-    setIdentity(savedIdentity)
+    setIdentity(null)
     setRoomSecrets(savedSecrets ?? {})
     setActiveRoomID('')
     setLiveMessages([])
@@ -296,6 +292,12 @@ export default function MessengerPage() {
     setLeaveConfirmOpened(false)
     if (isMobile) setMobileView('rooms')
     else setSidebarView('rooms')
+    fetchCurrentIdentity(target.accessToken)
+      .then(setIdentity)
+      .catch((err: Error) => {
+        if (err instanceof AuthError) handleAuthExpired()
+        else notifications.show({ title: t('profileTitle'), message: err.message, color: 'red' })
+      })
   }
 
   function clearAccountLocalState() {
@@ -409,22 +411,6 @@ export default function MessengerPage() {
     onError: (err: Error) => handleRequestError(err, t('login')),
   })
 
-  const createIdentityMutation = useMutation({
-    mutationFn: async () => {
-      if (!session) throw new Error('login_required')
-      const next = await createLocalIdentity(displayName.trim() || session.principal.username)
-      await upsertIdentity({ ...next, token: session.accessToken })
-      return next
-    },
-    onSuccess: (next) => {
-      const accountId = accountStorageID()
-      if (accountId) localStorage.setItem(accountScopedKey(IDENTITY_KEY, accountId), JSON.stringify(next))
-      setIdentity(next)
-      notifications.show({ title: t('identityCreated'), message: t('identityCreatedMessage'), color: 'green' })
-    },
-    onError: (err: Error) => handleRequestError(err, t('identityCreated')),
-  })
-
   const avatarMutation = useMutation({
     mutationFn: async (file: File) => {
       if (!session) throw new Error('login_required')
@@ -467,7 +453,7 @@ export default function MessengerPage() {
 
   const createRoomMutation = useMutation({
     mutationFn: async () => {
-      if (!identity || !session) throw new Error('identity_required')
+      if (!identity || !session) throw new Error('account_required')
       const secret = createRoomSecret()
       const room = await createRoom({ name: roomName.trim() || t('privateRoom'), members: [identity.userId], token: session.accessToken })
       return { room, secret }
@@ -478,7 +464,7 @@ export default function MessengerPage() {
       setActiveRoomID(room.roomId)
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
-      queryClient.invalidateQueries({ queryKey: ['zk-rooms'] })
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
       notifications.show({ title: t('roomReady'), message: t('roomReadyMessage'), color: 'green' })
     },
@@ -487,7 +473,7 @@ export default function MessengerPage() {
 
   const importInviteMutation = useMutation({
     mutationFn: async () => {
-      if (!identity || !session) throw new Error('identity_required')
+      if (!identity || !session) throw new Error('account_required')
       const [roomId, secret] = inviteText.trim().split(':')
       if (!roomId || !secret) throw new Error('invite_format_must_be_roomId_secret')
       const room = await createRoom({ roomId, name: t('importedRoom'), members: [identity.userId], token: session.accessToken })
@@ -500,7 +486,7 @@ export default function MessengerPage() {
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
       setInviteText('')
-      queryClient.invalidateQueries({ queryKey: ['zk-rooms'] })
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
       notifications.show({ title: t('inviteImported'), message: t('inviteImportedMessage'), color: 'green' })
     },
@@ -544,7 +530,7 @@ export default function MessengerPage() {
       if (identity) {
         sendRealtime({ kind: 'typing', userId: identity.userId, displayName: identity.displayName, typing: false, at: new Date().toISOString() })
       }
-      queryClient.invalidateQueries({ queryKey: ['zk-messages', activeRoomID] })
+      queryClient.invalidateQueries({ queryKey: ['chat-messages', activeRoomID] })
     },
     onError: (err: Error) => handleRequestError(err, t('sendFailed')),
   })
@@ -691,7 +677,7 @@ export default function MessengerPage() {
       token: session.accessToken,
       ...encrypted,
     })
-    queryClient.invalidateQueries({ queryKey: ['zk-messages', roomID] })
+    queryClient.invalidateQueries({ queryKey: ['chat-messages', roomID] })
   }
 
   async function leaveActiveRoom() {
@@ -708,7 +694,7 @@ export default function MessengerPage() {
       setSidebarView('rooms')
       setMobileChatActionsOpened(false)
       setLeaveConfirmOpened(false)
-      queryClient.invalidateQueries({ queryKey: ['zk-rooms'] })
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
     } catch (err) {
       if (err instanceof AuthError) {
         handleAuthExpired()
@@ -761,11 +747,6 @@ export default function MessengerPage() {
   function submitAuth() {
     if (!username.trim() || password.length < 8 || authMutation.isPending) return
     authMutation.mutate()
-  }
-
-  function submitIdentity() {
-    if (!displayName.trim() || createIdentityMutation.isPending) return
-    createIdentityMutation.mutate()
   }
 
   function submitMessage() {
@@ -994,24 +975,7 @@ export default function MessengerPage() {
     return (
       <Stack maw={520} mx={isMobile ? 'auto' : 0} px={isMobile ? 'xs' : 0}>
         <Title order={1}>Quietline</Title>
-        <Text c="dimmed">{t('createIdentityIntro')}</Text>
-        <TextInput
-          label={t('displayName')}
-          placeholder="Ada"
-          value={displayName}
-          onChange={(event) => setDisplayName(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') submitIdentity()
-          }}
-        />
-        <Button
-          leftSection={<IconKey size={16} />}
-          onClick={submitIdentity}
-          loading={createIdentityMutation.isPending}
-          disabled={!displayName.trim()}
-        >
-          {t('createIdentity')}
-        </Button>
+        <Text c="dimmed">{t('loadingProfile')}</Text>
         <Button variant="subtle" onClick={logout}>{t('logout')}</Button>
       </Stack>
     )
