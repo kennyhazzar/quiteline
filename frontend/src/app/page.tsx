@@ -1618,30 +1618,35 @@ export default function MessengerPage() {
           </Group>
         </Stack>
       </Modal>
-      {isMobile && (
-        <SegmentedControl
-          fullWidth
-          size="xs"
-          mb={6}
-          value={mobileView}
-          onChange={(value) => setMobileView(value as 'chat' | 'rooms' | 'profile')}
-          data={[
-            { value: 'chat', label: t('chat') },
-            { value: 'rooms', label: t('rooms') },
-            { value: 'profile', label: t('profile') },
-          ]}
-        />
+      {isMobile && mobileView !== 'chat' && (
+        <Group className="mobile-top-bar" justify="space-between" wrap="nowrap">
+          <div style={{ minWidth: 0 }}>
+            <Text fw={800} size="lg" truncate>Quietline</Text>
+            <Text size="xs" c="dimmed" truncate>{mobileView === 'rooms' ? t('rooms') : t('profile')}</Text>
+          </div>
+          <Badge color={health.data?.status === 'ok' ? 'green' : 'red'} variant="light">
+            {health.data?.status === 'ok' ? t('online') : t('offline')}
+          </Badge>
+        </Group>
       )}
       <Group
+        className={isMobile ? 'mobile-app-shell mobile-content' : undefined}
         align="stretch"
-        gap="md"
+        gap={isMobile ? 0 : 'md'}
         wrap={isMobile ? 'wrap' : 'nowrap'}
-        style={{ height: isMobile ? 'auto' : 'calc(100dvh - 96px)', minHeight: 0 }}
+        style={{ height: isMobile ? (mobileView === 'chat' ? '100dvh' : 'calc(100dvh - 58px)') : 'calc(100dvh - 96px)', minHeight: 0 }}
       >
       <Stack
         w={isMobile ? '100%' : isTablet ? 300 : 340}
-        gap="md"
-        style={{ minHeight: 0, flexShrink: 0, display: isMobile && mobileView === 'chat' ? 'none' : 'flex' }}
+        gap={isMobile ? 0 : 'md'}
+        style={{
+          minHeight: 0,
+          flexShrink: 0,
+          display: isMobile && mobileView === 'chat' ? 'none' : 'flex',
+          height: isMobile ? '100%' : undefined,
+          overflowY: isMobile ? 'auto' : undefined,
+          padding: isMobile ? '12px 12px 0' : undefined,
+        }}
       >
         {!isMobile && (
           <SegmentedControl
@@ -1656,7 +1661,7 @@ export default function MessengerPage() {
           />
         )}
 
-        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'chat' ? undefined : 'none' }}>
+        <Card withBorder={!isMobile} radius={isMobile ? 0 : 'sm'} p={isMobile ? 'xs' : 'md'} style={{ display: leftView === 'chat' ? undefined : 'none' }}>
           <Title order={4} mb="xs">{t('chat')}</Title>
           {activeRoom ? (
             <Stack gap="xs">
@@ -1689,14 +1694,15 @@ export default function MessengerPage() {
         </Card>
 
         <Card
-          withBorder
-          radius="sm"
-          p="md"
+          withBorder={!isMobile}
+          radius={isMobile ? 'md' : 'sm'}
+          p={isMobile ? 'sm' : 'md'}
+          className={isMobile ? 'mobile-panel mobile-panel-with-header' : undefined}
           style={{
             display: leftView === 'profile' ? 'block' : 'none',
             flex: isMobile ? 'unset' : 1,
             minHeight: 0,
-            maxHeight: isMobile ? 'calc(100dvh - 132px)' : undefined,
+            maxHeight: isMobile ? undefined : undefined,
             overflowY: 'auto',
           }}
         >
@@ -1900,7 +1906,7 @@ export default function MessengerPage() {
           </Group>
         </Card>
 
-        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
+        <Card withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('createRoom')}</Title>
           <Stack gap="sm">
             <TextInput label={t('roomName')} value={roomName} onChange={(event) => setRoomName(event.currentTarget.value)} />
@@ -1921,7 +1927,7 @@ export default function MessengerPage() {
           </Stack>
         </Card>
 
-        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
+        <Card withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('importInvite')}</Title>
           <Stack gap="sm">
             <PasswordInput
@@ -1943,9 +1949,9 @@ export default function MessengerPage() {
         </Card>
 
         <Card
-          withBorder
-          radius="sm"
-          p="md"
+          withBorder={!isMobile}
+          radius={isMobile ? 'md' : 'sm'}
+          p={isMobile ? 'sm' : 'md'}
           style={{
             display: leftView === 'rooms' ? 'flex' : 'none',
             flex: isMobile ? 'unset' : 1,
@@ -2006,16 +2012,17 @@ export default function MessengerPage() {
       </Stack>
 
       <Card
-        withBorder
-        radius="sm"
-        p={isMobile ? 'xs' : 'md'}
+        withBorder={!isMobile}
+        radius={isMobile ? 0 : 'sm'}
+        p={isMobile ? 0 : 'md'}
+        className={isMobile ? 'mobile-chat-card' : undefined}
         style={{
           display: !isMobile || mobileView === 'chat' ? 'flex' : 'none',
           flex: 1,
           width: isMobile ? '100%' : undefined,
           minWidth: 0,
-          height: isMobile ? 'calc(100dvh - 96px)' : undefined,
-          maxHeight: isMobile ? 'calc(100dvh - 96px)' : undefined,
+          height: isMobile ? 'calc(100dvh - 76px)' : undefined,
+          maxHeight: isMobile ? 'calc(100dvh - 76px)' : undefined,
           minHeight: isMobile ? 0 : 0,
         }}
       >
@@ -2029,8 +2036,13 @@ export default function MessengerPage() {
             )}
           </Stack>
         ) : (
-          <Stack h="100%" gap={isMobile ? 6 : 'md'} style={{ flex: 1, minHeight: 0 }}>
-            <Group justify="space-between" align={isMobile ? 'center' : 'flex-start'} wrap="nowrap">
+          <Stack h="100%" gap={isMobile ? 0 : 'md'} style={{ flex: 1, minHeight: 0 }}>
+            <Group
+              className={isMobile ? 'mobile-chat-header' : undefined}
+              justify="space-between"
+              align={isMobile ? 'center' : 'flex-start'}
+              wrap="nowrap"
+            >
               <div style={{ minWidth: 0, flex: 1 }}>
                 {isMobile ? (
                   <Text fw={800} size="lg" truncate>{activeRoom.name}</Text>
@@ -2159,9 +2171,22 @@ export default function MessengerPage() {
 
             <Box style={{ flex: 1, minHeight: 0 }}>
               <ScrollArea h="100%" type="auto" offsetScrollbars viewportRef={messagesViewportRef}>
-                <Stack gap="xs" pr={isMobile ? 0 : 'sm'}>
+                <Stack className={isMobile ? 'mobile-message-list' : undefined} gap={isMobile ? 8 : 'xs'} pr={isMobile ? 0 : 'sm'}>
                   {visibleMessages.map((msg) => (
-                    <Card key={msg.id} withBorder radius="sm" p="sm">
+                    <Card
+                      key={msg.id}
+                      withBorder={!isMobile}
+                      radius={isMobile ? 'lg' : 'sm'}
+                      p={isMobile ? 'sm' : 'sm'}
+                      style={isMobile && !msg.body?.system ? {
+                        alignSelf: msg.senderId === identity.userId ? 'flex-end' : 'flex-start',
+                        maxWidth: '88%',
+                        background: msg.senderId === identity.userId
+                          ? 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.18))'
+                          : 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.08)',
+                      } : undefined}
+                    >
                       {msg.body?.system ? (
                         <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
                       ) : (
@@ -2302,7 +2327,7 @@ export default function MessengerPage() {
               </ScrollArea>
             </Box>
 
-            <Stack gap={6} mt="auto">
+            <Stack className={isMobile ? 'mobile-composer' : undefined} gap={6} mt="auto">
               {replyTarget && (
                 <Card withBorder radius="sm" p="xs">
                   <Group justify="space-between" wrap="nowrap">
@@ -2372,6 +2397,27 @@ export default function MessengerPage() {
         )}
       </Card>
       </Group>
+      {isMobile && (
+        <Group className="mobile-bottom-nav" gap={4} wrap="nowrap">
+          {([
+            { value: 'chat', label: t('chat'), icon: <IconMessageCircle size={18} /> },
+            { value: 'rooms', label: t('rooms'), icon: <IconLock size={18} /> },
+            { value: 'profile', label: t('profile'), icon: <IconUserPlus size={18} /> },
+          ] as const).map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              className={`mobile-nav-item${mobileView === item.value ? ' mobile-nav-item-active' : ''}`}
+              onClick={() => setMobileView(item.value)}
+            >
+              <Stack gap={1} align="center">
+                {item.icon}
+                <Text size="xs" fw={700}>{item.label}</Text>
+              </Stack>
+            </button>
+          ))}
+        </Group>
+      )}
     </>
   )
 }

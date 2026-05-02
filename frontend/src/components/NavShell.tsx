@@ -16,31 +16,33 @@ export function NavShell({ children, onToggleTheme }: { children: React.ReactNod
   }
 
   return (
-    <AppShell padding={compact ? 'xs' : 'md'}>
-      <AppShell.Header h={compact ? 44 : 56} px={compact ? 'xs' : 'md'}>
-        <Group h="100%" justify="space-between" wrap="nowrap">
-          <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-            <IconLockSquareRounded size={compact ? 18 : 22} />
-            <Text fw={700} size={compact ? 'sm' : 'md'} truncate>Quietline</Text>
+    <AppShell padding={compact ? 0 : 'md'}>
+      {!compact && (
+        <AppShell.Header h={56} px="md">
+          <Group h="100%" justify="space-between" wrap="nowrap">
+            <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
+              <IconLockSquareRounded size={22} />
+              <Text fw={700} truncate>Quietline</Text>
+            </Group>
+            <Group gap="xs" wrap="nowrap">
+              <Badge variant="light" color="green">{t('encryptedBadge')}</Badge>
+              <SegmentedControl
+                size="xs"
+                value={locale}
+                onChange={(value) => setLocale(value === 'en' ? 'en' : 'ru')}
+                data={[
+                  { value: 'ru', label: 'RU' },
+                  { value: 'en', label: 'EN' },
+                ]}
+              />
+              <ActionIcon variant="subtle" onClick={toggleTheme} aria-label="Toggle theme">
+                {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+              </ActionIcon>
+            </Group>
           </Group>
-          <Group gap={compact ? 4 : 'xs'} wrap="nowrap">
-            {!compact && <Badge variant="light" color="green">{t('encryptedBadge')}</Badge>}
-            <SegmentedControl
-              size="xs"
-              value={locale}
-              onChange={(value) => setLocale(value === 'en' ? 'en' : 'ru')}
-              data={[
-                { value: 'ru', label: 'RU' },
-                { value: 'en', label: 'EN' },
-              ]}
-            />
-            <ActionIcon variant="subtle" onClick={toggleTheme} aria-label="Toggle theme">
-              {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
-            </ActionIcon>
-          </Group>
-        </Group>
-      </AppShell.Header>
-      <AppShell.Main pt={compact ? 52 : 72}>{children}</AppShell.Main>
+        </AppShell.Header>
+      )}
+      <AppShell.Main pt={compact ? 0 : 72}>{children}</AppShell.Main>
     </AppShell>
   )
 }
