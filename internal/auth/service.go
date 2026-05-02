@@ -192,6 +192,13 @@ func (s *Service) UserByID(ctx context.Context, userID string) (User, error) {
 	return s.users.GetUserByID(ctx, strings.TrimSpace(userID))
 }
 
+func (s *Service) UserByUsername(ctx context.Context, username string) (User, error) {
+	if normalizeUsername(username) == "" {
+		return User{}, ErrUserNotFound
+	}
+	return s.users.GetUserByUsername(ctx, username)
+}
+
 func (s *Service) PrincipalFor(ctx context.Context, principal Principal) (Principal, error) {
 	if principal.UserID == "" || principal.Username == "" {
 		return principal, nil

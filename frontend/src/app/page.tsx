@@ -27,7 +27,7 @@ import {
 } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { IconCopy, IconDotsVertical, IconDownload, IconKey, IconLock, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconX } from '@tabler/icons-react'
+import { IconCopy, IconDotsVertical, IconDownload, IconKey, IconLink, IconLock, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconUserPlus, IconX } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -35,15 +35,20 @@ import {
   AuthError,
   fetchAccountSessions,
   fetchCurrentIdentity,
+  fetchFriends,
   createRoom,
   downloadEncryptedFile,
   fetchIdentity,
   fetchHealth,
   fetchMessages,
   fetchRooms,
+  inviteFriendToRoom,
   leaveRoom,
   loginUser,
+  markRoomRead,
   registerUser,
+  requestFriend,
+  respondFriend,
   revokeAccountSession,
   revokeOtherAccountSessions,
   sendEncryptedMessage,
@@ -53,6 +58,7 @@ import {
   type AuthSession,
   type AccountSession,
   type EncryptedMessage,
+  type Friend,
   type Identity,
   type MessageEnvelope,
   type Room,
@@ -136,6 +142,7 @@ export default function MessengerPage() {
   const [newRoomSecret, setNewRoomSecret] = useState('')
   const [roomSecret, setRoomSecret] = useState('')
   const [inviteText, setInviteText] = useState('')
+  const [friendUsername, setFriendUsername] = useState('')
   const [roomSecrets, setRoomSecrets] = useState<Record<string, string>>({})
   const [activeRoomID, setActiveRoomID] = useState('')
   const [messageText, setMessageText] = useState('')
@@ -162,6 +169,7 @@ export default function MessengerPage() {
   const localStreamRef = useRef<MediaStream | null>(null)
   const activeCallIDRef = useRef('')
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
+  const readMarksRef = useRef<Record<string, number>>({})
 
   useEffect(() => {
     const savedSession = readStoredJSON<AuthSession>(SESSION_KEY)
@@ -170,6 +178,12 @@ export default function MessengerPage() {
     setColorScheme(savedSession.principal.theme)
     setDisplayName(savedSession.principal.displayName || savedSession.principal.username)
     loadAccountLocalState(savedSession)
+    const invite = new URLSearchParams(window.location.search).get('invite')
+    if (invite) {
+      setInviteText(invite)
+      setMobileView('rooms')
+      setSidebarView('rooms')
+    }
   }, [])
 
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 5000 })
@@ -186,6 +200,14 @@ export default function MessengerPage() {
     queryKey: ['account-sessions', session?.accessToken],
     queryFn: () => fetchAccountSessions(session?.accessToken ?? ''),
     enabled: Boolean(session),
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  })
+  const friends = useQuery({
+    queryKey: ['friends', session?.accessToken],
+    queryFn: () => fetchFriends(session?.accessToken ?? ''),
+    enabled: Boolean(session),
+    refetchInterval: 5000,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   })
@@ -262,11 +284,19 @@ export default function MessengerPage() {
     for (const item of memberIdentities.data ?? []) result.set(item.userId, item)
     return result
   }, [memberIdentities.data])
+  const acceptedFriends = useMemo(
+    () => (friends.data?.friends ?? []).filter((friend) => friend.status === 'accepted'),
+    [friends.data?.friends],
+  )
+  const activeInviteLink = useMemo(() => {
+    if (!activeInvite || typeof window === 'undefined') return ''
+    return `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(activeInvite)}`
+  }, [activeInvite])
 
   useEffect(() => {
-    const error = rooms.error ?? history.error ?? memberIdentities.error ?? accountSessions.error
+    const error = rooms.error ?? history.error ?? memberIdentities.error ?? accountSessions.error ?? friends.error
     if (error instanceof AuthError) handleAuthExpired()
-  }, [rooms.error, history.error, memberIdentities.error, accountSessions.error])
+  }, [rooms.error, history.error, memberIdentities.error, accountSessions.error, friends.error])
 
   function saveSession(next: AuthSession, options: { reloadLocalState?: boolean } = { reloadLocalState: true }) {
     localStorage.setItem(SESSION_KEY, JSON.stringify(next))
@@ -452,6 +482,42 @@ export default function MessengerPage() {
     onError: (err: Error) => handleRequestError(err, t('sessions')),
   })
 
+  const requestFriendMutation = useMutation({
+    mutationFn: async () => {
+      if (!session || !friendUsername.trim()) throw new Error('username_required')
+      return requestFriend({ token: session.accessToken, username: friendUsername.trim() })
+    },
+    onSuccess: () => {
+      setFriendUsername('')
+      friends.refetch()
+      notifications.show({ title: t('friends'), message: t('friendRequestSent'), color: 'green' })
+    },
+    onError: (err: Error) => handleRequestError(err, t('friends')),
+  })
+
+  const respondFriendMutation = useMutation({
+    mutationFn: async (input: { friend: Friend; accept: boolean }) => {
+      if (!session) throw new Error('login_required')
+      await respondFriend({ token: session.accessToken, userId: input.friend.userId, accept: input.accept })
+      return input
+    },
+    onSuccess: () => friends.refetch(),
+    onError: (err: Error) => handleRequestError(err, t('friends')),
+  })
+
+  const inviteFriendMutation = useMutation({
+    mutationFn: async (friend: Friend) => {
+      if (!session || !activeRoomID) throw new Error('room_not_ready')
+      await inviteFriendToRoom({ token: session.accessToken, roomId: activeRoomID, userId: friend.userId })
+      return friend
+    },
+    onSuccess: (friend) => {
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+      notifications.show({ title: t('inviteFriend'), message: friend.displayName, color: 'green' })
+    },
+    onError: (err: Error) => handleRequestError(err, t('inviteFriend')),
+  })
+
   const createRoomMutation = useMutation({
     mutationFn: async () => {
       if (!identity || !session) throw new Error('account_required')
@@ -587,6 +653,18 @@ export default function MessengerPage() {
       viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
     })
   }, [activeRoomID, decryptedMessages.length])
+
+  useEffect(() => {
+    if (!session || !activeRoomID) return
+    const lastSeenLength = readMarksRef.current[activeRoomID] ?? -1
+    if (lastSeenLength === decryptedMessages.length) return
+    readMarksRef.current[activeRoomID] = decryptedMessages.length
+    markRoomRead({ token: session.accessToken, roomId: activeRoomID })
+      .then(() => queryClient.invalidateQueries({ queryKey: ['chat-rooms'] }))
+      .catch((err: Error) => {
+        if (err instanceof AuthError) handleAuthExpired()
+      })
+  }, [session, activeRoomID, decryptedMessages.length])
 
   function handleRealtimeEvent(event: RealtimeEvent) {
     if (!identity) return
@@ -1060,6 +1138,26 @@ export default function MessengerPage() {
                 </Button>
               )}
             </CopyButton>
+            <CopyButton value={activeInviteLink}>
+              {({ copy }) => (
+                <Button variant="light" leftSection={<IconLink size={16} />} onClick={copy} fullWidth disabled={!activeInviteLink}>
+                  {t('copyInviteLink')}
+                </Button>
+              )}
+            </CopyButton>
+            {acceptedFriends.length > 0 && (
+              <Stack gap={6}>
+                <Text size="xs" c="dimmed">{t('inviteFriend')}</Text>
+                {acceptedFriends
+                  .filter((friend) => !activeRoom.members.includes(friend.userId))
+                  .slice(0, 4)
+                  .map((friend) => (
+                    <Button key={friend.userId} size="xs" variant="light" onClick={() => inviteFriendMutation.mutate(friend)}>
+                      {friend.displayName || friend.userId}
+                    </Button>
+                  ))}
+              </Stack>
+            )}
             {!activeInvite && <Text size="xs" c="dimmed">{t('inviteSecretMissing')}</Text>}
             <Button variant="light" color="red" onClick={requestLeaveChat} loading={leavingRoom} fullWidth>
               {t('leaveChat')}
@@ -1160,6 +1258,58 @@ export default function MessengerPage() {
               {({ copy }) => <ActionIcon variant="subtle" onClick={copy}><IconCopy size={16} /></ActionIcon>}
             </CopyButton>
           </Group>
+          <Divider my="sm" />
+          <Group justify="space-between" align="center" mb="xs">
+            <Text fw={700} size="sm">{t('friends')}</Text>
+            <ActionIcon variant="subtle" onClick={() => friends.refetch()} loading={friends.isFetching}>
+              <IconRefresh size={16} />
+            </ActionIcon>
+          </Group>
+          <Group align="flex-end" gap="xs" wrap="nowrap" mb="xs">
+            <TextInput
+              label={t('friendUsername')}
+              placeholder="alice"
+              value={friendUsername}
+              onChange={(event) => setFriendUsername(event.currentTarget.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') requestFriendMutation.mutate()
+              }}
+              style={{ flex: 1, minWidth: 0 }}
+            />
+            <ActionIcon
+              variant="light"
+              size="lg"
+              onClick={() => requestFriendMutation.mutate()}
+              loading={requestFriendMutation.isPending}
+              disabled={!friendUsername.trim()}
+              aria-label={t('addFriend')}
+            >
+              <IconUserPlus size={18} />
+            </ActionIcon>
+          </Group>
+          <Stack gap="xs">
+            {(friends.data?.friends ?? []).map((friend) => (
+              <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
+                <div style={{ minWidth: 0 }}>
+                  <Text size="sm" fw={friend.status === 'accepted' ? 700 : 500} truncate>{friend.displayName || friend.userId}</Text>
+                  <Text size="xs" c="dimmed" truncate>
+                    {friend.status === 'accepted' ? t('friendAccepted') : friend.direction === 'incoming' ? t('friendIncoming') : t('friendOutgoing')}
+                  </Text>
+                </div>
+                {friend.status === 'pending' && friend.direction === 'incoming' ? (
+                  <Group gap={4} wrap="nowrap">
+                    <Button size="xs" variant="light" onClick={() => respondFriendMutation.mutate({ friend, accept: true })}>{t('accept')}</Button>
+                    <Button size="xs" variant="subtle" color="red" onClick={() => respondFriendMutation.mutate({ friend, accept: false })}>{t('decline')}</Button>
+                  </Group>
+                ) : friend.status === 'accepted' && activeRoomID && !activeRoom?.members.includes(friend.userId) ? (
+                  <Button size="xs" variant="light" onClick={() => inviteFriendMutation.mutate(friend)} loading={inviteFriendMutation.isPending}>
+                    {t('invite')}
+                  </Button>
+                ) : null}
+              </Group>
+            ))}
+            {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{t('noFriends')}</Text>}
+          </Stack>
           <Divider my="sm" />
           <Group justify="space-between" align="center" mb="xs">
             <Text fw={700} size="sm">{t('sessions')}</Text>
@@ -1285,7 +1435,16 @@ export default function MessengerPage() {
                       style={{ flex: 1, minWidth: 0 }}
                       styles={{ label: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }}
                     >
-                      <span>{room.name} · {hiddenId}</span>
+                      <Group gap={6} wrap="nowrap" style={{ minWidth: 0, width: '100%' }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {room.name} · {hiddenId}
+                        </span>
+                        {Boolean(room.unreadCount) && (
+                          <Badge size="xs" color="red" variant="filled" style={{ flexShrink: 0 }}>
+                            {room.unreadCount}
+                          </Badge>
+                        )}
+                      </Group>
                     </Button>
                     <CopyButton value={room.roomId}>
                       {({ copy }) => (
@@ -1370,6 +1529,13 @@ export default function MessengerPage() {
                     {({ copy }) => (
                       <Button variant="light" leftSection={<IconCopy size={16} />} onClick={copy} disabled={!activeInvite}>
                         {t('copyInvite')}
+                      </Button>
+                    )}
+                  </CopyButton>
+                  <CopyButton value={activeInviteLink}>
+                    {({ copy }) => (
+                      <Button variant="light" leftSection={<IconLink size={16} />} onClick={copy} disabled={!activeInviteLink}>
+                        {t('copyInviteLink')}
                       </Button>
                     )}
                   </CopyButton>

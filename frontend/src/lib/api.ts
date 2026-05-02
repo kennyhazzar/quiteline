@@ -43,6 +43,16 @@ export interface Room {
   name: string
   members: string[]
   roomSecret?: string
+  lastMessageAt?: string
+  unreadCount?: number
+  createdAt: string
+}
+
+export interface Friend {
+  userId: string
+  displayName: string
+  status: 'pending' | 'accepted'
+  direction: 'incoming' | 'outgoing'
   createdAt: string
 }
 
@@ -181,6 +191,42 @@ export async function fetchCurrentIdentity(token: string): Promise<Identity> {
   return readJSON(res)
 }
 
+export async function fetchFriends(token: string): Promise<{ friends: Friend[] }> {
+  const res = await fetch(`${BASE}/v1/chat/friends`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function requestFriend(input: {
+  token: string
+  username: string
+}): Promise<{ friends: Friend[] }> {
+  const res = await fetch(`${BASE}/v1/chat/friends`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ username: input.username }),
+  })
+  return readJSON(res)
+}
+
+export async function respondFriend(input: {
+  token: string
+  userId: string
+  accept: boolean
+}): Promise<void> {
+  const res = await fetch(`${BASE}/v1/chat/friends/${encodeURIComponent(input.userId)}/${input.accept ? 'accept' : 'decline'}`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({}),
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'friend_response_failed')
+  }
+}
+
 export async function upsertIdentity(input: {
   userId: string
   displayName: string
@@ -254,6 +300,39 @@ export async function leaveRoom(input: {
     if (res.status === 401) throw new AuthError()
     const err = await res.json().catch(() => ({ error: 'unknown_error' }))
     throw new Error((err as { error?: string }).error ?? 'leave_failed')
+  }
+}
+
+export async function inviteFriendToRoom(input: {
+  token: string
+  roomId: string
+  userId: string
+}): Promise<void> {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/friends`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ userId: input.userId }),
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'invite_friend_failed')
+  }
+}
+
+export async function markRoomRead(input: {
+  token: string
+  roomId: string
+}): Promise<void> {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/read`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({}),
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'mark_read_failed')
   }
 }
 

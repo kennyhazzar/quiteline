@@ -28,11 +28,21 @@ type Identity struct {
 }
 
 type Room struct {
-	RoomID     string    `json:"roomId"`
-	Name       string    `json:"name"`
-	Members    []string  `json:"members"`
-	RoomSecret string    `json:"roomSecret,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
+	RoomID        string    `json:"roomId"`
+	Name          string    `json:"name"`
+	Members       []string  `json:"members"`
+	RoomSecret    string    `json:"roomSecret,omitempty"`
+	LastMessageAt time.Time `json:"lastMessageAt,omitempty"`
+	UnreadCount   int       `json:"unreadCount,omitempty"`
+	CreatedAt     time.Time `json:"createdAt"`
+}
+
+type Friend struct {
+	UserID      string    `json:"userId"`
+	DisplayName string    `json:"displayName"`
+	Status      string    `json:"status"`
+	Direction   string    `json:"direction"`
+	CreatedAt   time.Time `json:"createdAt"`
 }
 
 type EncryptedMessage struct {
@@ -51,10 +61,16 @@ type Store interface {
 	GetIdentity(ctx context.Context, userID string) (Identity, error)
 	TouchIdentity(ctx context.Context, userID string) (Identity, error)
 	CreateRoom(ctx context.Context, room Room) (Room, error)
+	AddRoomMember(ctx context.Context, roomID string, userID string) error
 	LeaveRoom(ctx context.Context, roomID string, userID string) error
 	ListRooms(ctx context.Context, userID string) ([]Room, error)
+	MarkRoomRead(ctx context.Context, roomID string, userID string) error
 	AppendMessage(ctx context.Context, msg EncryptedMessage) (EncryptedMessage, error)
 	ListMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error)
+	ListFriends(ctx context.Context, userID string) ([]Friend, error)
+	RequestFriend(ctx context.Context, fromUserID string, toUserID string) error
+	RespondFriend(ctx context.Context, userID string, friendID string, accept bool) error
+	AreFriends(ctx context.Context, userID string, friendID string) (bool, error)
 }
 
 type MemoryStore struct {
@@ -62,6 +78,16 @@ type MemoryStore struct {
 	identities map[string]Identity
 	rooms      map[string]Room
 	messages   map[string][]EncryptedMessage
+	roomReads  map[string]map[string]time.Time
+	friends    map[string]friendEdge
+}
+
+type friendEdge struct {
+	UserA     string
+	UserB     string
+	Requester string
+	Status    string
+	CreatedAt time.Time
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -69,6 +95,8 @@ func NewMemoryStore() *MemoryStore {
 		identities: make(map[string]Identity),
 		rooms:      make(map[string]Room),
 		messages:   make(map[string][]EncryptedMessage),
+		roomReads:  make(map[string]map[string]time.Time),
+		friends:    make(map[string]friendEdge),
 	}
 }
 
@@ -151,12 +179,38 @@ func (s *MemoryStore) CreateRoom(_ context.Context, room Room) (Room, error) {
 		}
 		if existing.RoomSecret == "" && room.RoomSecret != "" {
 			existing.RoomSecret = room.RoomSecret
-			s.rooms[room.RoomID] = existing
 		}
+		for _, member := range room.Members {
+			if !hasMember(existing.Members, member) {
+				existing.Members = append(existing.Members, member)
+			}
+		}
+		sort.Strings(existing.Members)
+		s.rooms[room.RoomID] = existing
 		return existing, nil
 	}
 	s.rooms[room.RoomID] = room
 	return room, nil
+}
+
+func (s *MemoryStore) AddRoomMember(_ context.Context, roomID string, userID string) error {
+	roomID = normalizeID(roomID)
+	userID = normalizeID(userID)
+	if roomID == "" || userID == "" {
+		return ErrBadRequest
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return ErrNotFound
+	}
+	if !hasMember(room.Members, userID) {
+		room.Members = append(room.Members, userID)
+		sort.Strings(room.Members)
+		s.rooms[roomID] = room
+	}
+	return nil
 }
 
 func (s *MemoryStore) ListRooms(_ context.Context, userID string) ([]Room, error) {
@@ -167,11 +221,21 @@ func (s *MemoryStore) ListRooms(_ context.Context, userID string) ([]Room, error
 	rooms := make([]Room, 0)
 	for _, room := range s.rooms {
 		if userID == "" || hasMember(room.Members, userID) {
+			room.LastMessageAt = s.lastMessageAt(room.RoomID)
+			room.UnreadCount = s.unreadCount(room.RoomID, userID)
 			rooms = append(rooms, room)
 		}
 	}
 	sort.Slice(rooms, func(i, j int) bool {
-		return rooms[i].CreatedAt.After(rooms[j].CreatedAt)
+		left := rooms[i].LastMessageAt
+		if left.IsZero() {
+			left = rooms[i].CreatedAt
+		}
+		right := rooms[j].LastMessageAt
+		if right.IsZero() {
+			right = rooms[j].CreatedAt
+		}
+		return left.After(right)
 	})
 	return rooms, nil
 }
@@ -225,6 +289,24 @@ func (s *MemoryStore) AppendMessage(_ context.Context, msg EncryptedMessage) (En
 	return msg, nil
 }
 
+func (s *MemoryStore) MarkRoomRead(_ context.Context, roomID string, userID string) error {
+	roomID = normalizeID(roomID)
+	userID = normalizeID(userID)
+	if roomID == "" || userID == "" {
+		return ErrBadRequest
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.rooms[roomID]; !ok {
+		return ErrNotFound
+	}
+	if s.roomReads[roomID] == nil {
+		s.roomReads[roomID] = make(map[string]time.Time)
+	}
+	s.roomReads[roomID][userID] = time.Now().UTC()
+	return nil
+}
+
 func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int) ([]EncryptedMessage, error) {
 	roomID = normalizeID(roomID)
 	if limit <= 0 || limit > 500 {
@@ -240,6 +322,110 @@ func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int) 
 	result := make([]EncryptedMessage, len(messages))
 	copy(result, messages)
 	return result, nil
+}
+
+func (s *MemoryStore) ListFriends(_ context.Context, userID string) ([]Friend, error) {
+	userID = normalizeID(userID)
+	if userID == "" {
+		return nil, ErrBadRequest
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := []Friend{}
+	for _, edge := range s.friends {
+		if edge.UserA != userID && edge.UserB != userID {
+			continue
+		}
+		friendID := edge.UserB
+		if friendID == userID {
+			friendID = edge.UserA
+		}
+		identity := s.identities[friendID]
+		direction := "incoming"
+		if edge.Requester == userID {
+			direction = "outgoing"
+		}
+		result = append(result, Friend{
+			UserID: friendID, DisplayName: identity.DisplayName, Status: edge.Status, Direction: direction, CreatedAt: edge.CreatedAt,
+		})
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i].CreatedAt.After(result[j].CreatedAt) })
+	return result, nil
+}
+
+func (s *MemoryStore) RequestFriend(_ context.Context, fromUserID string, toUserID string) error {
+	fromUserID = normalizeID(fromUserID)
+	toUserID = normalizeID(toUserID)
+	if fromUserID == "" || toUserID == "" || fromUserID == toUserID {
+		return ErrBadRequest
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := friendKey(fromUserID, toUserID)
+	if existing, ok := s.friends[key]; ok {
+		if existing.Status == "pending" && existing.Requester != fromUserID {
+			existing.Status = "accepted"
+			s.friends[key] = existing
+		}
+		return nil
+	}
+	a, b := orderedPair(fromUserID, toUserID)
+	s.friends[key] = friendEdge{UserA: a, UserB: b, Requester: fromUserID, Status: "pending", CreatedAt: time.Now().UTC()}
+	return nil
+}
+
+func (s *MemoryStore) RespondFriend(_ context.Context, userID string, friendID string, accept bool) error {
+	userID = normalizeID(userID)
+	friendID = normalizeID(friendID)
+	if userID == "" || friendID == "" {
+		return ErrBadRequest
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := friendKey(userID, friendID)
+	edge, ok := s.friends[key]
+	if !ok {
+		return ErrNotFound
+	}
+	if edge.Requester == userID {
+		return ErrBadRequest
+	}
+	if accept {
+		edge.Status = "accepted"
+		s.friends[key] = edge
+	} else {
+		delete(s.friends, key)
+	}
+	return nil
+}
+
+func (s *MemoryStore) AreFriends(_ context.Context, userID string, friendID string) (bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	edge, ok := s.friends[friendKey(userID, friendID)]
+	return ok && edge.Status == "accepted", nil
+}
+
+func (s *MemoryStore) lastMessageAt(roomID string) time.Time {
+	messages := s.messages[roomID]
+	if len(messages) == 0 {
+		return time.Time{}
+	}
+	return messages[len(messages)-1].CreatedAt
+}
+
+func (s *MemoryStore) unreadCount(roomID string, userID string) int {
+	if userID == "" {
+		return 0
+	}
+	readAt := s.roomReads[roomID][userID]
+	count := 0
+	for _, msg := range s.messages[roomID] {
+		if msg.SenderID != userID && (readAt.IsZero() || msg.CreatedAt.After(readAt)) {
+			count++
+		}
+	}
+	return count
 }
 
 func Envelope(msg EncryptedMessage, source string) message.Envelope {
@@ -296,4 +482,16 @@ func newRoomSecret() string {
 		return newID() + newID()
 	}
 	return base64.RawURLEncoding.EncodeToString(bytes[:])
+}
+
+func friendKey(a string, b string) string {
+	left, right := orderedPair(a, b)
+	return left + ":" + right
+}
+
+func orderedPair(a string, b string) (string, string) {
+	if a < b {
+		return a, b
+	}
+	return b, a
 }

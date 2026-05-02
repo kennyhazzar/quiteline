@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,6 +59,13 @@ CREATE TABLE IF NOT EXISTS room_members (
 	PRIMARY KEY (room_id, user_id)
 );
 
+CREATE TABLE IF NOT EXISTS room_reads (
+	room_id TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
+	user_id TEXT NOT NULL,
+	last_read_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (room_id, user_id)
+);
+
 CREATE TABLE IF NOT EXISTS messages (
 	id         TEXT PRIMARY KEY,
 	room_id    TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
@@ -70,6 +78,17 @@ CREATE TABLE IF NOT EXISTS messages (
 );
 
 CREATE INDEX IF NOT EXISTS messages_room_created ON messages(room_id, created_at);
+
+CREATE TABLE IF NOT EXISTS friendships (
+	user_a TEXT NOT NULL,
+	user_b TEXT NOT NULL,
+	requester_id TEXT NOT NULL,
+	status TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (user_a, user_b)
+);
+CREATE INDEX IF NOT EXISTS friendships_user_a_idx ON friendships(user_a);
+CREATE INDEX IF NOT EXISTS friendships_user_b_idx ON friendships(user_b);
 `
 
 func (s *PostgresStore) migrate(ctx context.Context) error {
@@ -186,6 +205,32 @@ func (s *PostgresStore) CreateRoom(ctx context.Context, room Room) (Room, error)
 	return room, tx.Commit(ctx)
 }
 
+func (s *PostgresStore) AddRoomMember(ctx context.Context, roomID string, userID string) error {
+	roomID = normalizeID(roomID)
+	userID = normalizeID(userID)
+	if roomID == "" || userID == "" {
+		return ErrBadRequest
+	}
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO room_members (room_id, user_id)
+		SELECT $1, $2 WHERE EXISTS(SELECT 1 FROM rooms WHERE room_id = $1)
+		ON CONFLICT DO NOTHING
+	`, roomID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		var exists bool
+		if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM rooms WHERE room_id = $1)`, roomID).Scan(&exists); err != nil {
+			return err
+		}
+		if !exists {
+			return ErrNotFound
+		}
+	}
+	return nil
+}
+
 func (s *PostgresStore) ListRooms(ctx context.Context, userID string) ([]Room, error) {
 	userID = normalizeID(userID)
 
@@ -195,13 +240,35 @@ func (s *PostgresStore) ListRooms(ctx context.Context, userID string) ([]Room, e
 	)
 	if userID == "" {
 		rows, err = s.pool.Query(ctx,
-			`SELECT room_id, name, room_secret, created_at FROM rooms ORDER BY created_at DESC`)
+			`SELECT r.room_id, r.name, r.room_secret, r.created_at,
+			        lm.last_message_at,
+			        0::bigint AS unread_count
+			   FROM rooms r
+			   LEFT JOIN (
+			       SELECT room_id, max(created_at) AS last_message_at
+			       FROM messages GROUP BY room_id
+			   ) lm ON lm.room_id = r.room_id
+			   ORDER BY COALESCE(lm.last_message_at, r.created_at) DESC`)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT r.room_id, r.name, r.room_secret, r.created_at
+			SELECT r.room_id, r.name, r.room_secret, r.created_at,
+			       lm.last_message_at,
+			       COALESCE(uc.unread_count, 0)
 			FROM rooms r
 			JOIN room_members rm ON rm.room_id = r.room_id AND rm.user_id = $1
-			ORDER BY r.created_at DESC
+			LEFT JOIN (
+				SELECT room_id, max(created_at) AS last_message_at
+				FROM messages GROUP BY room_id
+			) lm ON lm.room_id = r.room_id
+			LEFT JOIN room_reads rr ON rr.room_id = r.room_id AND rr.user_id = $1
+			LEFT JOIN LATERAL (
+				SELECT count(*) AS unread_count
+				FROM messages m
+				WHERE m.room_id = r.room_id
+				  AND m.sender_id <> $1
+				  AND (rr.last_read_at IS NULL OR m.created_at > rr.last_read_at)
+			) uc ON true
+			ORDER BY COALESCE(lm.last_message_at, r.created_at) DESC
 		`, userID)
 	}
 	if err != nil {
@@ -215,8 +282,12 @@ func (s *PostgresStore) ListRooms(ctx context.Context, userID string) ([]Room, e
 
 	for rows.Next() {
 		var r Room
-		if err := rows.Scan(&r.RoomID, &r.Name, &r.RoomSecret, &r.CreatedAt); err != nil {
+		var lastMessageAt *time.Time
+		if err := rows.Scan(&r.RoomID, &r.Name, &r.RoomSecret, &r.CreatedAt, &lastMessageAt, &r.UnreadCount); err != nil {
 			return nil, err
+		}
+		if lastMessageAt != nil {
+			r.LastMessageAt = *lastMessageAt
 		}
 		r.Members = []string{}
 		rooms = append(rooms, r)
@@ -250,6 +321,27 @@ func (s *PostgresStore) ListRooms(ctx context.Context, userID string) ([]Room, e
 		}
 	}
 	return rooms, mRows.Err()
+}
+
+func (s *PostgresStore) MarkRoomRead(ctx context.Context, roomID string, userID string) error {
+	roomID = normalizeID(roomID)
+	userID = normalizeID(userID)
+	if roomID == "" || userID == "" {
+		return ErrBadRequest
+	}
+	tag, err := s.pool.Exec(ctx, `
+		INSERT INTO room_reads (room_id, user_id, last_read_at)
+		SELECT $1, $2, now()
+		WHERE EXISTS(SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2)
+		ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_at = EXCLUDED.last_read_at
+	`, roomID, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 func (s *PostgresStore) LeaveRoom(ctx context.Context, roomID string, userID string) error {
@@ -336,4 +428,101 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+func (s *PostgresStore) ListFriends(ctx context.Context, userID string) ([]Friend, error) {
+	userID = normalizeID(userID)
+	if userID == "" {
+		return nil, ErrBadRequest
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END AS friend_id,
+		       COALESCE(i.display_name, CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END) AS display_name,
+		       f.status,
+		       CASE WHEN f.requester_id = $1 THEN 'outgoing' ELSE 'incoming' END AS direction,
+		       f.created_at
+		FROM friendships f
+		LEFT JOIN identities i ON i.user_id = CASE WHEN f.user_a = $1 THEN f.user_b ELSE f.user_a END
+		WHERE f.user_a = $1 OR f.user_b = $1
+		ORDER BY f.created_at DESC
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []Friend{}
+	for rows.Next() {
+		var friend Friend
+		if err := rows.Scan(&friend.UserID, &friend.DisplayName, &friend.Status, &friend.Direction, &friend.CreatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, friend)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresStore) RequestFriend(ctx context.Context, fromUserID string, toUserID string) error {
+	fromUserID = normalizeID(fromUserID)
+	toUserID = normalizeID(toUserID)
+	if fromUserID == "" || toUserID == "" || fromUserID == toUserID {
+		return ErrBadRequest
+	}
+	userA, userB := orderedPair(fromUserID, toUserID)
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO friendships (user_a, user_b, requester_id, status)
+		VALUES ($1, $2, $3, 'pending')
+		ON CONFLICT (user_a, user_b) DO UPDATE
+		SET status = CASE
+			WHEN friendships.status = 'pending' AND friendships.requester_id <> EXCLUDED.requester_id THEN 'accepted'
+			ELSE friendships.status
+		END
+	`, userA, userB, fromUserID)
+	return err
+}
+
+func (s *PostgresStore) RespondFriend(ctx context.Context, userID string, friendID string, accept bool) error {
+	userID = normalizeID(userID)
+	friendID = normalizeID(friendID)
+	if userID == "" || friendID == "" {
+		return ErrBadRequest
+	}
+	userA, userB := orderedPair(userID, friendID)
+	if accept {
+		tag, err := s.pool.Exec(ctx, `
+			UPDATE friendships SET status = 'accepted'
+			WHERE user_a = $1 AND user_b = $2 AND requester_id <> $3 AND status = 'pending'
+		`, userA, userB, userID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+		return nil
+	}
+	tag, err := s.pool.Exec(ctx, `
+		DELETE FROM friendships
+		WHERE user_a = $1 AND user_b = $2 AND requester_id <> $3 AND status = 'pending'
+	`, userA, userB, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (s *PostgresStore) AreFriends(ctx context.Context, userID string, friendID string) (bool, error) {
+	userID = normalizeID(userID)
+	friendID = normalizeID(friendID)
+	if userID == "" || friendID == "" {
+		return false, ErrBadRequest
+	}
+	userA, userB := orderedPair(userID, friendID)
+	var exists bool
+	err := s.pool.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM friendships WHERE user_a = $1 AND user_b = $2 AND status = 'accepted')
+	`, userA, userB).Scan(&exists)
+	return exists, err
 }

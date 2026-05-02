@@ -69,6 +69,15 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /v1/me/identity", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleCurrentIdentity(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/chat/friends", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleListFriends(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/chat/friends", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleRequestFriend(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/chat/friends/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleRespondFriend(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/me/sessions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleListSessions(w, r, deps)
 	}))
@@ -194,6 +203,15 @@ type createRoomRequest struct {
 	Name       string   `json:"name"`
 	Members    []string `json:"members"`
 	RoomSecret string   `json:"roomSecret,omitempty"`
+}
+
+type friendRequest struct {
+	Username string `json:"username"`
+	UserID   string `json:"userId"`
+}
+
+type inviteFriendRequest struct {
+	UserID string `json:"userId"`
 }
 
 type encryptedMessageRequest struct {
@@ -391,6 +409,53 @@ func handleCurrentIdentity(w http.ResponseWriter, r *http.Request, deps Dependen
 	writeJSON(w, http.StatusOK, identity)
 }
 
+func handleListFriends(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	friends, err := deps.ZKStore.ListFriends(r.Context(), principalFromContext(r.Context()).UserID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"friends": friends})
+}
+
+func handleRequestFriend(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req friendRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	targetID := strings.TrimSpace(req.UserID)
+	if targetID == "" {
+		user, err := deps.Auth.UserByUsername(r.Context(), req.Username)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "user_not_found")
+			return
+		}
+		targetID = user.UserID
+		_, _ = ensureCurrentIdentity(r.Context(), deps, auth.Principal{UserID: user.UserID, Username: user.Username, DisplayName: user.DisplayName})
+	}
+	if err := deps.ZKStore.RequestFriend(r.Context(), principalFromContext(r.Context()).UserID, targetID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	handleListFriends(w, r, deps)
+}
+
+func handleRespondFriend(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	friendID, action, ok := friendActionSubroute(r.URL.Path)
+	if !ok {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	accept := action == "accept"
+	if err := deps.ZKStore.RespondFriend(r.Context(), principalFromContext(r.Context()).UserID, friendID, accept); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func ensureCurrentIdentity(ctx context.Context, deps Dependencies, principal auth.Principal) (zk.Identity, error) {
 	if principal.UserID == "" {
 		return zk.Identity{}, zk.ErrBadRequest
@@ -560,11 +625,17 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 		}
 		handleListEncryptedMessages(w, r, deps, roomID)
 	case http.MethodPost:
-		if tail != "messages" {
+		switch {
+		case tail == "messages":
+			handleAppendEncryptedMessage(w, r, deps, roomID)
+		case tail == "read":
+			handleMarkRoomRead(w, r, deps, roomID)
+		case tail == "friends":
+			handleInviteFriendToRoom(w, r, deps, roomID)
+		default:
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
-		handleAppendEncryptedMessage(w, r, deps, roomID)
 	case http.MethodDelete:
 		userID, ok := memberSubroute(tail)
 		if !ok {
@@ -575,6 +646,55 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
+}
+
+func handleMarkRoomRead(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {
+	if err := deps.ZKStore.MarkRoomRead(r.Context(), roomID, principalFromContext(r.Context()).UserID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleInviteFriendToRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req inviteFriendRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	principal := principalFromContext(r.Context())
+	friendID := strings.TrimSpace(req.UserID)
+	ok, err := deps.ZKStore.AreFriends(r.Context(), principal.UserID, friendID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, "not_friends")
+		return
+	}
+	rooms, err := deps.ZKStore.ListRooms(r.Context(), principal.UserID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	member := false
+	for _, room := range rooms {
+		if room.RoomID == roomID {
+			member = true
+			break
+		}
+	}
+	if !member {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if err := deps.ZKStore.AddRoomMember(r.Context(), roomID, friendID); err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleLeaveRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, userID string) {
@@ -719,6 +839,19 @@ func fileIDFromPath(path string) string {
 		}
 	}
 	return ""
+}
+
+func friendActionSubroute(path string) (string, string, bool) {
+	const prefix = "/v1/chat/friends/"
+	if !strings.HasPrefix(path, prefix) {
+		return "", "", false
+	}
+	rest := strings.Trim(strings.TrimPrefix(path, prefix), "/")
+	friendID, action, ok := strings.Cut(rest, "/")
+	if !ok || friendID == "" || (action != "accept" && action != "decline") || strings.ContainsAny(friendID, " \t\r\n") {
+		return "", "", false
+	}
+	return friendID, action, true
 }
 
 func memberSubroute(tail string) (string, bool) {
