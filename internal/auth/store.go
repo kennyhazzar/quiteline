@@ -142,8 +142,9 @@ func (s *MemorySessionStore) ListSessions(_ context.Context, userID string) ([]S
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]Session, 0)
+	now := time.Now().UTC()
 	for _, session := range s.sessions {
-		if session.UserID == userID {
+		if session.UserID == userID && session.RevokedAt.IsZero() && session.ExpiresAt.After(now) {
 			result = append(result, session)
 		}
 	}

@@ -130,6 +130,7 @@ export default function MessengerPage() {
   const [messageText, setMessageText] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [mobileView, setMobileView] = useState<'chat' | 'rooms' | 'profile'>('rooms')
+  const [sidebarView, setSidebarView] = useState<'chat' | 'rooms' | 'profile'>('rooms')
   const [previews, setPreviews] = useState<Record<string, string>>({})
   const [avatarVersion, setAvatarVersion] = useState(Date.now())
   const [liveMessages, setLiveMessages] = useState<EncryptedMessage[]>([])
@@ -211,6 +212,7 @@ export default function MessengerPage() {
   const activeSecret = activeRoomID ? roomSecrets[activeRoomID] : ''
   const activeInvite = activeRoomID && activeSecret ? `${activeRoomID}:${activeSecret}` : ''
   const activeTopic = activeRoomID ? `room:${activeRoomID}` : ''
+  const leftView = isMobile ? mobileView : sidebarView
   const ownAvatarSrc = useMemo(() => {
     const url = absoluteAvatarUrl(session?.principal.avatarUrl)
     return url ? `${url}?v=${avatarVersion}` : ''
@@ -291,6 +293,7 @@ export default function MessengerPage() {
     setSession(null)
     setActiveRoomID('')
     setMobileView('rooms')
+    setSidebarView('rooms')
     setMobileChatActionsOpened(false)
     setLeaveConfirmOpened(false)
     wsRef.current?.close()
@@ -424,6 +427,7 @@ export default function MessengerPage() {
       localStorage.setItem(ROOM_SECRETS_KEY, JSON.stringify(nextSecrets))
       setActiveRoomID(room.roomId)
       if (isMobile) setMobileView('chat')
+      else setSidebarView('chat')
       queryClient.invalidateQueries({ queryKey: ['zk-rooms'] })
       sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
       notifications.show({ title: t('roomReady'), message: t('roomReadyMessage'), color: 'green' })
@@ -445,6 +449,7 @@ export default function MessengerPage() {
       localStorage.setItem(ROOM_SECRETS_KEY, JSON.stringify(nextSecrets))
       setActiveRoomID(room.roomId)
       if (isMobile) setMobileView('chat')
+      else setSidebarView('chat')
       setInviteText('')
       queryClient.invalidateQueries({ queryKey: ['zk-rooms'] })
       sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
@@ -618,6 +623,7 @@ export default function MessengerPage() {
     setActiveRoomID(room.roomId)
     requestNotifications()
     if (isMobile) setMobileView('chat')
+    else setSidebarView('chat')
   }
 
   async function sendSystemMessage(roomID: string, secret: string, type: 'join' | 'leave') {
@@ -651,6 +657,7 @@ export default function MessengerPage() {
       localStorage.setItem(ROOM_SECRETS_KEY, JSON.stringify(nextSecrets))
       setActiveRoomID('')
       setMobileView('rooms')
+      setSidebarView('rooms')
       setMobileChatActionsOpened(false)
       setLeaveConfirmOpened(false)
       queryClient.invalidateQueries({ queryKey: ['zk-rooms'] })
@@ -669,6 +676,7 @@ export default function MessengerPage() {
     setMobileChatActionsOpened(false)
     setActiveRoomID('')
     setMobileView('rooms')
+    setSidebarView('rooms')
   }
 
   function requestLeaveChat() {
@@ -1072,7 +1080,36 @@ export default function MessengerPage() {
         gap="md"
         style={{ minHeight: 0, flexShrink: 0, display: isMobile && mobileView === 'chat' ? 'none' : 'flex' }}
       >
-        <Card withBorder radius="sm" p="md" style={{ display: !isMobile || mobileView === 'profile' ? undefined : 'none' }}>
+        {!isMobile && (
+          <SegmentedControl
+            fullWidth
+            value={sidebarView}
+            onChange={(value) => setSidebarView(value as 'chat' | 'rooms' | 'profile')}
+            data={[
+              { value: 'chat', label: t('chat') },
+              { value: 'rooms', label: t('rooms') },
+              { value: 'profile', label: t('profile') },
+            ]}
+          />
+        )}
+
+        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'chat' ? undefined : 'none' }}>
+          <Title order={4} mb="xs">{t('chat')}</Title>
+          {activeRoom ? (
+            <Stack gap="xs">
+              <Text fw={700} truncate>{activeRoom.name}</Text>
+              <Text size="xs" c="dimmed" truncate>room:{maskedRoomId(activeRoom.roomId)}</Text>
+              <Button variant="light" onClick={() => setSidebarView('rooms')}>{t('rooms')}</Button>
+            </Stack>
+          ) : (
+            <Stack gap="xs">
+              <Text size="sm" c="dimmed">{t('chooseRoom')}</Text>
+              <Button variant="light" onClick={() => setSidebarView('rooms')}>{t('rooms')}</Button>
+            </Stack>
+          )}
+        </Card>
+
+        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'profile' ? undefined : 'none' }}>
           <Group justify="space-between" align="flex-start" mb="xs" wrap="nowrap">
             <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
               <Avatar src={ownAvatarSrc} name={session.principal.displayName || identity.displayName} radius="xl" size={52} />
@@ -1156,7 +1193,7 @@ export default function MessengerPage() {
           </Group>
         </Card>
 
-        <Card withBorder radius="sm" p="md" style={{ display: !isMobile || mobileView === 'rooms' ? undefined : 'none' }}>
+        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('createRoom')}</Title>
           <Stack gap="sm">
             <TextInput label={t('roomName')} value={roomName} onChange={(event) => setRoomName(event.currentTarget.value)} />
@@ -1171,7 +1208,7 @@ export default function MessengerPage() {
           </Stack>
         </Card>
 
-        <Card withBorder radius="sm" p="md" style={{ display: !isMobile || mobileView === 'rooms' ? undefined : 'none' }}>
+        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('importInvite')}</Title>
           <Stack gap="sm">
             <PasswordInput
@@ -1197,7 +1234,7 @@ export default function MessengerPage() {
           radius="sm"
           p="md"
           style={{
-            display: !isMobile || mobileView === 'rooms' ? 'flex' : 'none',
+            display: leftView === 'rooms' ? 'flex' : 'none',
             flex: isMobile ? 'unset' : 1,
             minHeight: isMobile ? 320 : 0,
             flexDirection: 'column',

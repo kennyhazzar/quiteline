@@ -191,7 +191,7 @@ func (s *PostgresUserStore) ListSessions(ctx context.Context, userID string) ([]
 	rows, err := s.pool.Query(ctx, `
 		SELECT session_id, user_id, username, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
 		FROM auth_sessions
-		WHERE user_id = $1 AND expires_at > now()
+		WHERE user_id = $1 AND expires_at > now() AND revoked_at IS NULL
 		ORDER BY created_at DESC
 	`, strings.TrimSpace(userID))
 	if err != nil {
