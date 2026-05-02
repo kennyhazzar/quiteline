@@ -47,8 +47,10 @@ ALTER TABLE identities ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NUL
 CREATE TABLE IF NOT EXISTS rooms (
 	room_id    TEXT PRIMARY KEY,
 	name       TEXT NOT NULL,
+	room_secret TEXT NOT NULL DEFAULT '',
 	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE rooms ADD COLUMN IF NOT EXISTS room_secret TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS room_members (
 	room_id TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
@@ -131,6 +133,11 @@ func (s *PostgresStore) CreateRoom(ctx context.Context, room Room) (Room, error)
 	if room.RoomID == "" {
 		room.RoomID = newID()
 	}
+	requestedSecret := strings.TrimSpace(room.RoomSecret)
+	room.RoomSecret = requestedSecret
+	if room.RoomSecret == "" {
+		room.RoomSecret = newRoomSecret()
+	}
 	if room.Name == "" || len(room.Members) == 0 {
 		return Room{}, ErrBadRequest
 	}
@@ -141,12 +148,28 @@ func (s *PostgresStore) CreateRoom(ctx context.Context, room Room) (Room, error)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
+	var existingSecret string
+	err = tx.QueryRow(ctx, `SELECT room_secret FROM rooms WHERE room_id = $1`, room.RoomID).Scan(&existingSecret)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Room{}, err
+	}
+	if err == nil && existingSecret != "" && room.RoomSecret != existingSecret {
+		return Room{}, ErrBadRequest
+	}
+	if err == nil && existingSecret == "" && requestedSecret == "" {
+		return Room{}, ErrBadRequest
+	}
+
 	err = tx.QueryRow(ctx, `
-		INSERT INTO rooms (room_id, name)
-		VALUES ($1, $2)
-		ON CONFLICT (room_id) DO UPDATE SET name = rooms.name
-		RETURNING created_at
-	`, room.RoomID, room.Name).Scan(&room.CreatedAt)
+		INSERT INTO rooms (room_id, name, room_secret)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (room_id) DO UPDATE
+			SET room_secret = CASE
+				WHEN rooms.room_secret = '' AND EXCLUDED.room_secret <> '' THEN EXCLUDED.room_secret
+				ELSE rooms.room_secret
+			END
+		RETURNING room_secret, created_at
+	`, room.RoomID, room.Name, room.RoomSecret).Scan(&room.RoomSecret, &room.CreatedAt)
 	if err != nil {
 		return Room{}, err
 	}
@@ -172,10 +195,10 @@ func (s *PostgresStore) ListRooms(ctx context.Context, userID string) ([]Room, e
 	)
 	if userID == "" {
 		rows, err = s.pool.Query(ctx,
-			`SELECT room_id, name, created_at FROM rooms ORDER BY created_at DESC`)
+			`SELECT room_id, name, room_secret, created_at FROM rooms ORDER BY created_at DESC`)
 	} else {
 		rows, err = s.pool.Query(ctx, `
-			SELECT r.room_id, r.name, r.created_at
+			SELECT r.room_id, r.name, r.room_secret, r.created_at
 			FROM rooms r
 			JOIN room_members rm ON rm.room_id = r.room_id AND rm.user_id = $1
 			ORDER BY r.created_at DESC
@@ -192,7 +215,7 @@ func (s *PostgresStore) ListRooms(ctx context.Context, userID string) ([]Room, e
 
 	for rows.Next() {
 		var r Room
-		if err := rows.Scan(&r.RoomID, &r.Name, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.RoomID, &r.Name, &r.RoomSecret, &r.CreatedAt); err != nil {
 			return nil, err
 		}
 		r.Members = []string{}

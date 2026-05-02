@@ -42,6 +42,7 @@ export interface Room {
   roomId: string
   name: string
   members: string[]
+  roomSecret?: string
   createdAt: string
 }
 
@@ -217,6 +218,7 @@ export async function createRoom(input: {
   roomId?: string
   name: string
   members: string[]
+  roomSecret?: string
   token: string
 }): Promise<Room> {
   const res = await fetch(`${BASE}/v1/chat/rooms`, {
@@ -226,6 +228,7 @@ export async function createRoom(input: {
       roomId: input.roomId,
       name: input.name,
       members: input.members,
+      roomSecret: input.roomSecret,
     }),
   })
   return readJSON(res)

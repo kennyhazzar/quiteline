@@ -133,6 +133,7 @@ export default function MessengerPage() {
   const [identity, setIdentity] = useState<Identity | null>(null)
   const [displayName, setDisplayName] = useState('')
   const [roomName, setRoomName] = useState('')
+  const [newRoomSecret, setNewRoomSecret] = useState('')
   const [roomSecret, setRoomSecret] = useState('')
   const [inviteText, setInviteText] = useState('')
   const [roomSecrets, setRoomSecrets] = useState<Record<string, string>>({})
@@ -219,7 +220,7 @@ export default function MessengerPage() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   })
-  const activeSecret = activeRoomID ? roomSecrets[activeRoomID] : ''
+  const activeSecret = activeRoom?.roomSecret || (activeRoomID ? roomSecrets[activeRoomID] : '')
   const activeInvite = activeRoomID && activeSecret ? `${activeRoomID}:${activeSecret}` : ''
   const activeTopic = activeRoomID ? `room:${activeRoomID}` : ''
   const leftView = isMobile ? mobileView : sidebarView
@@ -454,14 +455,21 @@ export default function MessengerPage() {
   const createRoomMutation = useMutation({
     mutationFn: async () => {
       if (!identity || !session) throw new Error('account_required')
-      const secret = createRoomSecret()
-      const room = await createRoom({ name: roomName.trim() || t('privateRoom'), members: [identity.userId], token: session.accessToken })
+      const requestedSecret = newRoomSecret.trim()
+      const room = await createRoom({
+        name: roomName.trim() || t('privateRoom'),
+        members: [identity.userId],
+        roomSecret: requestedSecret || undefined,
+        token: session.accessToken,
+      })
+      const secret = room.roomSecret || requestedSecret || createRoomSecret()
       return { room, secret }
     },
     onSuccess: ({ room, secret }) => {
       const nextSecrets = { ...roomSecrets, [room.roomId]: secret }
       persistRoomSecrets(nextSecrets)
       setActiveRoomID(room.roomId)
+      setNewRoomSecret('')
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
@@ -476,8 +484,8 @@ export default function MessengerPage() {
       if (!identity || !session) throw new Error('account_required')
       const [roomId, secret] = inviteText.trim().split(':')
       if (!roomId || !secret) throw new Error('invite_format_must_be_roomId_secret')
-      const room = await createRoom({ roomId, name: t('importedRoom'), members: [identity.userId], token: session.accessToken })
-      return { room, secret }
+      const room = await createRoom({ roomId, name: t('importedRoom'), members: [identity.userId], roomSecret: secret, token: session.accessToken })
+      return { room, secret: room.roomSecret || secret }
     },
     onSuccess: ({ room, secret }) => {
       const nextSecrets = { ...roomSecrets, [room.roomId]: secret }
@@ -1209,6 +1217,12 @@ export default function MessengerPage() {
           <Title order={4} mb="sm">{t('createRoom')}</Title>
           <Stack gap="sm">
             <TextInput label={t('roomName')} value={roomName} onChange={(event) => setRoomName(event.currentTarget.value)} />
+            <PasswordInput
+              label={t('roomSecretOptional')}
+              description={t('roomSecretOptionalDescription')}
+              value={newRoomSecret}
+              onChange={(event) => setNewRoomSecret(event.currentTarget.value)}
+            />
             <Button
               leftSection={<IconPlus size={16} />}
               onClick={() => createRoomMutation.mutate()}

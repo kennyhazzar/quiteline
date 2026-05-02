@@ -3,6 +3,7 @@ package zk
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"sort"
@@ -27,10 +28,11 @@ type Identity struct {
 }
 
 type Room struct {
-	RoomID    string    `json:"roomId"`
-	Name      string    `json:"name"`
-	Members   []string  `json:"members"`
-	CreatedAt time.Time `json:"createdAt"`
+	RoomID     string    `json:"roomId"`
+	Name       string    `json:"name"`
+	Members    []string  `json:"members"`
+	RoomSecret string    `json:"roomSecret,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
 }
 
 type EncryptedMessage struct {
@@ -126,6 +128,11 @@ func (s *MemoryStore) CreateRoom(_ context.Context, room Room) (Room, error) {
 	if room.RoomID == "" {
 		room.RoomID = newID()
 	}
+	requestedSecret := strings.TrimSpace(room.RoomSecret)
+	room.RoomSecret = requestedSecret
+	if room.RoomSecret == "" {
+		room.RoomSecret = newRoomSecret()
+	}
 	if room.Name == "" || len(room.Members) == 0 {
 		return Room{}, ErrBadRequest
 	}
@@ -136,6 +143,16 @@ func (s *MemoryStore) CreateRoom(_ context.Context, room Room) (Room, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if existing, ok := s.rooms[room.RoomID]; ok {
+		if existing.RoomSecret != "" && room.RoomSecret != existing.RoomSecret {
+			return Room{}, ErrBadRequest
+		}
+		if existing.RoomSecret == "" && requestedSecret == "" {
+			return Room{}, ErrBadRequest
+		}
+		if existing.RoomSecret == "" && room.RoomSecret != "" {
+			existing.RoomSecret = room.RoomSecret
+			s.rooms[room.RoomID] = existing
+		}
 		return existing, nil
 	}
 	s.rooms[room.RoomID] = room
@@ -271,4 +288,12 @@ func newID() string {
 		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
 	}
 	return hex.EncodeToString(bytes[:])
+}
+
+func newRoomSecret() string {
+	var bytes [32]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return newID() + newID()
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes[:])
 }

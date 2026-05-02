@@ -190,9 +190,10 @@ type upsertIdentityRequest struct {
 }
 
 type createRoomRequest struct {
-	RoomID  string   `json:"roomId"`
-	Name    string   `json:"name"`
-	Members []string `json:"members"`
+	RoomID     string   `json:"roomId"`
+	Name       string   `json:"name"`
+	Members    []string `json:"members"`
+	RoomSecret string   `json:"roomSecret,omitempty"`
 }
 
 type encryptedMessageRequest struct {
@@ -524,9 +525,10 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request, deps Dependencies)
 	}
 
 	room, err := deps.ZKStore.CreateRoom(r.Context(), zk.Room{
-		RoomID:  req.RoomID,
-		Name:    req.Name,
-		Members: []string{principalFromContext(r.Context()).UserID},
+		RoomID:     req.RoomID,
+		Name:       req.Name,
+		RoomSecret: req.RoomSecret,
+		Members:    []string{principalFromContext(r.Context()).UserID},
 	})
 	if err != nil {
 		writeStoreError(w, err)
