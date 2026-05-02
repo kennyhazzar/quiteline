@@ -1,0 +1,33 @@
+# Local env files
+.env
+.env.*
+!.env.example
+!.env.prod.example
+frontend/.env.local
+frontend/.env.*.local
+
+# Go build artifacts
+server.exe
+loadgen.exe
+*.exe
+*.test
+coverage.out
+
+# Node / Next.js
+node_modules/
+frontend/node_modules/
+.next/
+frontend/.next/
+out/
+frontend/out/
+
+# Logs and caches
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Runtime data
+deploy/certbot/conf/
+deploy/certbot/www/

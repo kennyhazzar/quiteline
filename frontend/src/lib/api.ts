@@ -1,0 +1,279 @@
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
+export const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:8080'
+export const API_BASE = BASE
+
+export interface Identity {
+  userId: string
+  displayName: string
+  identityPublicKey: string
+  createdAt: string
+  lastSeenAt: string
+}
+
+export interface Principal {
+  clientId: string
+  userId: string
+  username: string
+  displayName: string
+  theme: 'light' | 'dark'
+  avatarUrl?: string
+  scopes: string[]
+  expires: number
+}
+
+export interface AuthSession {
+  accessToken: string
+  tokenType: string
+  expiresAt: number
+  principal: Principal
+}
+
+export interface Room {
+  roomId: string
+  name: string
+  members: string[]
+  createdAt: string
+}
+
+export interface EncryptedMessage {
+  id: string
+  roomId: string
+  senderId: string
+  ciphertext: string
+  nonce: string
+  algorithm: string
+  keyId: string
+  createdAt: string
+}
+
+export interface MessageEnvelope {
+  id: string
+  topic: string
+  data: EncryptedMessage
+  source: string
+  createdAt: string
+}
+
+export interface FileUploadResponse {
+  fileId: string
+  size: number
+}
+
+export class AuthError extends Error {
+  constructor(message = 'unauthorized') {
+    super(message)
+    this.name = 'AuthError'
+  }
+}
+
+export async function fetchHealth(): Promise<{ status: string }> {
+  const res = await fetch(`${BASE}/healthz`)
+  if (!res.ok) throw new Error('health check failed')
+  return res.json()
+}
+
+export async function registerUser(input: {
+  username: string
+  password: string
+  displayName: string
+}): Promise<AuthSession> {
+  const res = await fetch(`${BASE}/v1/auth/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return readJSON(res)
+}
+
+export async function loginUser(input: {
+  username: string
+  password: string
+}): Promise<AuthSession> {
+  const res = await fetch(`${BASE}/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  return readJSON(res)
+}
+
+export async function updateTheme(input: {
+  token: string
+  theme: 'light' | 'dark'
+}): Promise<Principal> {
+  const res = await fetch(`${BASE}/v1/me/theme`, {
+    method: 'PUT',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ theme: input.theme }),
+  })
+  return readJSON(res)
+}
+
+export async function uploadAvatar(input: {
+  token: string
+  blob: Blob
+}): Promise<Principal> {
+  const form = new FormData()
+  form.append('avatar', input.blob, 'avatar.webp')
+  const res = await fetch(`${BASE}/v1/me/avatar`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: form,
+  })
+  return readJSON(res)
+}
+
+export function absoluteAvatarUrl(avatarUrl?: string): string {
+  if (!avatarUrl) return ''
+  if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) return avatarUrl
+  return `${BASE}${avatarUrl}`
+}
+
+export async function upsertIdentity(input: {
+  userId: string
+  displayName: string
+  identityPublicKey: string
+  token: string
+}): Promise<Identity> {
+  const res = await fetch(`${BASE}/v1/zk/identities/${encodeURIComponent(input.userId)}`, {
+    method: 'PUT',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({
+      displayName: input.displayName,
+      identityPublicKey: input.identityPublicKey,
+    }),
+  })
+  return readJSON(res)
+}
+
+export async function fetchIdentity(userId: string, token: string): Promise<Identity> {
+  const res = await fetch(`${BASE}/v1/zk/identities/${encodeURIComponent(userId)}`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function touchIdentity(userId: string, token: string): Promise<Identity> {
+  const res = await fetch(`${BASE}/v1/zk/identities/${encodeURIComponent(userId)}/last-seen`, {
+    method: 'PUT',
+    headers: authHeaders(token),
+    body: JSON.stringify({}),
+  })
+  return readJSON(res)
+}
+
+export async function createRoom(input: {
+  roomId?: string
+  name: string
+  members: string[]
+  token: string
+}): Promise<Room> {
+  const res = await fetch(`${BASE}/v1/zk/rooms`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({
+      roomId: input.roomId,
+      name: input.name,
+      members: input.members,
+    }),
+  })
+  return readJSON(res)
+}
+
+export async function fetchRooms(userId: string, token: string): Promise<{ rooms: Room[] }> {
+  const res = await fetch(`${BASE}/v1/zk/rooms?userId=${encodeURIComponent(userId)}`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function leaveRoom(input: {
+  roomId: string
+  userId: string
+  token: string
+}): Promise<void> {
+  const res = await fetch(`${BASE}/v1/zk/rooms/${encodeURIComponent(input.roomId)}/members/${encodeURIComponent(input.userId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'leave_failed')
+  }
+}
+
+export async function fetchMessages(roomId: string, token: string): Promise<{ messages: EncryptedMessage[] }> {
+  const res = await fetch(`${BASE}/v1/zk/rooms/${encodeURIComponent(roomId)}/messages`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function sendEncryptedMessage(input: {
+  roomId: string
+  senderId: string
+  ciphertext: string
+  nonce: string
+  algorithm: string
+  keyId: string
+  token: string
+}): Promise<EncryptedMessage> {
+  const res = await fetch(`${BASE}/v1/zk/rooms/${encodeURIComponent(input.roomId)}/messages`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({
+      senderId: input.senderId,
+      ciphertext: input.ciphertext,
+      nonce: input.nonce,
+      algorithm: input.algorithm,
+      keyId: input.keyId,
+    }),
+  })
+  return readJSON(res)
+}
+
+export async function uploadEncryptedFile(input: {
+  token: string
+  blob: Blob
+}): Promise<FileUploadResponse> {
+  const form = new FormData()
+  form.append('file', input.blob, 'encrypted.bin')
+  const res = await fetch(`${BASE}/v1/zk/files`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${input.token}` },
+    body: form,
+  })
+  return readJSON(res)
+}
+
+export async function downloadEncryptedFile(input: {
+  token: string
+  fileId: string
+}): Promise<Blob> {
+  const res = await fetch(`${BASE}/v1/zk/files/${encodeURIComponent(input.fileId)}`, {
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'download_failed')
+  }
+  return res.blob()
+}
+
+function authHeaders(token: string): HeadersInit {
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  }
+}
+
+async function readJSON<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'request_failed')
+  }
+  return res.json()
+}

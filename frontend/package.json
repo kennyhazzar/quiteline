@@ -1,0 +1,33 @@
+{
+  "name": "quietline-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start"
+  },
+  "dependencies": {
+    "@mantine/core": "^7.17.0",
+    "@mantine/hooks": "^7.17.0",
+    "@mantine/notifications": "^7.17.0",
+    "@tabler/icons-react": "^3.31.0",
+    "@tanstack/react-query": "^5.74.4",
+    "@tanstack/react-table": "^8.21.3",
+    "next": "^15.5.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.50",
+    "@types/react": "^18.3.21",
+    "@types/react-dom": "^18.3.5",
+    "postcss": "^8.5.10",
+    "postcss-preset-mantine": "^1.17.0",
+    "postcss-simple-vars": "^7.0.1",
+    "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "postcss": "^8.5.10"
+  }
+}
