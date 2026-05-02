@@ -174,7 +174,6 @@ export default function MessengerPage() {
   const [friendUsername, setFriendUsername] = useState('')
   const [roomSecrets, setRoomSecrets] = useState<Record<string, string>>({})
   const [activeRoomID, setActiveRoomID] = useState('')
-  const [messageText, setMessageText] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [mobileView, setMobileView] = useState<'chat' | 'rooms' | 'profile'>('rooms')
   const [sidebarView, setSidebarView] = useState<'chat' | 'rooms' | 'profile'>('rooms')
@@ -199,6 +198,8 @@ export default function MessengerPage() {
   const [mobileChatActionsOpened, setMobileChatActionsOpened] = useState(false)
   const [leaveConfirmOpened, setLeaveConfirmOpened] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
+  const messageInputRef = useRef<HTMLInputElement | null>(null)
+  const messageTextRef = useRef('')
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const authExpiredNotifiedRef = useRef(false)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -985,7 +986,7 @@ export default function MessengerPage() {
   }
 
   function submitMessage() {
-    const text = messageText.trim()
+    const text = messageTextRef.current.trim()
     if ((!text && !selectedFile) || !activeRoomID || sendMutation.isPending || !identity) return
     if (selectedFile && selectedFile.size > MAX_FILE_BYTES) {
       notifications.show({ title: t('fileTooLarge'), message: t('fileTooLargeMessage'), color: 'red' })
@@ -1025,14 +1026,15 @@ export default function MessengerPage() {
       createdAt: draft.createdAt,
       status: 'sending',
     }])
-    setMessageText('')
+    messageTextRef.current = ''
+    if (messageInputRef.current) messageInputRef.current.value = ''
     setSelectedFile(null)
     setReplyTarget(null)
     sendMutation.mutate(draft)
   }
 
   function updateMessageText(value: string) {
-    setMessageText(value)
+    messageTextRef.current = value
     if (!identity || !activeTopic) return
     sendRealtime({
       kind: 'typing',
@@ -2041,9 +2043,9 @@ export default function MessengerPage() {
                   )}
                 </FileButton>
                 <TextInput
+                  ref={messageInputRef}
                   aria-label={t('message')}
                   placeholder={activeRoomID ? t('typeMessage') : t('unlockFirst')}
-                  value={messageText}
                   onChange={(event) => updateMessageText(event.currentTarget.value)}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter' && !event.shiftKey) {
@@ -2060,7 +2062,7 @@ export default function MessengerPage() {
                   size="lg"
                   onClick={submitMessage}
                   loading={sendMutation.isPending}
-                  disabled={(!messageText.trim() && !selectedFile) || !activeRoomID}
+                  disabled={!activeRoomID || sendMutation.isPending}
                   aria-label={t('send')}
                   title={t('send')}
                 >
