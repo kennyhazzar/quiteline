@@ -17,6 +17,7 @@ export interface Principal {
   displayName: string
   theme: 'light' | 'dark'
   avatarUrl?: string
+  totpEnabled: boolean
   scopes: string[]
   expires: number
 }
@@ -90,6 +91,15 @@ export interface FileUploadResponse {
   size: number
 }
 
+export interface TwoFactorChallenge {
+  twoFactorRequired: true
+}
+
+export interface TOTPSetup {
+  secret: string
+  otpauthUrl: string
+}
+
 export class AuthError extends Error {
   constructor(message = 'unauthorized') {
     super(message)
@@ -119,13 +129,18 @@ export async function registerUser(input: {
 export async function loginUser(input: {
   username: string
   password: string
-}): Promise<AuthSession> {
+  totpCode?: string
+}): Promise<AuthSession | TwoFactorChallenge> {
   const res = await fetch(`${BASE}/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   })
   return readJSON(res)
+}
+
+export function isTwoFactorChallenge(value: AuthSession | TwoFactorChallenge): value is TwoFactorChallenge {
+  return 'twoFactorRequired' in value && value.twoFactorRequired
 }
 
 export async function updateTheme(input: {
@@ -150,6 +165,40 @@ export async function uploadAvatar(input: {
     method: 'PUT',
     headers: { Authorization: `Bearer ${input.token}` },
     body: form,
+  })
+  return readJSON(res)
+}
+
+export async function beginTOTPSetup(token: string): Promise<TOTPSetup> {
+  const res = await fetch(`${BASE}/v1/me/2fa/setup`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({}),
+  })
+  return readJSON(res)
+}
+
+export async function confirmTOTP(input: {
+  token: string
+  code: string
+}): Promise<Principal> {
+  const res = await fetch(`${BASE}/v1/me/2fa/confirm`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ code: input.code }),
+  })
+  return readJSON(res)
+}
+
+export async function disableTOTP(input: {
+  token: string
+  password: string
+  code: string
+}): Promise<Principal> {
+  const res = await fetch(`${BASE}/v1/me/2fa`, {
+    method: 'DELETE',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ password: input.password, code: input.code }),
   })
   return readJSON(res)
 }

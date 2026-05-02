@@ -66,6 +66,15 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("PUT /v1/me/avatar", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleUploadAvatar(w, r, deps)
 	}))
+	mux.HandleFunc("POST /v1/me/2fa/setup", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleBeginTOTPSetup(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/me/2fa/confirm", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleConfirmTOTP(w, r, deps)
+	}))
+	mux.HandleFunc("DELETE /v1/me/2fa", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleDisableTOTP(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/me/identity", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleCurrentIdentity(w, r, deps)
 	}))
@@ -182,10 +191,20 @@ type authRequest struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
 	DisplayName string `json:"displayName,omitempty"`
+	TOTPCode    string `json:"totpCode,omitempty"`
 }
 
 type themeRequest struct {
 	Theme string `json:"theme"`
+}
+
+type totpCodeRequest struct {
+	Code string `json:"code"`
+}
+
+type disableTOTPRequest struct {
+	Password string `json:"password"`
+	Code     string `json:"code"`
 }
 
 type tokenResponse struct {
@@ -289,12 +308,55 @@ func handleLogin(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	token, principal, err := deps.Auth.Login(r.Context(), req.Username, req.Password)
+	token, principal, err := deps.Auth.Login(r.Context(), req.Username, req.Password, req.TOTPCode)
 	if err != nil {
+		if err == auth.ErrTwoFactorRequired {
+			writeJSON(w, http.StatusAccepted, map[string]any{"twoFactorRequired": true})
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "invalid_credentials")
 		return
 	}
 	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: token, TokenType: "Bearer", ExpiresAt: principal.Expires, Principal: principal})
+}
+
+func handleBeginTOTPSetup(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	setup, err := deps.Auth.BeginTOTPSetup(r.Context(), principalFromContext(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "totp_setup_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, setup)
+}
+
+func handleConfirmTOTP(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req totpCodeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	principal, err := deps.Auth.ConfirmTOTP(r.Context(), principalFromContext(r.Context()), req.Code)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_totp")
+		return
+	}
+	writeJSON(w, http.StatusOK, principal)
+}
+
+func handleDisableTOTP(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req disableTOTPRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	principal, err := deps.Auth.DisableTOTP(r.Context(), principalFromContext(r.Context()), req.Password, req.Code)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "invalid_totp")
+		return
+	}
+	writeJSON(w, http.StatusOK, principal)
 }
 
 func handleUpdateTheme(w http.ResponseWriter, r *http.Request, deps Dependencies) {

@@ -4,13 +4,18 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base32"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -25,6 +30,7 @@ var (
 	ErrTokenExpired       = errors.New("token expired")
 	ErrUserExists         = errors.New("user exists")
 	ErrUserNotFound       = errors.New("user not found")
+	ErrTwoFactorRequired  = errors.New("two factor required")
 )
 
 type Service struct {
@@ -41,6 +47,7 @@ type Principal struct {
 	DisplayName string   `json:"displayName,omitempty"`
 	Theme       string   `json:"theme,omitempty"`
 	AvatarURL   string   `json:"avatarUrl,omitempty"`
+	TOTPEnabled bool     `json:"totpEnabled"`
 	Scopes      []string `json:"scopes"`
 	Expires     int64    `json:"expires"`
 }
@@ -65,6 +72,8 @@ type User struct {
 	AvatarMimeType string    `json:"avatarMimeType,omitempty"`
 	AvatarSize     int64     `json:"avatarSize,omitempty"`
 	PasswordHash   string    `json:"-"`
+	TOTPSecret     string    `json:"-"`
+	TOTPEnabled    bool      `json:"totpEnabled"`
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
@@ -74,6 +83,12 @@ type UserStore interface {
 	GetUserByUsername(ctx context.Context, username string) (User, error)
 	UpdateUserAvatar(ctx context.Context, userID string, avatarFileID string, mimeType string, size int64) (User, error)
 	UpdateUserTheme(ctx context.Context, userID string, theme string) (User, error)
+	UpdateUserTOTP(ctx context.Context, userID string, secret string, enabled bool) (User, error)
+}
+
+type TOTPSetup struct {
+	Secret     string `json:"secret"`
+	OtpauthURL string `json:"otpauthUrl"`
 }
 
 type Session struct {
@@ -212,7 +227,7 @@ func (s *Service) PrincipalFor(ctx context.Context, principal Principal) (Princi
 	return next, nil
 }
 
-func (s *Service) Login(ctx context.Context, username, password string) (string, Principal, error) {
+func (s *Service) Login(ctx context.Context, username, password string, totpCode string) (string, Principal, error) {
 	user, err := s.users.GetUserByUsername(ctx, normalizeUsername(username))
 	if err != nil {
 		return "", Principal{}, ErrInvalidCredentials
@@ -220,7 +235,79 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return "", Principal{}, ErrInvalidCredentials
 	}
+	if user.TOTPEnabled {
+		if strings.TrimSpace(totpCode) == "" {
+			return "", Principal{}, ErrTwoFactorRequired
+		}
+		if !validateTOTP(user.TOTPSecret, totpCode, time.Now().UTC()) {
+			return "", Principal{}, ErrInvalidCredentials
+		}
+	}
 	return s.issueUserToken(ctx, user)
+}
+
+func (s *Service) BeginTOTPSetup(ctx context.Context, principal Principal) (TOTPSetup, error) {
+	if principal.UserID == "" {
+		return TOTPSetup{}, ErrInvalidCredentials
+	}
+	user, err := s.users.GetUserByID(ctx, principal.UserID)
+	if err != nil {
+		return TOTPSetup{}, err
+	}
+	if user.TOTPEnabled {
+		return TOTPSetup{}, ErrInvalidCredentials
+	}
+	secret, err := newTOTPSecret()
+	if err != nil {
+		return TOTPSetup{}, err
+	}
+	if _, err := s.users.UpdateUserTOTP(ctx, principal.UserID, secret, false); err != nil {
+		return TOTPSetup{}, err
+	}
+	return TOTPSetup{Secret: secret, OtpauthURL: otpauthURL("Quietline", user.Username, secret)}, nil
+}
+
+func (s *Service) ConfirmTOTP(ctx context.Context, principal Principal, code string) (Principal, error) {
+	if principal.UserID == "" {
+		return Principal{}, ErrInvalidCredentials
+	}
+	user, err := s.users.GetUserByID(ctx, principal.UserID)
+	if err != nil {
+		return Principal{}, err
+	}
+	if user.TOTPSecret == "" || !validateTOTP(user.TOTPSecret, code, time.Now().UTC()) {
+		return Principal{}, ErrInvalidCredentials
+	}
+	user, err = s.users.UpdateUserTOTP(ctx, principal.UserID, user.TOTPSecret, true)
+	if err != nil {
+		return Principal{}, err
+	}
+	next := userPrincipal(user, principal.Expires)
+	next.SessionID = principal.SessionID
+	return next, nil
+}
+
+func (s *Service) DisableTOTP(ctx context.Context, principal Principal, password string, code string) (Principal, error) {
+	if principal.UserID == "" {
+		return Principal{}, ErrInvalidCredentials
+	}
+	user, err := s.users.GetUserByID(ctx, principal.UserID)
+	if err != nil {
+		return Principal{}, err
+	}
+	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
+		return Principal{}, ErrInvalidCredentials
+	}
+	if user.TOTPEnabled && !validateTOTP(user.TOTPSecret, code, time.Now().UTC()) {
+		return Principal{}, ErrInvalidCredentials
+	}
+	user, err = s.users.UpdateUserTOTP(ctx, principal.UserID, "", false)
+	if err != nil {
+		return Principal{}, err
+	}
+	next := userPrincipal(user, principal.Expires)
+	next.SessionID = principal.SessionID
+	return next, nil
 }
 
 func (s *Service) AuthenticateRequest(r *http.Request) (Principal, error) {
@@ -365,6 +452,7 @@ func (s *Service) issueUserToken(ctx context.Context, user User) (string, Princi
 		DisplayName: user.DisplayName,
 		Theme:       claims.Theme,
 		AvatarURL:   avatarURL(user),
+		TOTPEnabled: user.TOTPEnabled,
 		Scopes:      claims.Scopes,
 		Expires:     claims.Expires,
 	}, nil
@@ -378,6 +466,7 @@ func userPrincipal(user User, expires int64) Principal {
 		DisplayName: user.DisplayName,
 		Theme:       normalizeThemeOrDefault(user.Theme),
 		AvatarURL:   avatarURL(user),
+		TOTPEnabled: user.TOTPEnabled,
 		Scopes:      defaultScopes(),
 		Expires:     expires,
 	}
@@ -389,6 +478,61 @@ func newSessionID() string {
 		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
 	}
 	return hex.EncodeToString(bytes[:])
+}
+
+func newTOTPSecret() (string, error) {
+	var bytes [20]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(bytes[:]), "="), nil
+}
+
+func otpauthURL(issuer string, account string, secret string) string {
+	values := url.Values{}
+	values.Set("secret", secret)
+	values.Set("issuer", issuer)
+	values.Set("algorithm", "SHA1")
+	values.Set("digits", "6")
+	values.Set("period", "30")
+	return "otpauth://totp/" + url.PathEscape(issuer+":"+account) + "?" + values.Encode()
+}
+
+func validateTOTP(secret string, code string, now time.Time) bool {
+	code = strings.TrimSpace(code)
+	if len(code) != 6 {
+		return false
+	}
+	for _, r := range code {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	for offset := int64(-1); offset <= 1; offset++ {
+		expected, err := totpAt(secret, now.Unix()/30+offset)
+		if err == nil && subtle.ConstantTimeCompare([]byte(expected), []byte(code)) == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+func totpAt(secret string, counter int64) (string, error) {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(strings.TrimSpace(secret)))
+	if err != nil {
+		return "", err
+	}
+	var buf [8]byte
+	binary.BigEndian.PutUint64(buf[:], uint64(counter))
+	mac := hmac.New(sha1.New, key)
+	_, _ = mac.Write(buf[:])
+	sum := mac.Sum(nil)
+	offset := sum[len(sum)-1] & 0x0f
+	binaryCode := (int(sum[offset])&0x7f)<<24 |
+		(int(sum[offset+1])&0xff)<<16 |
+		(int(sum[offset+2])&0xff)<<8 |
+		(int(sum[offset+3]) & 0xff)
+	return fmt.Sprintf("%06d", binaryCode%1000000), nil
 }
 
 func avatarURL(user User) string {

@@ -47,12 +47,16 @@ CREATE TABLE IF NOT EXISTS users (
 	avatar_mime_type TEXT NOT NULL DEFAULT '',
 	avatar_size BIGINT NOT NULL DEFAULT 0,
 	password_hash TEXT NOT NULL,
+	totp_secret TEXT NOT NULL DEFAULT '',
+	totp_enabled BOOLEAN NOT NULL DEFAULT false,
 	created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'dark';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime_type TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_size BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_secret TEXT NOT NULL DEFAULT '';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN NOT NULL DEFAULT false;
 
 CREATE TABLE IF NOT EXISTS auth_sessions (
 	session_id TEXT PRIMARY KEY,
@@ -82,9 +86,9 @@ func (s *PostgresUserStore) CreateUser(ctx context.Context, user User) (User, er
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO users (user_id, username, display_name, theme, password_hash)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, created_at
+		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
 	`, user.UserID, user.Username, user.DisplayName, user.Theme, user.PasswordHash).
-		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.CreatedAt)
+		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return User{}, ErrUserExists
@@ -95,10 +99,10 @@ func (s *PostgresUserStore) CreateUser(ctx context.Context, user User) (User, er
 func (s *PostgresUserStore) GetUserByUsername(ctx context.Context, username string) (User, error) {
 	var result User
 	err := s.pool.QueryRow(ctx, `
-		SELECT user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, created_at
+		SELECT user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
 		FROM users WHERE username = $1
 	`, normalizeUsername(username)).
-		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.CreatedAt)
+		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -108,10 +112,10 @@ func (s *PostgresUserStore) GetUserByUsername(ctx context.Context, username stri
 func (s *PostgresUserStore) GetUserByID(ctx context.Context, userID string) (User, error) {
 	var result User
 	err := s.pool.QueryRow(ctx, `
-		SELECT user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, created_at
+		SELECT user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
 		FROM users WHERE user_id = $1
 	`, strings.TrimSpace(userID)).
-		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.CreatedAt)
+		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -127,9 +131,9 @@ func (s *PostgresUserStore) UpdateUserTheme(ctx context.Context, userID string, 
 	err := s.pool.QueryRow(ctx, `
 		UPDATE users SET theme = $2
 		WHERE user_id = $1
-		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, created_at
+		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
 	`, userID, theme).
-		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.CreatedAt)
+		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
@@ -148,9 +152,29 @@ func (s *PostgresUserStore) UpdateUserAvatar(ctx context.Context, userID string,
 		UPDATE users
 		SET avatar_file_id = $2, avatar_mime_type = $3, avatar_size = $4
 		WHERE user_id = $1
-		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, created_at
+		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
 	`, userID, avatarFileID, mimeType, size).
-		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.CreatedAt)
+		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	return result, err
+}
+
+func (s *PostgresUserStore) UpdateUserTOTP(ctx context.Context, userID string, secret string, enabled bool) (User, error) {
+	userID = strings.TrimSpace(userID)
+	secret = strings.TrimSpace(secret)
+	if userID == "" {
+		return User{}, ErrInvalidCredentials
+	}
+	var result User
+	err := s.pool.QueryRow(ctx, `
+		UPDATE users
+		SET totp_secret = $2, totp_enabled = $3
+		WHERE user_id = $1
+		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
+	`, userID, secret, enabled).
+		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}

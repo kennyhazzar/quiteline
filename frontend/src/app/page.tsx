@@ -39,13 +39,17 @@ import {
   fetchAccountSessions,
   fetchCurrentIdentity,
   fetchFriends,
+  beginTOTPSetup,
   createRoom,
+  confirmTOTP,
+  disableTOTP,
   downloadEncryptedFile,
   fetchIdentity,
   fetchHealth,
   fetchMessages,
   fetchRooms,
   inviteFriendToRoom,
+  isTwoFactorChallenge,
   leaveRoom,
   loginUser,
   markRoomRead,
@@ -172,6 +176,8 @@ export default function MessengerPage() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [totpCode, setTotpCode] = useState('')
+  const [totpRequired, setTotpRequired] = useState(false)
   const [identity, setIdentity] = useState<Identity | null>(null)
   const [displayName, setDisplayName] = useState('')
   const [roomName, setRoomName] = useState('')
@@ -197,6 +203,10 @@ export default function MessengerPage() {
   const [deleteForEveryone, setDeleteForEveryone] = useState(false)
   const [roomSearch, setRoomSearch] = useState('')
   const [messageSearch, setMessageSearch] = useState('')
+  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null)
+  const [totpConfirmCode, setTotpConfirmCode] = useState('')
+  const [totpDisablePassword, setTotpDisablePassword] = useState('')
+  const [totpDisableCode, setTotpDisableCode] = useState('')
   const [typingUsers, setTypingUsers] = useState<Record<string, { displayName: string; until: number }>>({})
   const [presence, setPresence] = useState<Record<string, { displayName: string; status: 'online' | 'offline'; lastSeenAt: string }>>({})
   const [callState, setCallState] = useState<CallState>('idle')
@@ -377,6 +387,8 @@ export default function MessengerPage() {
     setPresence({})
     setMobileChatActionsOpened(false)
     setLeaveConfirmOpened(false)
+    setTotpRequired(false)
+    setTotpCode('')
     if (isMobile) setMobileView('rooms')
     else setSidebarView('rooms')
     fetchCurrentIdentity(target.accessToken)
@@ -400,6 +412,8 @@ export default function MessengerPage() {
     setSidebarView('rooms')
     setMobileChatActionsOpened(false)
     setLeaveConfirmOpened(false)
+    setTotpRequired(false)
+    setTotpCode('')
   }
 
   function persistRoomSecrets(nextSecrets: Record<string, string>) {
@@ -495,12 +509,19 @@ export default function MessengerPage() {
       if (authMode === 'register') {
         return registerUser({ username, password, displayName: displayName.trim() || username })
       }
-      return loginUser({ username, password })
+      return loginUser({ username, password, totpCode: totpCode.trim() || undefined })
     },
     onSuccess: (next) => {
+      if (isTwoFactorChallenge(next)) {
+        setTotpRequired(true)
+        notifications.show({ title: t('login'), message: 'Enter your 2FA code.', color: 'blue' })
+        return
+      }
       saveSession(next)
       setColorScheme(next.principal.theme)
       setDisplayName(next.principal.username || username)
+      setTotpRequired(false)
+      setTotpCode('')
       notifications.show({ title: authMode === 'register' ? t('createAccount') : t('login'), message: t('sessionReady'), color: 'green' })
     },
     onError: (err: Error) => handleRequestError(err, t('login')),
@@ -519,6 +540,43 @@ export default function MessengerPage() {
       notifications.show({ title: t('avatarReady'), message: t('avatarReadyMessage'), color: 'green' })
     },
     onError: (err: Error) => handleRequestError(err, t('avatarFailed')),
+  })
+
+  const beginTOTPMutation = useMutation({
+    mutationFn: async () => {
+      if (!session) throw new Error('login_required')
+      return beginTOTPSetup(session.accessToken)
+    },
+    onSuccess: setTotpSetup,
+    onError: (err: Error) => handleRequestError(err, '2FA setup failed'),
+  })
+
+  const confirmTOTPMutation = useMutation({
+    mutationFn: async () => {
+      if (!session) throw new Error('login_required')
+      return confirmTOTP({ token: session.accessToken, code: totpConfirmCode.trim() })
+    },
+    onSuccess: (principal) => {
+      updateSessionPrincipal(principal)
+      setTotpSetup(null)
+      setTotpConfirmCode('')
+      notifications.show({ title: '2FA enabled', message: 'Two-factor authentication is active.', color: 'green' })
+    },
+    onError: (err: Error) => handleRequestError(err, '2FA confirmation failed'),
+  })
+
+  const disableTOTPMutation = useMutation({
+    mutationFn: async () => {
+      if (!session) throw new Error('login_required')
+      return disableTOTP({ token: session.accessToken, password: totpDisablePassword, code: totpDisableCode.trim() })
+    },
+    onSuccess: (principal) => {
+      updateSessionPrincipal(principal)
+      setTotpDisablePassword('')
+      setTotpDisableCode('')
+      notifications.show({ title: '2FA disabled', message: 'Two-factor authentication is off.', color: 'yellow' })
+    },
+    onError: (err: Error) => handleRequestError(err, 'Could not disable 2FA'),
   })
 
   const revokeSessionMutation = useMutation({
@@ -1330,15 +1388,30 @@ export default function MessengerPage() {
             if (event.key === 'Enter') submitAuth()
           }}
         />
+        {totpRequired && authMode === 'login' && (
+          <TextInput
+            label="2FA code"
+            placeholder="123456"
+            value={totpCode}
+            onChange={(event) => setTotpCode(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') submitAuth()
+            }}
+          />
+        )}
         <Group>
           <Button
             onClick={submitAuth}
             loading={authMutation.isPending}
-            disabled={!username.trim() || password.length < 8}
+            disabled={!username.trim() || password.length < 8 || (totpRequired && totpCode.trim().length < 6)}
           >
             {authMode === 'register' ? t('createAccount') : t('login')}
           </Button>
-          <Button variant="subtle" onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+          <Button variant="subtle" onClick={() => {
+            setAuthMode(authMode === 'login' ? 'register' : 'login')
+            setTotpRequired(false)
+            setTotpCode('')
+          }}>
             {authMode === 'login' ? t('needAccount') : t('alreadyHaveAccount')}
           </Button>
         </Group>
@@ -1659,6 +1732,61 @@ export default function MessengerPage() {
               </Group>
             ))}
             {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{t('noFriends')}</Text>}
+          </Stack>
+          <Divider my="sm" />
+          <Text fw={700} size="sm" mb="xs">Two-factor authentication</Text>
+          <Stack gap="xs">
+            <Badge color={session.principal.totpEnabled ? 'green' : 'gray'} variant="light" w="fit-content">
+              {session.principal.totpEnabled ? 'Enabled' : 'Disabled'}
+            </Badge>
+            {!session.principal.totpEnabled ? (
+              <>
+                <Button variant="light" onClick={() => beginTOTPMutation.mutate()} loading={beginTOTPMutation.isPending}>
+                  Set up 2FA
+                </Button>
+                {totpSetup && (
+                  <Stack gap="xs">
+                    <Text size="xs" c="dimmed">Add this key in your authenticator app, then enter the 6-digit code.</Text>
+                    <Code block>{totpSetup.secret}</Code>
+                    <Code block style={{ maxHeight: 88, overflow: 'auto' }}>{totpSetup.otpauthUrl}</Code>
+                    <TextInput
+                      label="Code"
+                      value={totpConfirmCode}
+                      onChange={(event) => setTotpConfirmCode(event.currentTarget.value)}
+                    />
+                    <Button
+                      onClick={() => confirmTOTPMutation.mutate()}
+                      loading={confirmTOTPMutation.isPending}
+                      disabled={totpConfirmCode.trim().length < 6}
+                    >
+                      Enable 2FA
+                    </Button>
+                  </Stack>
+                )}
+              </>
+            ) : (
+              <Stack gap="xs">
+                <PasswordInput
+                  label={t('password')}
+                  value={totpDisablePassword}
+                  onChange={(event) => setTotpDisablePassword(event.currentTarget.value)}
+                />
+                <TextInput
+                  label="2FA code"
+                  value={totpDisableCode}
+                  onChange={(event) => setTotpDisableCode(event.currentTarget.value)}
+                />
+                <Button
+                  color="red"
+                  variant="light"
+                  onClick={() => disableTOTPMutation.mutate()}
+                  loading={disableTOTPMutation.isPending}
+                  disabled={totpDisablePassword.length < 8 || totpDisableCode.trim().length < 6}
+                >
+                  Disable 2FA
+                </Button>
+              </Stack>
+            )}
           </Stack>
           <Divider my="sm" />
           <Group justify="space-between" align="center" mb="xs">

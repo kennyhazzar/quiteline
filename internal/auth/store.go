@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"strings"
 	"sync"
 	"time"
 )
@@ -81,6 +82,22 @@ func (s *MemoryUserStore) UpdateUserAvatar(_ context.Context, userID string, ava
 			user.AvatarFileID = avatarFileID
 			user.AvatarMimeType = mimeType
 			user.AvatarSize = size
+			s.byName[username] = user
+			return user, nil
+		}
+	}
+	return User{}, ErrUserNotFound
+}
+
+func (s *MemoryUserStore) UpdateUserTOTP(_ context.Context, userID string, secret string, enabled bool) (User, error) {
+	userID = strings.TrimSpace(userID)
+	secret = strings.TrimSpace(secret)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for username, user := range s.byName {
+		if user.UserID == userID {
+			user.TOTPSecret = secret
+			user.TOTPEnabled = enabled
 			s.byName[username] = user
 			return user, nil
 		}
