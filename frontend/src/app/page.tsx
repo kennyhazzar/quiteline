@@ -218,6 +218,8 @@ export default function MessengerPage() {
   const [profileUser, setProfileUser] = useState<Identity | null>(null)
   const [leavingRoom, setLeavingRoom] = useState(false)
   const [mobileChatActionsOpened, setMobileChatActionsOpened] = useState(false)
+  const [mobileCreateRoomOpened, setMobileCreateRoomOpened] = useState(false)
+  const [mobileImportInviteOpened, setMobileImportInviteOpened] = useState(false)
   const [leaveConfirmOpened, setLeaveConfirmOpened] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const messageInputRef = useRef<HTMLInputElement | null>(null)
@@ -716,6 +718,7 @@ export default function MessengerPage() {
       persistRoomSecrets(nextSecrets)
       setActiveRoomID(room.roomId)
       setNewRoomSecret('')
+      setMobileCreateRoomOpened(false)
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
@@ -740,6 +743,7 @@ export default function MessengerPage() {
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
       setInviteText('')
+      setMobileImportInviteOpened(false)
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
       notifications.show({ title: t('inviteImported'), message: t('inviteImportedMessage'), color: 'green' })
@@ -1646,6 +1650,44 @@ export default function MessengerPage() {
           </Group>
         </Stack>
       </Modal>
+      <Modal opened={mobileCreateRoomOpened} onClose={() => setMobileCreateRoomOpened(false)} title={t('createRoom')} centered>
+        <Stack gap="sm">
+          <TextInput label={t('roomName')} value={roomName} onChange={(event) => setRoomName(event.currentTarget.value)} />
+          <PasswordInput
+            label={t('roomSecretOptional')}
+            description={t('roomSecretOptionalDescription')}
+            value={newRoomSecret}
+            onChange={(event) => setNewRoomSecret(event.currentTarget.value)}
+          />
+          <Button
+            leftSection={<IconPlus size={16} />}
+            onClick={() => createRoomMutation.mutate()}
+            loading={createRoomMutation.isPending}
+            disabled={createRoomMutation.isPending}
+          >
+            {t('createEncryptedRoom')}
+          </Button>
+        </Stack>
+      </Modal>
+      <Modal opened={mobileImportInviteOpened} onClose={() => setMobileImportInviteOpened(false)} title={t('importInvite')} centered>
+        <Stack gap="sm">
+          <PasswordInput
+            label={t('invite')}
+            placeholder="roomId:roomSecret"
+            value={inviteText}
+            onChange={(event) => setInviteText(event.currentTarget.value)}
+          />
+          <Button
+            variant="light"
+            leftSection={<IconKey size={16} />}
+            onClick={() => importInviteMutation.mutate()}
+            loading={importInviteMutation.isPending}
+            disabled={!inviteText.trim()}
+          >
+            {t('joinRoom')}
+          </Button>
+        </Stack>
+      </Modal>
       <Box className="app-workspace">
       {(!isMobile || mobileView !== 'chat') && (
         <Group className={isMobile ? 'mobile-top-bar' : 'app-top-bar'} justify="space-between" wrap="nowrap">
@@ -1954,7 +1996,7 @@ export default function MessengerPage() {
           </Group>
         </Card>
 
-        <Card className={!isMobile ? 'desktop-surface' : undefined} withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
+        {!isMobile && <Card className="desktop-surface" withBorder radius="sm" p="md" style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('createRoom')}</Title>
           <Stack gap="sm">
             <TextInput label={t('roomName')} value={roomName} onChange={(event) => setRoomName(event.currentTarget.value)} />
@@ -1973,9 +2015,9 @@ export default function MessengerPage() {
               {t('createEncryptedRoom')}
             </Button>
           </Stack>
-        </Card>
+        </Card>}
 
-        <Card className={!isMobile ? 'desktop-surface' : undefined} withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
+        {!isMobile && <Card className="desktop-surface" withBorder radius="sm" p="md" style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('importInvite')}</Title>
           <Stack gap="sm">
             <PasswordInput
@@ -1994,7 +2036,7 @@ export default function MessengerPage() {
               {t('joinRoom')}
             </Button>
           </Stack>
-        </Card>
+        </Card>}
 
         <Card
           withBorder={!isMobile}
@@ -2003,16 +2045,28 @@ export default function MessengerPage() {
           p={isMobile ? 'sm' : 'md'}
           style={{
             display: leftView === 'rooms' ? 'flex' : 'none',
-            flex: isMobile ? 'unset' : 1,
-            minHeight: isMobile ? 320 : 0,
+            flex: 1,
+            minHeight: 0,
             flexDirection: 'column',
           }}
         >
           <Group justify="space-between" mb="sm">
             <Title order={4}>{t('rooms')}</Title>
-            <ActionIcon variant="subtle" onClick={() => rooms.refetch()} loading={rooms.isFetching}>
-              <IconRefresh size={16} />
-            </ActionIcon>
+            <Group gap={6} wrap="nowrap">
+              {isMobile && (
+                <>
+                  <ActionIcon variant="light" onClick={() => setMobileCreateRoomOpened(true)} aria-label={t('createRoom')}>
+                    <IconPlus size={16} />
+                  </ActionIcon>
+                  <ActionIcon variant="light" onClick={() => setMobileImportInviteOpened(true)} aria-label={t('importInvite')}>
+                    <IconKey size={16} />
+                  </ActionIcon>
+                </>
+              )}
+              <ActionIcon variant="subtle" onClick={() => rooms.refetch()} loading={rooms.isFetching}>
+                <IconRefresh size={16} />
+              </ActionIcon>
+            </Group>
           </Group>
           <TextInput
             mb="sm"

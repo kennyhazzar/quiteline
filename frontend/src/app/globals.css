@@ -165,9 +165,9 @@ body {
     position: fixed;
     left: 12px;
     right: 12px;
-    bottom: calc(env(safe-area-inset-bottom) + 10px);
+    bottom: calc(env(safe-area-inset-bottom) + 6px);
     z-index: 40;
-    height: 56px;
+    height: 54px;
     padding: 6px;
     border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4));
     border-radius: 18px;
