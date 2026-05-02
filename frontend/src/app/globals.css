@@ -8,6 +8,60 @@ body {
   margin: 0;
 }
 
+.app-workspace {
+  height: 100dvh;
+  min-height: 100dvh;
+  padding: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, light-dark(rgba(34, 139, 230, 0.12), rgba(34, 139, 230, 0.16)), transparent 30%),
+    light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
+}
+
+.app-top-bar {
+  height: 58px;
+  padding: 0 4px;
+}
+
+.workspace-shell {
+  height: calc(100dvh - 94px);
+  min-height: 0;
+}
+
+.app-sidebar {
+  border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
+  border-radius: 22px;
+  background: light-dark(rgba(255, 255, 255, 0.78), rgba(20, 21, 23, 0.82));
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.desktop-surface {
+  border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5)) !important;
+  border-radius: 18px !important;
+  background: light-dark(rgba(255, 255, 255, 0.86), rgba(31, 31, 33, 0.86)) !important;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.1);
+}
+
+.desktop-chat-card {
+  border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5)) !important;
+  border-radius: 24px !important;
+  background: light-dark(rgba(255, 255, 255, 0.82), rgba(20, 21, 23, 0.82)) !important;
+  box-shadow: 0 20px 54px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.message-bubble {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+}
+
+.composer-bar {
+  padding: 10px;
+  border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
+  border-radius: 18px;
+  background: light-dark(rgba(255, 255, 255, 0.88), rgba(20, 21, 23, 0.88));
+  backdrop-filter: blur(18px);
+}
+
 @media (max-width: 767px) {
   body {
     overflow: hidden;
@@ -29,7 +83,7 @@ body {
   .mobile-app-shell {
     height: 100dvh;
     min-height: 100dvh;
-    padding: 0 0 76px;
+    padding: 0;
     background:
       radial-gradient(circle at 12% 0%, light-dark(rgba(34, 139, 230, 0.12), rgba(34, 139, 230, 0.16)), transparent 30%),
       light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
@@ -41,6 +95,30 @@ body {
     border-bottom: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
     background: light-dark(rgba(255, 255, 255, 0.86), rgba(20, 21, 23, 0.86));
     backdrop-filter: blur(18px);
+  }
+
+  .app-workspace {
+    height: auto;
+    min-height: 100dvh;
+    padding: 0;
+    background: transparent;
+  }
+
+  .workspace-shell {
+    height: auto;
+  }
+
+  .app-sidebar {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+  }
+
+  .desktop-surface,
+  .desktop-chat-card {
+    box-shadow: none;
   }
 
   .mobile-content {

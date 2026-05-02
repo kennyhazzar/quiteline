@@ -30,7 +30,7 @@ import {
 } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { IconCheck, IconChecks, IconClock, IconCopy, IconDotsVertical, IconDownload, IconEdit, IconInfoCircle, IconKey, IconLink, IconLock, IconMessageCircle, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconTrash, IconUserPlus, IconX } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconClock, IconCopy, IconDotsVertical, IconDownload, IconEdit, IconInfoCircle, IconKey, IconLink, IconLock, IconMessageCircle, IconMoon, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconSun, IconTrash, IconUserPlus, IconX } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import QRCode from 'qrcode'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -64,6 +64,7 @@ import {
   deleteEncryptedMessageForAll,
   toggleMessageReaction,
   updateEncryptedMessage,
+  updateTheme,
   uploadAvatar,
   uploadEncryptedFile,
   type AuthSession,
@@ -169,8 +170,8 @@ function isPersistedMessageID(messageID: string) {
 
 export default function MessengerPage() {
   const queryClient = useQueryClient()
-  const { setColorScheme } = useMantineColorScheme()
-  const { t } = useI18n()
+  const { colorScheme, setColorScheme } = useMantineColorScheme()
+  const { locale, setLocale, t } = useI18n()
   const isMobile = useMediaQuery('(max-width: 767px)')
   const isTablet = useMediaQuery('(min-width: 768px) and (max-width: 1180px)')
   const [session, setSession] = useState<AuthSession | null>(null)
@@ -400,6 +401,22 @@ export default function MessengerPage() {
 
   function accountStorageID(target: AuthSession | null = session) {
     return target?.principal.userId || target?.principal.clientId || ''
+  }
+
+  async function toggleTheme() {
+    const theme = colorScheme === 'dark' ? 'light' : 'dark'
+    setColorScheme(theme)
+    if (!session) return
+    try {
+      const principal = await updateTheme({ token: session.accessToken, theme })
+      saveSession({ ...session, principal }, { reloadLocalState: false })
+    } catch (err) {
+      notifications.show({
+        title: t('saveLocalThemeFailed'),
+        message: err instanceof Error ? err.message : t('saveLocalThemeFailedMessage'),
+        color: 'yellow',
+      })
+    }
   }
 
   function loadAccountLocalState(target: AuthSession) {
@@ -1618,25 +1635,45 @@ export default function MessengerPage() {
           </Group>
         </Stack>
       </Modal>
-      {isMobile && mobileView !== 'chat' && (
-        <Group className="mobile-top-bar" justify="space-between" wrap="nowrap">
+      <Box className="app-workspace">
+      {(!isMobile || mobileView !== 'chat') && (
+        <Group className={isMobile ? 'mobile-top-bar' : 'app-top-bar'} justify="space-between" wrap="nowrap">
           <div style={{ minWidth: 0 }}>
             <Text fw={800} size="lg" truncate>Quietline</Text>
-            <Text size="xs" c="dimmed" truncate>{mobileView === 'rooms' ? t('rooms') : t('profile')}</Text>
+            <Text size="xs" c="dimmed" truncate>{isMobile ? (mobileView === 'rooms' ? t('rooms') : t('profile')) : t('encryptedBadge')}</Text>
           </div>
-          <Badge color={health.data?.status === 'ok' ? 'green' : 'red'} variant="light">
-            {health.data?.status === 'ok' ? t('online') : t('offline')}
-          </Badge>
+          <Group gap="xs" wrap="nowrap">
+            <Badge color={health.data?.status === 'ok' ? 'green' : 'red'} variant="light">
+              {health.data?.status === 'ok' ? t('online') : t('offline')}
+            </Badge>
+            {!isMobile && (
+              <>
+                <SegmentedControl
+                  size="xs"
+                  value={locale}
+                  onChange={(value) => setLocale(value === 'en' ? 'en' : 'ru')}
+                  data={[
+                    { value: 'ru', label: 'RU' },
+                    { value: 'en', label: 'EN' },
+                  ]}
+                />
+                <ActionIcon variant="subtle" onClick={toggleTheme} aria-label="Toggle theme">
+                  {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
+                </ActionIcon>
+              </>
+            )}
+          </Group>
         </Group>
       )}
       <Group
-        className={isMobile ? 'mobile-app-shell mobile-content' : undefined}
+        className={isMobile ? 'mobile-app-shell mobile-content' : 'workspace-shell'}
         align="stretch"
         gap={isMobile ? 0 : 'md'}
         wrap={isMobile ? 'wrap' : 'nowrap'}
         style={{ height: isMobile ? (mobileView === 'chat' ? '100dvh' : 'calc(100dvh - 58px)') : 'calc(100dvh - 96px)', minHeight: 0 }}
       >
       <Stack
+        className={!isMobile ? 'app-sidebar' : undefined}
         w={isMobile ? '100%' : isTablet ? 300 : 340}
         gap={isMobile ? 0 : 'md'}
         style={{
@@ -1645,7 +1682,7 @@ export default function MessengerPage() {
           display: isMobile && mobileView === 'chat' ? 'none' : 'flex',
           height: isMobile ? '100%' : undefined,
           overflowY: isMobile ? 'auto' : undefined,
-          padding: isMobile ? '12px 12px 0' : undefined,
+          padding: isMobile ? '12px 12px 66px' : 12,
         }}
       >
         {!isMobile && (
@@ -1661,7 +1698,7 @@ export default function MessengerPage() {
           />
         )}
 
-        <Card withBorder={!isMobile} radius={isMobile ? 0 : 'sm'} p={isMobile ? 'xs' : 'md'} style={{ display: leftView === 'chat' ? undefined : 'none' }}>
+        <Card className={!isMobile ? 'desktop-surface' : undefined} withBorder={!isMobile} radius={isMobile ? 0 : 'sm'} p={isMobile ? 'xs' : 'md'} style={{ display: leftView === 'chat' ? undefined : 'none' }}>
           <Title order={4} mb="xs">{t('chat')}</Title>
           {activeRoom ? (
             <Stack gap="xs">
@@ -1697,7 +1734,7 @@ export default function MessengerPage() {
           withBorder={!isMobile}
           radius={isMobile ? 'md' : 'sm'}
           p={isMobile ? 'sm' : 'md'}
-          className={isMobile ? 'mobile-panel mobile-panel-with-header' : undefined}
+          className={isMobile ? 'mobile-panel mobile-panel-with-header' : 'desktop-surface'}
           style={{
             display: leftView === 'profile' ? 'block' : 'none',
             flex: isMobile ? 'unset' : 1,
@@ -1906,7 +1943,7 @@ export default function MessengerPage() {
           </Group>
         </Card>
 
-        <Card withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
+        <Card className={!isMobile ? 'desktop-surface' : undefined} withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('createRoom')}</Title>
           <Stack gap="sm">
             <TextInput label={t('roomName')} value={roomName} onChange={(event) => setRoomName(event.currentTarget.value)} />
@@ -1927,7 +1964,7 @@ export default function MessengerPage() {
           </Stack>
         </Card>
 
-        <Card withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
+        <Card className={!isMobile ? 'desktop-surface' : undefined} withBorder={!isMobile} radius={isMobile ? 'md' : 'sm'} p={isMobile ? 'sm' : 'md'} mb={isMobile ? 'sm' : undefined} style={{ display: leftView === 'rooms' ? undefined : 'none' }}>
           <Title order={4} mb="sm">{t('importInvite')}</Title>
           <Stack gap="sm">
             <PasswordInput
@@ -1950,6 +1987,7 @@ export default function MessengerPage() {
 
         <Card
           withBorder={!isMobile}
+          className={!isMobile ? 'desktop-surface' : undefined}
           radius={isMobile ? 'md' : 'sm'}
           p={isMobile ? 'sm' : 'md'}
           style={{
@@ -2015,7 +2053,7 @@ export default function MessengerPage() {
         withBorder={!isMobile}
         radius={isMobile ? 0 : 'sm'}
         p={isMobile ? 0 : 'md'}
-        className={isMobile ? 'mobile-chat-card' : undefined}
+        className={isMobile ? 'mobile-chat-card' : 'desktop-chat-card'}
         style={{
           display: !isMobile || mobileView === 'chat' ? 'flex' : 'none',
           flex: 1,
@@ -2176,15 +2214,15 @@ export default function MessengerPage() {
                     <Card
                       key={msg.id}
                       withBorder={!isMobile}
-                      radius={isMobile ? 'lg' : 'sm'}
+                      className={!msg.body?.system ? 'message-bubble' : undefined}
+                      radius={!msg.body?.system ? 'lg' : 'sm'}
                       p={isMobile ? 'sm' : 'sm'}
-                      style={isMobile && !msg.body?.system ? {
+                      style={!msg.body?.system ? {
                         alignSelf: msg.senderId === identity.userId ? 'flex-end' : 'flex-start',
-                        maxWidth: '88%',
+                        maxWidth: isMobile ? '88%' : '76%',
                         background: msg.senderId === identity.userId
                           ? 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.18))'
                           : 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
-                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.08)',
                       } : undefined}
                     >
                       {msg.body?.system ? (
@@ -2327,7 +2365,7 @@ export default function MessengerPage() {
               </ScrollArea>
             </Box>
 
-            <Stack className={isMobile ? 'mobile-composer' : undefined} gap={6} mt="auto">
+            <Stack className={isMobile ? 'mobile-composer' : 'composer-bar'} gap={6} mt="auto">
               {replyTarget && (
                 <Card withBorder radius="sm" p="xs">
                   <Group justify="space-between" wrap="nowrap">
@@ -2418,6 +2456,7 @@ export default function MessengerPage() {
           ))}
         </Group>
       )}
+      </Box>
     </>
   )
 }
