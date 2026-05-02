@@ -65,6 +65,8 @@ export interface EncryptedMessage {
   algorithm: string
   keyId: string
   createdAt: string
+  editedAt?: string
+  deletedAt?: string
   readBy?: string[]
   read?: boolean
 }
@@ -364,6 +366,40 @@ export async function sendEncryptedMessage(input: {
       algorithm: input.algorithm,
       keyId: input.keyId,
     }),
+  })
+  return readJSON(res)
+}
+
+export async function updateEncryptedMessage(input: {
+  roomId: string
+  messageId: string
+  ciphertext: string
+  nonce: string
+  algorithm: string
+  keyId: string
+  token: string
+}): Promise<EncryptedMessage> {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}`, {
+    method: 'PUT',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({
+      ciphertext: input.ciphertext,
+      nonce: input.nonce,
+      algorithm: input.algorithm,
+      keyId: input.keyId,
+    }),
+  })
+  return readJSON(res)
+}
+
+export async function deleteEncryptedMessageForAll(input: {
+  roomId: string
+  messageId: string
+  token: string
+}): Promise<EncryptedMessage> {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}` },
   })
   return readJSON(res)
 }

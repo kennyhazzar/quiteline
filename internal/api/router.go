@@ -140,6 +140,12 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("POST /v1/chat/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
+	mux.HandleFunc("PUT /v1/zk/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
+	mux.HandleFunc("PUT /v1/chat/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
 	mux.HandleFunc("DELETE /v1/zk/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
@@ -636,13 +642,23 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
-	case http.MethodDelete:
-		userID, ok := memberSubroute(tail)
+	case http.MethodPut:
+		messageID, ok := messageSubroute(tail)
 		if !ok {
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
-		handleLeaveRoom(w, r, deps, roomID, userID)
+		handleUpdateEncryptedMessage(w, r, deps, roomID, messageID)
+	case http.MethodDelete:
+		if userID, ok := memberSubroute(tail); ok {
+			handleLeaveRoom(w, r, deps, roomID, userID)
+			return
+		}
+		if messageID, ok := messageSubroute(tail); ok {
+			handleDeleteEncryptedMessage(w, r, deps, roomID, messageID)
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found")
 	default:
 		writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
 	}
@@ -746,6 +762,48 @@ func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 	}
 	deps.Metrics.MessagesPublished.Inc()
 	writeJSON(w, http.StatusAccepted, msg)
+}
+
+func handleUpdateEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, messageID string) {
+	r.Body = http.MaxBytesReader(w, r.Body, deps.Config.MaxMessageBytes)
+	var req encryptedMessageRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+
+	msg, err := deps.ZKStore.UpdateMessage(r.Context(), roomID, messageID, principalFromContext(r.Context()).UserID, zk.EncryptedMessage{
+		RoomID:     roomID,
+		SenderID:   principalFromContext(r.Context()).UserID,
+		Ciphertext: req.Ciphertext,
+		Nonce:      req.Nonce,
+		Algorithm:  req.Algorithm,
+		KeyID:      req.KeyID,
+	})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := deps.Broker.Publish(r.Context(), zk.Envelope(msg, deps.Config.NodeID)); err != nil {
+		deps.Metrics.BrokerPublishErrors.Inc()
+		writeError(w, http.StatusBadGateway, "publish_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, msg)
+}
+
+func handleDeleteEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, messageID string) {
+	msg, err := deps.ZKStore.DeleteMessageForAll(r.Context(), roomID, messageID, principalFromContext(r.Context()).UserID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := deps.Broker.Publish(r.Context(), zk.Envelope(msg, deps.Config.NodeID)); err != nil {
+		deps.Metrics.BrokerPublishErrors.Inc()
+		writeError(w, http.StatusBadGateway, "publish_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, msg)
 }
 
 func handleUploadEncryptedFile(w http.ResponseWriter, r *http.Request, deps Dependencies) {
@@ -866,6 +924,18 @@ func memberSubroute(tail string) (string, bool) {
 	return userID, true
 }
 
+func messageSubroute(tail string) (string, bool) {
+	const prefix = "messages/"
+	if !strings.HasPrefix(tail, prefix) {
+		return "", false
+	}
+	messageID := strings.Trim(strings.TrimPrefix(tail, prefix), "/")
+	if messageID == "" || strings.ContainsAny(messageID, " \t\r\n/") {
+		return "", false
+	}
+	return messageID, true
+}
+
 func decodeJSON(r *http.Request, value any) error {
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
@@ -888,6 +958,8 @@ func writeStoreError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "bad_request")
 	case zk.ErrNotFound:
 		writeError(w, http.StatusNotFound, "not_found")
+	case zk.ErrForbidden:
+		writeError(w, http.StatusForbidden, "forbidden")
 	default:
 		writeError(w, http.StatusInternalServerError, "internal_error")
 	}

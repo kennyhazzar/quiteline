@@ -2,6 +2,7 @@ package zk
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"time"
@@ -74,8 +75,12 @@ CREATE TABLE IF NOT EXISTS messages (
 	nonce      TEXT NOT NULL,
 	algorithm  TEXT NOT NULL,
 	key_id     TEXT NOT NULL,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	edited_at  TIMESTAMPTZ,
+	deleted_at TIMESTAMPTZ
 );
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
+ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS messages_room_created ON messages(room_id, created_at);
 
@@ -367,11 +372,8 @@ func (s *PostgresStore) AppendMessage(ctx context.Context, msg EncryptedMessage)
 	msg.Nonce = strings.TrimSpace(msg.Nonce)
 	msg.Algorithm = strings.TrimSpace(msg.Algorithm)
 	msg.KeyID = strings.TrimSpace(msg.KeyID)
-	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Algorithm == "" {
-		return EncryptedMessage{}, ErrBadRequest
-	}
-	if msg.Nonce == "" && !allowsEmptyNonce(msg.Algorithm) {
-		return EncryptedMessage{}, ErrBadRequest
+	if err := validateMessagePayload(msg); err != nil {
+		return EncryptedMessage{}, err
 	}
 	if msg.ID == "" {
 		msg.ID = newID()
@@ -388,15 +390,89 @@ func (s *PostgresStore) AppendMessage(ctx context.Context, msg EncryptedMessage)
 	}
 
 	var result EncryptedMessage
+	var editedAt, deletedAt sql.NullTime
 	err := s.pool.QueryRow(ctx, `
 		INSERT INTO messages (id, room_id, sender_id, ciphertext, nonce, algorithm, key_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at
+		RETURNING id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at, edited_at, deleted_at
 	`, msg.ID, msg.RoomID, msg.SenderID, msg.Ciphertext, msg.Nonce, msg.Algorithm, msg.KeyID).
 		Scan(&result.ID, &result.RoomID, &result.SenderID,
 			&result.Ciphertext, &result.Nonce, &result.Algorithm, &result.KeyID,
-			&result.CreatedAt)
+			&result.CreatedAt, &editedAt, &deletedAt)
+	assignOptionalMessageTimes(&result, editedAt, deletedAt)
 	return result, err
+}
+
+func (s *PostgresStore) UpdateMessage(ctx context.Context, roomID string, messageID string, userID string, msg EncryptedMessage) (EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	messageID = normalizeID(messageID)
+	userID = normalizeID(userID)
+	msg.RoomID = roomID
+	msg.SenderID = userID
+	msg.Ciphertext = strings.TrimSpace(msg.Ciphertext)
+	msg.Nonce = strings.TrimSpace(msg.Nonce)
+	msg.Algorithm = strings.TrimSpace(msg.Algorithm)
+	msg.KeyID = strings.TrimSpace(msg.KeyID)
+	if messageID == "" {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+	if err := validateMessagePayload(msg); err != nil {
+		return EncryptedMessage{}, err
+	}
+
+	var result EncryptedMessage
+	var editedAt, deletedAt sql.NullTime
+	err := s.pool.QueryRow(ctx, `
+		UPDATE messages
+		SET ciphertext = $4, nonce = $5, algorithm = $6, key_id = $7, edited_at = now()
+		WHERE room_id = $1 AND id = $2 AND sender_id = $3 AND deleted_at IS NULL
+		RETURNING id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at, edited_at, deleted_at
+	`, roomID, messageID, userID, msg.Ciphertext, msg.Nonce, msg.Algorithm, msg.KeyID).
+		Scan(&result.ID, &result.RoomID, &result.SenderID,
+			&result.Ciphertext, &result.Nonce, &result.Algorithm, &result.KeyID,
+			&result.CreatedAt, &editedAt, &deletedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return EncryptedMessage{}, ErrNotFound
+	}
+	assignOptionalMessageTimes(&result, editedAt, deletedAt)
+	return result, err
+}
+
+func (s *PostgresStore) DeleteMessageForAll(ctx context.Context, roomID string, messageID string, userID string) (EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	messageID = normalizeID(messageID)
+	userID = normalizeID(userID)
+	if roomID == "" || messageID == "" || userID == "" {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+
+	var result EncryptedMessage
+	var editedAt, deletedAt sql.NullTime
+	err := s.pool.QueryRow(ctx, `
+		UPDATE messages
+		SET deleted_at = now()
+		WHERE room_id = $1 AND id = $2 AND sender_id = $3
+		RETURNING id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at, edited_at, deleted_at
+	`, roomID, messageID, userID).
+		Scan(&result.ID, &result.RoomID, &result.SenderID,
+			&result.Ciphertext, &result.Nonce, &result.Algorithm, &result.KeyID,
+			&result.CreatedAt, &editedAt, &deletedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return EncryptedMessage{}, ErrNotFound
+	}
+	assignOptionalMessageTimes(&result, editedAt, deletedAt)
+	return result, err
+}
+
+func assignOptionalMessageTimes(msg *EncryptedMessage, editedAt sql.NullTime, deletedAt sql.NullTime) {
+	if editedAt.Valid {
+		value := editedAt.Time
+		msg.EditedAt = &value
+	}
+	if deletedAt.Valid {
+		value := deletedAt.Time
+		msg.DeletedAt = &value
+	}
 }
 
 func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error) {
@@ -407,12 +483,12 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 
 	rows, err := s.pool.Query(ctx, `
 		WITH recent AS (
-			SELECT id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at
+			SELECT id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at, edited_at, deleted_at
 			FROM messages WHERE room_id = $1
 			ORDER BY created_at DESC LIMIT $2
 		)
 		SELECT recent.id, recent.room_id, recent.sender_id, recent.ciphertext, recent.nonce,
-		       recent.algorithm, recent.key_id, recent.created_at,
+		       recent.algorithm, recent.key_id, recent.created_at, recent.edited_at, recent.deleted_at,
 		       COALESCE(reads.read_by, '') AS read_by,
 		       COALESCE(reads.read_count, 0) >= GREATEST(member_counts.member_count - 1, 0) AS read
 		FROM recent
@@ -439,13 +515,15 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 	for rows.Next() {
 		var m EncryptedMessage
 		var readByCSV string
+		var editedAt, deletedAt sql.NullTime
 		if err := rows.Scan(
 			&m.ID, &m.RoomID, &m.SenderID,
 			&m.Ciphertext, &m.Nonce, &m.Algorithm, &m.KeyID,
-			&m.CreatedAt, &readByCSV, &m.Read,
+			&m.CreatedAt, &editedAt, &deletedAt, &readByCSV, &m.Read,
 		); err != nil {
 			return nil, err
 		}
+		assignOptionalMessageTimes(&m, editedAt, deletedAt)
 		if readByCSV != "" {
 			m.ReadBy = strings.Split(readByCSV, ",")
 		}

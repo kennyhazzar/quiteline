@@ -17,6 +17,7 @@ import (
 var (
 	ErrNotFound   = errors.New("not found")
 	ErrBadRequest = errors.New("bad request")
+	ErrForbidden  = errors.New("forbidden")
 )
 
 type Identity struct {
@@ -46,16 +47,18 @@ type Friend struct {
 }
 
 type EncryptedMessage struct {
-	ID         string    `json:"id"`
-	RoomID     string    `json:"roomId"`
-	SenderID   string    `json:"senderId"`
-	Ciphertext string    `json:"ciphertext"`
-	Nonce      string    `json:"nonce"`
-	Algorithm  string    `json:"algorithm"`
-	KeyID      string    `json:"keyId"`
-	CreatedAt  time.Time `json:"createdAt"`
-	ReadBy     []string  `json:"readBy,omitempty"`
-	Read       bool      `json:"read,omitempty"`
+	ID         string     `json:"id"`
+	RoomID     string     `json:"roomId"`
+	SenderID   string     `json:"senderId"`
+	Ciphertext string     `json:"ciphertext"`
+	Nonce      string     `json:"nonce"`
+	Algorithm  string     `json:"algorithm"`
+	KeyID      string     `json:"keyId"`
+	CreatedAt  time.Time  `json:"createdAt"`
+	EditedAt   *time.Time `json:"editedAt,omitempty"`
+	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
+	ReadBy     []string   `json:"readBy,omitempty"`
+	Read       bool       `json:"read,omitempty"`
 }
 
 type Store interface {
@@ -68,6 +71,8 @@ type Store interface {
 	ListRooms(ctx context.Context, userID string) ([]Room, error)
 	MarkRoomRead(ctx context.Context, roomID string, userID string) error
 	AppendMessage(ctx context.Context, msg EncryptedMessage) (EncryptedMessage, error)
+	UpdateMessage(ctx context.Context, roomID string, messageID string, userID string, msg EncryptedMessage) (EncryptedMessage, error)
+	DeleteMessageForAll(ctx context.Context, roomID string, messageID string, userID string) (EncryptedMessage, error)
 	ListMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error)
 	ListFriends(ctx context.Context, userID string) ([]Friend, error)
 	RequestFriend(ctx context.Context, fromUserID string, toUserID string) error
@@ -272,10 +277,7 @@ func (s *MemoryStore) AppendMessage(_ context.Context, msg EncryptedMessage) (En
 	msg.Nonce = strings.TrimSpace(msg.Nonce)
 	msg.Algorithm = strings.TrimSpace(msg.Algorithm)
 	msg.KeyID = strings.TrimSpace(msg.KeyID)
-	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Algorithm == "" {
-		return EncryptedMessage{}, ErrBadRequest
-	}
-	if msg.Nonce == "" && !allowsEmptyNonce(msg.Algorithm) {
+	if err := validateMessagePayload(msg); err != nil {
 		return EncryptedMessage{}, ErrBadRequest
 	}
 	if msg.ID == "" {
@@ -292,6 +294,86 @@ func (s *MemoryStore) AppendMessage(_ context.Context, msg EncryptedMessage) (En
 	}
 	s.messages[msg.RoomID] = append(s.messages[msg.RoomID], msg)
 	return msg, nil
+}
+
+func (s *MemoryStore) UpdateMessage(_ context.Context, roomID string, messageID string, userID string, msg EncryptedMessage) (EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	messageID = normalizeID(messageID)
+	userID = normalizeID(userID)
+	msg.RoomID = roomID
+	msg.SenderID = userID
+	msg.Ciphertext = strings.TrimSpace(msg.Ciphertext)
+	msg.Nonce = strings.TrimSpace(msg.Nonce)
+	msg.Algorithm = strings.TrimSpace(msg.Algorithm)
+	msg.KeyID = strings.TrimSpace(msg.KeyID)
+	if messageID == "" {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+	if err := validateMessagePayload(msg); err != nil {
+		return EncryptedMessage{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.messages[roomID] {
+		current := &s.messages[roomID][i]
+		if current.ID != messageID {
+			continue
+		}
+		if current.SenderID != userID {
+			return EncryptedMessage{}, ErrForbidden
+		}
+		if current.DeletedAt != nil {
+			return EncryptedMessage{}, ErrBadRequest
+		}
+		current.Ciphertext = msg.Ciphertext
+		current.Nonce = msg.Nonce
+		current.Algorithm = msg.Algorithm
+		current.KeyID = msg.KeyID
+		now := time.Now().UTC()
+		current.EditedAt = &now
+		result := *current
+		s.decorateReadState(&result)
+		return result, nil
+	}
+	return EncryptedMessage{}, ErrNotFound
+}
+
+func (s *MemoryStore) DeleteMessageForAll(_ context.Context, roomID string, messageID string, userID string) (EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	messageID = normalizeID(messageID)
+	userID = normalizeID(userID)
+	if roomID == "" || messageID == "" || userID == "" {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.messages[roomID] {
+		current := &s.messages[roomID][i]
+		if current.ID != messageID {
+			continue
+		}
+		if current.SenderID != userID {
+			return EncryptedMessage{}, ErrForbidden
+		}
+		now := time.Now().UTC()
+		current.DeletedAt = &now
+		result := *current
+		s.decorateReadState(&result)
+		return result, nil
+	}
+	return EncryptedMessage{}, ErrNotFound
+}
+
+func validateMessagePayload(msg EncryptedMessage) error {
+	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Algorithm == "" {
+		return ErrBadRequest
+	}
+	if msg.Nonce == "" && !allowsEmptyNonce(msg.Algorithm) {
+		return ErrBadRequest
+	}
+	return nil
 }
 
 func allowsEmptyNonce(algorithm string) bool {

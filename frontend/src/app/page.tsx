@@ -8,6 +8,7 @@ import {
   Box,
   Button,
   Card,
+  Checkbox,
   Code,
   CopyButton,
   Divider,
@@ -15,19 +16,21 @@ import {
   FileInput,
   Group,
   Image,
+  Menu,
   Modal,
   PasswordInput,
   ScrollArea,
   SegmentedControl,
   Stack,
   Text,
+  Textarea,
   TextInput,
   Title,
   useMantineColorScheme,
 } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { IconCheck, IconChecks, IconClock, IconCopy, IconDotsVertical, IconDownload, IconKey, IconLink, IconLock, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconUserPlus, IconX } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconClock, IconCopy, IconDotsVertical, IconDownload, IconEdit, IconInfoCircle, IconKey, IconLink, IconLock, IconMessageCircle, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconTrash, IconUserPlus, IconX } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -53,6 +56,8 @@ import {
   revokeOtherAccountSessions,
   sendEncryptedMessage,
   touchIdentity,
+  deleteEncryptedMessageForAll,
+  updateEncryptedMessage,
   uploadAvatar,
   uploadEncryptedFile,
   type AuthSession,
@@ -81,6 +86,8 @@ interface DecryptedMessage {
   senderId: string
   body: PlainMessage | null
   createdAt: string
+  editedAt?: string
+  deletedAt?: string
   readBy?: string[]
   read?: boolean
   status?: 'sending' | 'sent' | 'read' | 'failed'
@@ -93,6 +100,7 @@ interface MessageDraft {
   text: string
   file: File | null
   createdAt: string
+  replyTo?: PlainMessage['replyTo']
 }
 
 type RealtimeEvent =
@@ -107,6 +115,7 @@ type CallState = 'idle' | 'calling' | 'ringing' | 'connected'
 
 const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'
 const SESSION_KEY = 'zk.session.v1'
+const LOCAL_DELETED_MESSAGES_KEY = 'quietline.deletedMessages.v1'
 const MAX_FILE_BYTES = 100 * 1024 * 1024
 
 function accountScopedKey(base: string, accountId: string) {
@@ -138,6 +147,14 @@ function formatLastSeen(value?: string) {
   return new Date(value).toLocaleString()
 }
 
+function messageVersion(msg: EncryptedMessage) {
+  return Date.parse(msg.deletedAt || msg.editedAt || msg.createdAt)
+}
+
+function isPersistedMessageID(messageID: string) {
+  return !messageID.startsWith('local-')
+}
+
 export default function MessengerPage() {
   const queryClient = useQueryClient()
   const { setColorScheme } = useMantineColorScheme()
@@ -165,6 +182,13 @@ export default function MessengerPage() {
   const [avatarVersion, setAvatarVersion] = useState(Date.now())
   const [liveMessages, setLiveMessages] = useState<EncryptedMessage[]>([])
   const [pendingMessages, setPendingMessages] = useState<DecryptedMessage[]>([])
+  const [localDeletedMessageIDs, setLocalDeletedMessageIDs] = useState<Record<string, true>>({})
+  const [replyTarget, setReplyTarget] = useState<DecryptedMessage | null>(null)
+  const [messageInfo, setMessageInfo] = useState<DecryptedMessage | null>(null)
+  const [editTarget, setEditTarget] = useState<DecryptedMessage | null>(null)
+  const [editText, setEditText] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<DecryptedMessage | null>(null)
+  const [deleteForEveryone, setDeleteForEveryone] = useState(false)
   const [typingUsers, setTypingUsers] = useState<Record<string, { displayName: string; until: number }>>({})
   const [presence, setPresence] = useState<Record<string, { displayName: string; status: 'online' | 'offline'; lastSeenAt: string }>>({})
   const [callState, setCallState] = useState<CallState>('idle')
@@ -325,9 +349,11 @@ export default function MessengerPage() {
   function loadAccountLocalState(target: AuthSession) {
     const accountId = accountStorageID(target)
     const savedSecrets = accountId ? readStoredJSON<Record<string, string>>(accountScopedKey(ROOM_SECRETS_KEY, accountId)) : null
+    const deletedMessages = accountId ? readStoredJSON<Record<string, true>>(accountScopedKey(LOCAL_DELETED_MESSAGES_KEY, accountId)) : null
 
     setIdentity(null)
     setRoomSecrets(savedSecrets ?? {})
+    setLocalDeletedMessageIDs(deletedMessages ?? {})
     setActiveRoomID('')
     setLiveMessages([])
     setPendingMessages([])
@@ -348,6 +374,7 @@ export default function MessengerPage() {
   function clearAccountLocalState() {
     setIdentity(null)
     setRoomSecrets({})
+    setLocalDeletedMessageIDs({})
     setActiveRoomID('')
     setLiveMessages([])
     setPendingMessages([])
@@ -363,6 +390,12 @@ export default function MessengerPage() {
     setRoomSecrets(nextSecrets)
     const accountId = accountStorageID()
     if (accountId) localStorage.setItem(accountScopedKey(ROOM_SECRETS_KEY, accountId), JSON.stringify(nextSecrets))
+  }
+
+  function persistLocalDeletedMessages(nextDeleted: Record<string, true>) {
+    setLocalDeletedMessageIDs(nextDeleted)
+    const accountId = accountStorageID()
+    if (accountId) localStorage.setItem(accountScopedKey(LOCAL_DELETED_MESSAGES_KEY, accountId), JSON.stringify(nextDeleted))
   }
 
   function updateSessionPrincipal(principal: AuthSession['principal']) {
@@ -603,6 +636,7 @@ export default function MessengerPage() {
         senderName: identity.displayName,
         senderAvatarUrl: session.principal.avatarUrl,
         sentAt: draft.createdAt,
+        replyTo: draft.replyTo,
         attachment,
       })
       const message = await sendEncryptedMessage({
@@ -621,6 +655,7 @@ export default function MessengerPage() {
       }
       queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+      setReplyTarget(null)
     },
     onError: (err: Error, draft) => {
       setPendingMessages((prev) => prev.map((item) => (
@@ -630,10 +665,65 @@ export default function MessengerPage() {
     },
   })
 
+  const editMessageMutation = useMutation({
+    mutationFn: async () => {
+      if (!session || !editTarget || !editTarget.body) throw new Error('message_not_ready')
+      const payload = encodePlainMessage({
+        ...editTarget.body,
+        text: editText.trim(),
+      })
+      return updateEncryptedMessage({
+        roomId: editTarget.roomId,
+        messageId: editTarget.id,
+        token: session.accessToken,
+        ...payload,
+      })
+    },
+    onSuccess: (message) => {
+      setLiveMessages((prev) => [...prev, message].slice(-200))
+      setEditTarget(null)
+      setEditText('')
+      queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
+    },
+    onError: (err: Error) => handleRequestError(err, 'Could not edit message'),
+  })
+
+  const deleteMessageMutation = useMutation({
+    mutationFn: async () => {
+      if (!session || !deleteTarget) throw new Error('message_not_ready')
+      if (!deleteForEveryone) {
+        return { localOnly: true as const, message: deleteTarget }
+      }
+      const message = await deleteEncryptedMessageForAll({
+        roomId: deleteTarget.roomId,
+        messageId: deleteTarget.id,
+        token: session.accessToken,
+      })
+      return { localOnly: false as const, message }
+    },
+    onSuccess: ({ localOnly, message }) => {
+      if (localOnly) {
+        persistLocalDeletedMessages({ ...localDeletedMessageIDs, [message.id]: true })
+      } else {
+        setLiveMessages((prev) => [...prev, message].slice(-200))
+        queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
+      }
+      setDeleteTarget(null)
+      setDeleteForEveryone(false)
+    },
+    onError: (err: Error) => handleRequestError(err, 'Could not delete message'),
+  })
+
   const encryptedMessages = useMemo(() => {
     const byID = new Map<string, EncryptedMessage>()
-    for (const msg of liveMessages) byID.set(msg.id, msg)
-    for (const msg of history.data?.messages ?? []) byID.set(msg.id, msg)
+    const put = (msg: EncryptedMessage) => {
+      const current = byID.get(msg.id)
+      if (!current || messageVersion(msg) > messageVersion(current) || (messageVersion(msg) === messageVersion(current) && Boolean(msg.read) && !current.read)) {
+        byID.set(msg.id, msg)
+      }
+    }
+    for (const msg of history.data?.messages ?? []) put(msg)
+    for (const msg of liveMessages) put(msg)
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   }, [history.data?.messages, liveMessages])
 
@@ -656,6 +746,8 @@ export default function MessengerPage() {
                 algorithm: msg.algorithm,
               }),
               createdAt: msg.createdAt,
+              editedAt: msg.editedAt,
+              deletedAt: msg.deletedAt,
               readBy: msg.readBy ?? [],
               read: Boolean(msg.read),
               status,
@@ -667,6 +759,8 @@ export default function MessengerPage() {
               senderId: msg.senderId,
               body: null,
               createdAt: msg.createdAt,
+              editedAt: msg.editedAt,
+              deletedAt: msg.deletedAt,
               readBy: msg.readBy ?? [],
               read: Boolean(msg.read),
               status,
@@ -686,11 +780,13 @@ export default function MessengerPage() {
   const displayMessages = useMemo(() => {
     const byID = new Map<string, DecryptedMessage>()
     for (const msg of pendingMessages) {
-      if (msg.roomId === activeRoomID) byID.set(msg.id, msg)
+      if (msg.roomId === activeRoomID && !localDeletedMessageIDs[msg.id]) byID.set(msg.id, msg)
     }
-    for (const msg of decryptedMessages) byID.set(msg.id, msg)
+    for (const msg of decryptedMessages) {
+      if (!localDeletedMessageIDs[msg.id]) byID.set(msg.id, msg)
+    }
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  }, [activeRoomID, decryptedMessages, pendingMessages])
+  }, [activeRoomID, decryptedMessages, localDeletedMessageIDs, pendingMessages])
 
   useEffect(() => {
     const viewport = messagesViewportRef.current
@@ -901,6 +997,7 @@ export default function MessengerPage() {
       text,
       file: selectedFile,
       createdAt: new Date().toISOString(),
+      replyTo: replyTarget ? messageReplyPreview(replyTarget) : undefined,
     }
     const attachment = selectedFile
       ? {
@@ -922,6 +1019,7 @@ export default function MessengerPage() {
         senderName: identity.displayName,
         senderAvatarUrl: session?.principal.avatarUrl,
         sentAt: draft.createdAt,
+        replyTo: draft.replyTo,
         attachment,
       },
       createdAt: draft.createdAt,
@@ -929,6 +1027,7 @@ export default function MessengerPage() {
     }])
     setMessageText('')
     setSelectedFile(null)
+    setReplyTarget(null)
     sendMutation.mutate(draft)
   }
 
@@ -969,6 +1068,31 @@ export default function MessengerPage() {
     if (msg.status === 'failed') return <IconX size={15} stroke={1.8} aria-label="failed" />
     if (msg.status === 'read' || msg.read) return <IconChecks size={16} stroke={1.8} aria-label="read" />
     return <IconCheck size={15} stroke={1.8} aria-label="sent" />
+  }
+
+  function messageReplyPreview(msg: DecryptedMessage): PlainMessage['replyTo'] {
+    const text = msg.body?.text || msg.body?.attachment?.name || 'Message'
+    return {
+      id: msg.id,
+      senderName: msg.body?.senderName ?? msg.senderId,
+      text: text.length > 120 ? `${text.slice(0, 117)}...` : text,
+    }
+  }
+
+  function openEditMessage(msg: DecryptedMessage) {
+    setEditTarget(msg)
+    setEditText(msg.body?.text ?? '')
+  }
+
+  function openDeleteMessage(msg: DecryptedMessage) {
+    setDeleteTarget(msg)
+    setDeleteForEveryone(false)
+  }
+
+  function copyMessageText(msg: DecryptedMessage) {
+    const text = msg.body?.text || msg.body?.attachment?.name || ''
+    if (!text) return
+    navigator.clipboard.writeText(text).catch(() => undefined)
   }
 
   async function previewAttachment(msg: DecryptedMessage) {
@@ -1193,6 +1317,50 @@ export default function MessengerPage() {
             <Code block style={{ maxHeight: 160, overflow: 'auto' }}>{profileUser.identityPublicKey}</Code>
           </Stack>
         )}
+      </Modal>
+      <Modal opened={Boolean(messageInfo)} onClose={() => setMessageInfo(null)} title="Message info" centered>
+        {messageInfo && (
+          <Stack gap="xs">
+            <Text size="sm" fw={700}>{messageInfo.body?.senderName ?? messageInfo.senderId}</Text>
+            <Text size="sm">Sent: {new Date(messageInfo.createdAt).toLocaleString()}</Text>
+            {messageInfo.editedAt && <Text size="sm">Edited: {new Date(messageInfo.editedAt).toLocaleString()}</Text>}
+            {messageInfo.deletedAt && <Text size="sm">Deleted: {new Date(messageInfo.deletedAt).toLocaleString()}</Text>}
+            <Code block>{messageInfo.id}</Code>
+          </Stack>
+        )}
+      </Modal>
+      <Modal opened={Boolean(editTarget)} onClose={() => setEditTarget(null)} title="Edit message" centered>
+        <Stack gap="sm">
+          <Textarea value={editText} onChange={(event) => setEditText(event.currentTarget.value)} autosize minRows={3} />
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={() => setEditTarget(null)}>{t('cancel')}</Button>
+            <Button
+              onClick={() => editMessageMutation.mutate()}
+              loading={editMessageMutation.isPending}
+              disabled={!editText.trim()}
+            >
+              Save
+            </Button>
+          </Group>
+        </Stack>
+      </Modal>
+      <Modal opened={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title="Delete message" centered>
+        <Stack gap="sm">
+          <Text size="sm">Delete this message?</Text>
+          {identity?.userId === deleteTarget?.senderId && deleteTarget && isPersistedMessageID(deleteTarget.id) && (
+            <Checkbox
+              checked={deleteForEveryone}
+              onChange={(event) => setDeleteForEveryone(event.currentTarget.checked)}
+              label="Delete for everyone"
+            />
+          )}
+          <Group justify="flex-end">
+            <Button variant="subtle" onClick={() => setDeleteTarget(null)}>{t('cancel')}</Button>
+            <Button color="red" onClick={() => deleteMessageMutation.mutate()} loading={deleteMessageMutation.isPending}>
+              Delete
+            </Button>
+          </Group>
+        </Stack>
       </Modal>
       <Modal opened={mobileChatActionsOpened} onClose={() => setMobileChatActionsOpened(false)} title={activeRoom?.name ?? t('chat')} centered>
         {activeRoom && (
@@ -1738,13 +1906,53 @@ export default function MessengerPage() {
                         </Group>
                         <Group gap={4} wrap="nowrap" c="dimmed">
                           <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleTimeString()}</Text>
+                          {msg.editedAt && !msg.deletedAt && <Text size="xs" c="dimmed">edited</Text>}
                           {renderMessageStatus(msg)}
+                          <Menu shadow="md" width={210} position="bottom-end">
+                            <Menu.Target>
+                              <ActionIcon variant="subtle" size="sm" aria-label="Message actions">
+                                <IconDotsVertical size={16} />
+                              </ActionIcon>
+                            </Menu.Target>
+                            <Menu.Dropdown>
+                              {!msg.deletedAt && (
+                                <>
+                                  <Menu.Item leftSection={<IconMessageCircle size={15} />} onClick={() => setReplyTarget(msg)}>
+                                    Reply
+                                  </Menu.Item>
+                                  <Menu.Item leftSection={<IconCopy size={15} />} onClick={() => copyMessageText(msg)}>
+                                    Copy
+                                  </Menu.Item>
+                                </>
+                              )}
+                              {identity?.userId === msg.senderId && !msg.deletedAt && isPersistedMessageID(msg.id) && (
+                                <Menu.Item leftSection={<IconEdit size={15} />} onClick={() => openEditMessage(msg)}>
+                                  Edit
+                                </Menu.Item>
+                              )}
+                              <Menu.Item leftSection={<IconInfoCircle size={15} />} onClick={() => setMessageInfo(msg)}>
+                                Info
+                              </Menu.Item>
+                              <Menu.Divider />
+                              <Menu.Item color="red" leftSection={<IconTrash size={15} />} onClick={() => openDeleteMessage(msg)}>
+                                Delete
+                              </Menu.Item>
+                            </Menu.Dropdown>
+                          </Menu>
                         </Group>
                       </Group>
-                      {msg.failed ? (
+                      {msg.deletedAt ? (
+                        <Text fs="italic" c="dimmed">Message deleted</Text>
+                      ) : msg.failed ? (
                         <Code block>{t('unableToDecrypt')}</Code>
                       ) : (
                         <Stack gap="xs">
+                          {msg.body?.replyTo && (
+                            <Card withBorder radius="sm" p="xs" style={{ borderLeft: '3px solid var(--mantine-color-blue-5)' }}>
+                              <Text size="xs" fw={700}>{msg.body.replyTo.senderName}</Text>
+                              <Text size="xs" c="dimmed" lineClamp={2}>{msg.body.replyTo.text}</Text>
+                            </Card>
+                          )}
                           {msg.body?.text && <Text>{msg.body.text}</Text>}
                           {msg.body?.attachment && (
                             <Card withBorder radius="sm" p="xs">
@@ -1795,6 +2003,19 @@ export default function MessengerPage() {
             </Box>
 
             <Stack gap={6} mt="auto">
+              {replyTarget && (
+                <Card withBorder radius="sm" p="xs">
+                  <Group justify="space-between" wrap="nowrap">
+                    <div style={{ minWidth: 0 }}>
+                      <Text size="xs" fw={700}>Reply to {replyTarget.body?.senderName ?? replyTarget.senderId}</Text>
+                      <Text size="xs" c="dimmed" truncate>{messageReplyPreview(replyTarget)?.text}</Text>
+                    </div>
+                    <ActionIcon variant="subtle" size="sm" onClick={() => setReplyTarget(null)} aria-label="Cancel reply">
+                      <IconX size={14} />
+                    </ActionIcon>
+                  </Group>
+                </Card>
+              )}
               {selectedFile && (
                 <Group gap="xs" wrap="nowrap">
                   <Badge variant="light" color="blue" style={{ maxWidth: '100%' }}>

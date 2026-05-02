@@ -10,6 +10,11 @@ export interface PlainMessage {
   senderName: string
   senderAvatarUrl?: string
   sentAt: string
+  replyTo?: {
+    id: string
+    senderName: string
+    text: string
+  }
   system?: {
     type: 'join' | 'leave'
     text: string
