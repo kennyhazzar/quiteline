@@ -68,6 +68,8 @@ services:
 
   nginx:
     image: nginx:1.27-alpine
+    profiles:
+      - bundled-nginx
     ports:
       - "80:80"
       - "443:443"
@@ -81,6 +83,8 @@ services:
 
   certbot:
     image: certbot/certbot
+    profiles:
+      - bundled-nginx
     volumes:
       - ./deploy/certbot/www:/var/www/certbot
       - ./deploy/certbot/conf:/etc/letsencrypt

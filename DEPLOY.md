@@ -2,7 +2,7 @@
 
 This guide deploys Quietline with Docker Compose, nginx, and Let's Encrypt.
 
-Host ports `3000`, `8080`, `9000`, and `5432` are not published in production. Only nginx uses host ports `80` and `443`; backend services communicate inside the Docker network.
+Host ports `3000`, `8080`, `9000`, and `5432` are not published in production. The bundled nginx is profile-gated. If your server already has nginx on `80`/`443`, use [DEPLOY_CHAT_2VAULT.md](DEPLOY_CHAT_2VAULT.md).
 
 ## 1. DNS
 
@@ -68,13 +68,13 @@ cp deploy/nginx/conf.d/chat.2vault.site.http.conf.example deploy/nginx/conf.d/ch
 Start the stack enough for nginx and ACME challenge:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d postgres redis minio server-a frontend nginx
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod --profile bundled-nginx up -d postgres redis minio server-a frontend nginx
 ```
 
 Check nginx:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod ps
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 ```
 
 ## 5. Issue Let's Encrypt Certificate
@@ -82,7 +82,7 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod ps
 Run certbot:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm certbot certonly \
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod --profile bundled-nginx run --rm certbot certonly \
   --webroot \
   --webroot-path /var/www/certbot \
   -d chat.2vault.site \
@@ -97,7 +97,7 @@ Replace the temporary config with the HTTPS config:
 
 ```bash
 cp deploy/nginx/conf.d/chat.2vault.site.https.conf.example deploy/nginx/conf.d/chat.2vault.site.conf
-docker compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod --profile bundled-nginx restart nginx
 ```
 
 ## 7. Build And Run Production
@@ -105,13 +105,13 @@ docker compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
 Build images:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod build
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod build
 ```
 
 Start everything:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
 The compose file reads `.env.prod` by default through `APP_ENV_FILE`. If you keep the production env under another path, pass it explicitly:
@@ -123,7 +123,7 @@ APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env
 View logs:
 
 ```bash
-docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f server-a frontend nginx
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f server-a frontend
 ```
 
 ## 8. Verify
@@ -155,7 +155,7 @@ Smoke test:
 Add a cron job on the server:
 
 ```bash
-0 3 * * * cd /opt/quietline && docker compose -f docker-compose.prod.yml --env-file .env.prod run --rm certbot renew && docker compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
+0 3 * * * cd /opt/quietline && APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod --profile bundled-nginx run --rm certbot renew && APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod --profile bundled-nginx restart nginx
 ```
 
 ## 10. Updating The App
@@ -165,8 +165,8 @@ Pull and rebuild:
 ```bash
 cd /opt/quietline
 git pull
-docker compose -f docker-compose.prod.yml --env-file .env.prod build
-docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod build
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod up -d
 ```
 
 ## Troubleshooting
