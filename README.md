@@ -365,6 +365,8 @@ Account identity and crypto identity are intentionally separate in this MVP:
 | `POSTGRES_DSN` | empty | Enables Postgres store when set |
 | `BROKER` | `redis` | `redis` or `memory` |
 | `REDIS_ADDR` | `localhost:6379` | Redis address |
+| `REDIS_PASSWORD` | empty | Redis password, if Redis requires auth |
+| `REDIS_DB` | `0` | Redis database number |
 | `REDIS_CHANNEL_PREFIX` | `pubsub` | Redis Pub/Sub prefix |
 | `NODE_ID` | hostname | Server instance id |
 | `WS_CLIENT_BUFFER` | `256` | Per-client outbound queue |

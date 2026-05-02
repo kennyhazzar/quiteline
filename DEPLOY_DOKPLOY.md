@@ -87,6 +87,7 @@ Create Redis in Dokploy:
 
 ```text
 Name: quietline-redis
+Password: optional, but recommended if Dokploy exposes this setting
 ```
 
 Internal address:
@@ -96,6 +97,7 @@ quietline-redis:6379
 ```
 
 If Dokploy gives another internal hostname, use it in `REDIS_ADDR`.
+If Dokploy generates a Redis password, put it into `REDIS_PASSWORD`.
 
 ### S3 / MinIO
 
@@ -186,6 +188,8 @@ POSTGRES_DSN=postgres://quietline:CHANGE_ME_POSTGRES_PASSWORD@quietline-postgres
 
 BROKER=redis
 REDIS_ADDR=quietline-redis:6379
+REDIS_PASSWORD=
+REDIS_DB=0
 REDIS_CHANNEL_PREFIX=quietline
 
 CORS_ALLOWED_ORIGINS=https://chat.2vault.site
