@@ -101,27 +101,26 @@ If Dokploy gives another internal hostname, use it in `REDIS_ADDR`.
 
 Quietline needs S3-compatible storage for encrypted files and avatars.
 
-Option A, recommended inside Dokploy: create a MinIO service.
+Option A, recommended inside Dokploy: create a MinIO compose service from the Dokploy template.
 
 ```text
-Name: quietline-minio
+Service name in compose: minio
 Root user: quietline
 Root password: generate strong password
-Bucket: quietline
-Internal endpoint: quietline-minio:9000
+Bucket used by backend: quietline
+Internal endpoint for backend: minio:9000
 ```
 
-If Dokploy has no one-click MinIO in your installation, create it as a Docker Compose / service from image:
+Use this MinIO environment in the Dokploy compose template:
 
-```text
-Image: minio/minio:RELEASE.2025-04-22T22-12-26Z
-Command: server /data --console-address ":9001"
-Port: 9000 internal
-Volume: /data
-Environment:
+```env
 MINIO_ROOT_USER=quietline
-MINIO_ROOT_PASSWORD=GENERATE_STRONG_PASSWORD
+MINIO_ROOT_PASSWORD=CHANGE_ME_MINIO_PASSWORD
+MINIO_BROWSER_REDIRECT_URL=https://minio.2vault.site
 ```
+
+If you expose the MinIO console, use a separate domain like `minio.2vault.site` for port `9001`.
+The backend must use the API port `9000`, not the console port.
 
 Option B: use external S3. Then set `S3_ENDPOINT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET`, and `S3_USE_SSL=true` according to the provider.
 
@@ -191,7 +190,7 @@ REDIS_CHANNEL_PREFIX=quietline
 
 CORS_ALLOWED_ORIGINS=https://chat.2vault.site
 
-S3_ENDPOINT=quietline-minio:9000
+S3_ENDPOINT=minio:9000
 S3_ACCESS_KEY=quietline
 S3_SECRET_KEY=CHANGE_ME_MINIO_PASSWORD
 S3_BUCKET=quietline
@@ -209,6 +208,12 @@ Replace:
 - `CHANGE_ME_POSTGRES_PASSWORD`
 - `CHANGE_ME_MINIO_PASSWORD`
 - hostnames if Dokploy generated different service names
+
+If you renamed the MinIO compose service, update `S3_ENDPOINT` accordingly:
+
+```env
+S3_ENDPOINT=YOUR_MINIO_SERVICE_NAME:9000
+```
 
 ## 4. Frontend application
 
@@ -382,7 +387,7 @@ Also verify Dokploy/Traefik has WebSocket upgrade enabled for the backend route.
 Check backend can reach S3/MinIO:
 
 ```env
-S3_ENDPOINT=quietline-minio:9000
+S3_ENDPOINT=minio:9000
 S3_ACCESS_KEY=quietline
 S3_SECRET_KEY=...
 S3_BUCKET=quietline
