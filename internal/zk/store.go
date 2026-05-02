@@ -54,6 +54,8 @@ type EncryptedMessage struct {
 	Algorithm  string    `json:"algorithm"`
 	KeyID      string    `json:"keyId"`
 	CreatedAt  time.Time `json:"createdAt"`
+	ReadBy     []string  `json:"readBy,omitempty"`
+	Read       bool      `json:"read,omitempty"`
 }
 
 type Store interface {
@@ -321,7 +323,31 @@ func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int) 
 	}
 	result := make([]EncryptedMessage, len(messages))
 	copy(result, messages)
+	for i := range result {
+		s.decorateReadState(&result[i])
+	}
 	return result, nil
+}
+
+func (s *MemoryStore) decorateReadState(msg *EncryptedMessage) {
+	room, ok := s.rooms[msg.RoomID]
+	if !ok {
+		return
+	}
+	reads := s.roomReads[msg.RoomID]
+	readBy := make([]string, 0, len(room.Members))
+	for _, memberID := range room.Members {
+		memberID = normalizeID(memberID)
+		if memberID == "" || memberID == msg.SenderID {
+			continue
+		}
+		if readAt, ok := reads[memberID]; ok && !readAt.Before(msg.CreatedAt) {
+			readBy = append(readBy, memberID)
+		}
+	}
+	sort.Strings(readBy)
+	msg.ReadBy = readBy
+	msg.Read = len(readBy) >= max(len(room.Members)-1, 0)
 }
 
 func (s *MemoryStore) ListFriends(_ context.Context, userID string) ([]Friend, error) {

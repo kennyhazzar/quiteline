@@ -403,12 +403,29 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 	}
 
 	rows, err := s.pool.Query(ctx, `
-		SELECT id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at FROM (
+		WITH recent AS (
 			SELECT id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at
 			FROM messages WHERE room_id = $1
 			ORDER BY created_at DESC LIMIT $2
-		) recent
-		ORDER BY created_at ASC
+		)
+		SELECT recent.id, recent.room_id, recent.sender_id, recent.ciphertext, recent.nonce,
+		       recent.algorithm, recent.key_id, recent.created_at,
+		       COALESCE(reads.read_by, '') AS read_by,
+		       COALESCE(reads.read_count, 0) >= GREATEST(member_counts.member_count - 1, 0) AS read
+		FROM recent
+		LEFT JOIN LATERAL (
+			SELECT string_agg(rr.user_id, ',' ORDER BY rr.user_id) AS read_by,
+			       COUNT(*) AS read_count
+			FROM room_members rm
+			JOIN room_reads rr ON rr.room_id = recent.room_id AND rr.user_id = rm.user_id
+			WHERE rm.room_id = recent.room_id
+			  AND rm.user_id <> recent.sender_id
+			  AND rr.last_read_at >= recent.created_at
+		) reads ON true
+		LEFT JOIN LATERAL (
+			SELECT COUNT(*) AS member_count FROM room_members WHERE room_id = recent.room_id
+		) member_counts ON true
+		ORDER BY recent.created_at ASC
 	`, roomID, limit)
 	if err != nil {
 		return nil, err
@@ -418,12 +435,16 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 	msgs := []EncryptedMessage{}
 	for rows.Next() {
 		var m EncryptedMessage
+		var readByCSV string
 		if err := rows.Scan(
 			&m.ID, &m.RoomID, &m.SenderID,
 			&m.Ciphertext, &m.Nonce, &m.Algorithm, &m.KeyID,
-			&m.CreatedAt,
+			&m.CreatedAt, &readByCSV, &m.Read,
 		); err != nil {
 			return nil, err
+		}
+		if readByCSV != "" {
+			m.ReadBy = strings.Split(readByCSV, ",")
 		}
 		msgs = append(msgs, m)
 	}

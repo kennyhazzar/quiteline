@@ -65,6 +65,8 @@ export interface EncryptedMessage {
   algorithm: string
   keyId: string
   createdAt: string
+  readBy?: string[]
+  read?: boolean
 }
 
 export interface MessageEnvelope {

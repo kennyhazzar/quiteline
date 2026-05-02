@@ -27,7 +27,7 @@ import {
 } from '@mantine/core'
 import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { IconCopy, IconDotsVertical, IconDownload, IconKey, IconLink, IconLock, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconUserPlus, IconX } from '@tabler/icons-react'
+import { IconCheck, IconChecks, IconClock, IconCopy, IconDotsVertical, IconDownload, IconKey, IconLink, IconLock, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconUserPlus, IconX } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -77,10 +77,22 @@ import {
 
 interface DecryptedMessage {
   id: string
+  roomId: string
   senderId: string
   body: PlainMessage | null
   createdAt: string
+  readBy?: string[]
+  read?: boolean
+  status?: 'sending' | 'sent' | 'read' | 'failed'
   failed?: boolean
+}
+
+interface MessageDraft {
+  clientId: string
+  roomId: string
+  text: string
+  file: File | null
+  createdAt: string
 }
 
 type RealtimeEvent =
@@ -152,6 +164,7 @@ export default function MessengerPage() {
   const [previews, setPreviews] = useState<Record<string, string>>({})
   const [avatarVersion, setAvatarVersion] = useState(Date.now())
   const [liveMessages, setLiveMessages] = useState<EncryptedMessage[]>([])
+  const [pendingMessages, setPendingMessages] = useState<DecryptedMessage[]>([])
   const [typingUsers, setTypingUsers] = useState<Record<string, { displayName: string; until: number }>>({})
   const [presence, setPresence] = useState<Record<string, { displayName: string; status: 'online' | 'offline'; lastSeenAt: string }>>({})
   const [callState, setCallState] = useState<CallState>('idle')
@@ -317,6 +330,7 @@ export default function MessengerPage() {
     setRoomSecrets(savedSecrets ?? {})
     setActiveRoomID('')
     setLiveMessages([])
+    setPendingMessages([])
     setTypingUsers({})
     setPresence({})
     setMobileChatActionsOpened(false)
@@ -336,6 +350,7 @@ export default function MessengerPage() {
     setRoomSecrets({})
     setActiveRoomID('')
     setLiveMessages([])
+    setPendingMessages([])
     setTypingUsers({})
     setPresence({})
     setMobileView('rooms')
@@ -568,50 +583,57 @@ export default function MessengerPage() {
   })
 
   const sendMutation = useMutation({
-    mutationFn: async () => {
-      if (!identity || !session || !activeRoomID) throw new Error('room_not_ready')
+    mutationFn: async (draft: MessageDraft) => {
+      if (!identity || !session) throw new Error('room_not_ready')
       let attachment: PlainMessage['attachment']
-      if (selectedFile) {
-        const uploaded = await uploadEncryptedFile({ token: session.accessToken, blob: selectedFile })
+      if (draft.file) {
+        const uploaded = await uploadEncryptedFile({ token: session.accessToken, blob: draft.file })
         attachment = {
           fileId: uploaded.fileId,
-          name: selectedFile.name,
-          type: selectedFile.type,
-          size: selectedFile.size,
+          name: draft.file.name,
+          type: draft.file.type,
+          size: draft.file.size,
           ciphertextSize: uploaded.size,
           nonce: '',
           algorithm: PLAIN_FILE_ALGORITHM,
         }
       }
       const payload = encodePlainMessage({
-        text: messageText,
+        text: draft.text,
         senderName: identity.displayName,
         senderAvatarUrl: session.principal.avatarUrl,
-        sentAt: new Date().toISOString(),
+        sentAt: draft.createdAt,
         attachment,
       })
-      return sendEncryptedMessage({
-        roomId: activeRoomID,
+      const message = await sendEncryptedMessage({
+        roomId: draft.roomId,
         senderId: identity.userId,
         token: session.accessToken,
         ...payload,
       })
+      return { clientId: draft.clientId, message }
     },
-    onSuccess: () => {
-      setMessageText('')
-      setSelectedFile(null)
+    onSuccess: ({ clientId, message }) => {
+      setPendingMessages((prev) => prev.filter((item) => item.id !== clientId))
+      setLiveMessages((prev) => [...prev, message].slice(-200))
       if (identity) {
         sendRealtime({ kind: 'typing', userId: identity.userId, displayName: identity.displayName, typing: false, at: new Date().toISOString() })
       }
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', activeRoomID] })
+      queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
     },
-    onError: (err: Error) => handleRequestError(err, t('sendFailed')),
+    onError: (err: Error, draft) => {
+      setPendingMessages((prev) => prev.map((item) => (
+        item.id === draft.clientId ? { ...item, status: 'failed' } : item
+      )))
+      handleRequestError(err, t('sendFailed'))
+    },
   })
 
   const encryptedMessages = useMemo(() => {
     const byID = new Map<string, EncryptedMessage>()
-    for (const msg of history.data?.messages ?? []) byID.set(msg.id, msg)
     for (const msg of liveMessages) byID.set(msg.id, msg)
+    for (const msg of history.data?.messages ?? []) byID.set(msg.id, msg)
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   }, [history.data?.messages, liveMessages])
 
@@ -621,9 +643,11 @@ export default function MessengerPage() {
     async function run() {
       const next = await Promise.all(
         encryptedMessages.map(async (msg) => {
+          const status: DecryptedMessage['status'] = msg.senderId === identity?.userId ? (msg.read ? 'read' : 'sent') : undefined
           try {
             return {
               id: msg.id,
+              roomId: msg.roomId,
               senderId: msg.senderId,
               body: await decodeMessagePayload({
                 roomSecret: activeSecret,
@@ -632,9 +656,22 @@ export default function MessengerPage() {
                 algorithm: msg.algorithm,
               }),
               createdAt: msg.createdAt,
+              readBy: msg.readBy ?? [],
+              read: Boolean(msg.read),
+              status,
             }
           } catch {
-            return { id: msg.id, senderId: msg.senderId, body: null, createdAt: msg.createdAt, failed: true }
+            return {
+              id: msg.id,
+              roomId: msg.roomId,
+              senderId: msg.senderId,
+              body: null,
+              createdAt: msg.createdAt,
+              readBy: msg.readBy ?? [],
+              read: Boolean(msg.read),
+              status,
+              failed: true,
+            }
           }
         }),
       )
@@ -644,7 +681,16 @@ export default function MessengerPage() {
     return () => {
       cancelled = true
     }
-  }, [activeSecret, encryptedMessages])
+  }, [activeSecret, encryptedMessages, identity?.userId])
+
+  const displayMessages = useMemo(() => {
+    const byID = new Map<string, DecryptedMessage>()
+    for (const msg of pendingMessages) {
+      if (msg.roomId === activeRoomID) byID.set(msg.id, msg)
+    }
+    for (const msg of decryptedMessages) byID.set(msg.id, msg)
+    return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  }, [activeRoomID, decryptedMessages, pendingMessages])
 
   useEffect(() => {
     const viewport = messagesViewportRef.current
@@ -652,7 +698,7 @@ export default function MessengerPage() {
     window.requestAnimationFrame(() => {
       viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
     })
-  }, [activeRoomID, decryptedMessages.length])
+  }, [activeRoomID, displayMessages.length])
 
   useEffect(() => {
     if (!session || !activeRoomID) return
@@ -660,7 +706,10 @@ export default function MessengerPage() {
     if (lastSeenLength === decryptedMessages.length) return
     readMarksRef.current[activeRoomID] = decryptedMessages.length
     markRoomRead({ token: session.accessToken, roomId: activeRoomID })
-      .then(() => queryClient.invalidateQueries({ queryKey: ['chat-rooms'] }))
+      .then(() => {
+        queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+        queryClient.invalidateQueries({ queryKey: ['chat-messages', activeRoomID] })
+      })
       .catch((err: Error) => {
         if (err instanceof AuthError) handleAuthExpired()
       })
@@ -707,6 +756,7 @@ export default function MessengerPage() {
     if (!session) return
     wsRef.current?.close()
     setLiveMessages([])
+    setPendingMessages([])
     const url = new URL(`${WS_BASE}/ws`)
     url.searchParams.set('topics', `room:${roomID}`)
     url.searchParams.set('token', session.accessToken)
@@ -742,6 +792,7 @@ export default function MessengerPage() {
 
   function selectRoom(room: Room) {
     setActiveRoomID(room.roomId)
+    setPendingMessages([])
     requestNotifications()
     if (isMobile) setMobileView('chat')
     else setSidebarView('chat')
@@ -776,6 +827,7 @@ export default function MessengerPage() {
       delete nextSecrets[activeRoomID]
       persistRoomSecrets(nextSecrets)
       setActiveRoomID('')
+      setPendingMessages([])
       setMobileView('rooms')
       setSidebarView('rooms')
       setMobileChatActionsOpened(false)
@@ -795,6 +847,7 @@ export default function MessengerPage() {
   function closeChat() {
     setMobileChatActionsOpened(false)
     setActiveRoomID('')
+    setPendingMessages([])
     setMobileView('rooms')
     setSidebarView('rooms')
   }
@@ -836,12 +889,47 @@ export default function MessengerPage() {
   }
 
   function submitMessage() {
-    if ((!messageText.trim() && !selectedFile) || !activeRoomID || sendMutation.isPending) return
+    const text = messageText.trim()
+    if ((!text && !selectedFile) || !activeRoomID || sendMutation.isPending || !identity) return
     if (selectedFile && selectedFile.size > MAX_FILE_BYTES) {
       notifications.show({ title: t('fileTooLarge'), message: t('fileTooLargeMessage'), color: 'red' })
       return
     }
-    sendMutation.mutate()
+    const draft: MessageDraft = {
+      clientId: `local-${crypto.randomUUID()}`,
+      roomId: activeRoomID,
+      text,
+      file: selectedFile,
+      createdAt: new Date().toISOString(),
+    }
+    const attachment = selectedFile
+      ? {
+          fileId: '',
+          name: selectedFile.name,
+          type: selectedFile.type,
+          size: selectedFile.size,
+          ciphertextSize: selectedFile.size,
+          nonce: '',
+          algorithm: PLAIN_FILE_ALGORITHM,
+        }
+      : undefined
+    setPendingMessages((prev) => [...prev, {
+      id: draft.clientId,
+      roomId: draft.roomId,
+      senderId: identity.userId,
+      body: {
+        text,
+        senderName: identity.displayName,
+        senderAvatarUrl: session?.principal.avatarUrl,
+        sentAt: draft.createdAt,
+        attachment,
+      },
+      createdAt: draft.createdAt,
+      status: 'sending',
+    }])
+    setMessageText('')
+    setSelectedFile(null)
+    sendMutation.mutate(draft)
   }
 
   function updateMessageText(value: string) {
@@ -873,6 +961,14 @@ export default function MessengerPage() {
       return
     }
     setSelectedFile(file)
+  }
+
+  function renderMessageStatus(msg: DecryptedMessage) {
+    if (!identity || msg.senderId !== identity.userId || msg.body?.system) return null
+    if (msg.status === 'sending') return <IconClock size={15} stroke={1.8} aria-label="sending" />
+    if (msg.status === 'failed') return <IconX size={15} stroke={1.8} aria-label="failed" />
+    if (msg.status === 'read' || msg.read) return <IconChecks size={16} stroke={1.8} aria-label="read" />
+    return <IconCheck size={15} stroke={1.8} aria-label="sent" />
   }
 
   async function previewAttachment(msg: DecryptedMessage) {
@@ -1597,7 +1693,7 @@ export default function MessengerPage() {
               </Text>
             </Box>}
 
-            {!activeSecret && decryptedMessages.some((msg) => msg.failed) && (
+            {!activeSecret && displayMessages.some((msg) => msg.failed) && (
               <Alert color="yellow" title={t('roomSecretRequired')}>
                 <Group align="flex-end" mt="xs" wrap={isMobile ? 'wrap' : 'nowrap'}>
                   <PasswordInput
@@ -1616,7 +1712,7 @@ export default function MessengerPage() {
             <Box style={{ flex: 1, minHeight: 0 }}>
               <ScrollArea h="100%" type="auto" offsetScrollbars viewportRef={messagesViewportRef}>
                 <Stack gap="xs" pr="sm">
-                  {decryptedMessages.map((msg) => (
+                  {displayMessages.map((msg) => (
                     <Card key={msg.id} withBorder radius="sm" p="sm">
                       {msg.body?.system ? (
                         <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
@@ -1640,7 +1736,10 @@ export default function MessengerPage() {
                           />
                           <Text size="sm" fw={700} truncate>{msg.body?.senderName ?? msg.senderId}</Text>
                         </Group>
-                        <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleTimeString()}</Text>
+                        <Group gap={4} wrap="nowrap" c="dimmed">
+                          <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleTimeString()}</Text>
+                          {renderMessageStatus(msg)}
+                        </Group>
                       </Group>
                       {msg.failed ? (
                         <Code block>{t('unableToDecrypt')}</Code>
@@ -1688,7 +1787,7 @@ export default function MessengerPage() {
                       )}
                     </Card>
                   ))}
-                  {decryptedMessages.length === 0 && (
+                  {displayMessages.length === 0 && (
                     <Text c="dimmed" ta="center" mt="xl">{t('noMessages')}</Text>
                   )}
                 </Stack>
