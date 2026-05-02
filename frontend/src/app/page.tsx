@@ -32,6 +32,7 @@ import { useMediaQuery } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
 import { IconCheck, IconChecks, IconClock, IconCopy, IconDotsVertical, IconDownload, IconEdit, IconInfoCircle, IconKey, IconLink, IconLock, IconMessageCircle, IconPaperclip, IconPhone, IconPhoneOff, IconPlus, IconRefresh, IconSend, IconTrash, IconUserPlus, IconX } from '@tabler/icons-react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import QRCode from 'qrcode'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   absoluteAvatarUrl,
@@ -204,6 +205,7 @@ export default function MessengerPage() {
   const [roomSearch, setRoomSearch] = useState('')
   const [messageSearch, setMessageSearch] = useState('')
   const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauthUrl: string } | null>(null)
+  const [totpQRCode, setTotpQRCode] = useState('')
   const [totpConfirmCode, setTotpConfirmCode] = useState('')
   const [totpDisablePassword, setTotpDisablePassword] = useState('')
   const [totpDisableCode, setTotpDisableCode] = useState('')
@@ -313,6 +315,34 @@ export default function MessengerPage() {
       .map(([, value]) => value.displayName),
     [identity?.userId, typingUsers],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    if (!totpSetup?.otpauthUrl) {
+      setTotpQRCode('')
+      return
+    }
+
+    QRCode.toDataURL(totpSetup.otpauthUrl, {
+      errorCorrectionLevel: 'M',
+      margin: 1,
+      width: 184,
+      color: {
+        dark: '#111827',
+        light: '#ffffff',
+      },
+    })
+      .then((url) => {
+        if (!cancelled) setTotpQRCode(url)
+      })
+      .catch(() => {
+        if (!cancelled) setTotpQRCode('')
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [totpSetup?.otpauthUrl])
 
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -1758,8 +1788,18 @@ export default function MessengerPage() {
                 {totpSetup && (
                   <Stack gap="xs">
                     <Text size="xs" c="dimmed">Add this key in your authenticator app, then enter the 6-digit code.</Text>
+                    {totpQRCode ? (
+                      <Box
+                        p="xs"
+                        bg="white"
+                        style={{ borderRadius: 8, border: '1px solid var(--mantine-color-gray-3)', width: 'fit-content' }}
+                      >
+                        <Image src={totpQRCode} alt="2FA QR code" w={184} h={184} fit="contain" />
+                      </Box>
+                    ) : (
+                      <Text size="xs" c="dimmed">QR code is being generated...</Text>
+                    )}
                     <Code block>{totpSetup.secret}</Code>
-                    <Code block style={{ maxHeight: 88, overflow: 'auto' }}>{totpSetup.otpauthUrl}</Code>
                     <TextInput
                       label="Code"
                       value={totpConfirmCode}
