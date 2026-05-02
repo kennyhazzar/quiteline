@@ -1536,6 +1536,13 @@ export default function MessengerPage() {
                 )}
               </CopyButton>
             </Group>
+            {isMobile && (
+              <TextInput
+                placeholder="Search messages"
+                value={messageSearch}
+                onChange={(event) => setMessageSearch(event.currentTarget.value)}
+              />
+            )}
             {!isMobile && memberIdentities.data && memberIdentities.data.length > 0 && (
               <Group gap={6}>
                 {peers.map((member) => {
@@ -1614,7 +1621,8 @@ export default function MessengerPage() {
       {isMobile && (
         <SegmentedControl
           fullWidth
-          mb="sm"
+          size="xs"
+          mb={6}
           value={mobileView}
           onChange={(value) => setMobileView(value as 'chat' | 'rooms' | 'profile')}
           data={[
@@ -2000,14 +2008,14 @@ export default function MessengerPage() {
       <Card
         withBorder
         radius="sm"
-        p={isMobile ? 'sm' : 'md'}
+        p={isMobile ? 'xs' : 'md'}
         style={{
           display: !isMobile || mobileView === 'chat' ? 'flex' : 'none',
           flex: 1,
           width: isMobile ? '100%' : undefined,
           minWidth: 0,
-          height: isMobile ? 'calc(100dvh - 132px)' : undefined,
-          maxHeight: isMobile ? 'calc(100dvh - 132px)' : undefined,
+          height: isMobile ? 'calc(100dvh - 96px)' : undefined,
+          maxHeight: isMobile ? 'calc(100dvh - 96px)' : undefined,
           minHeight: isMobile ? 0 : 0,
         }}
       >
@@ -2021,10 +2029,14 @@ export default function MessengerPage() {
             )}
           </Stack>
         ) : (
-          <Stack h="100%" style={{ flex: 1, minHeight: 0 }}>
-            <Group justify="space-between" align="flex-start" wrap="nowrap">
+          <Stack h="100%" gap={isMobile ? 6 : 'md'} style={{ flex: 1, minHeight: 0 }}>
+            <Group justify="space-between" align={isMobile ? 'center' : 'flex-start'} wrap="nowrap">
               <div style={{ minWidth: 0, flex: 1 }}>
-                <Title order={3}>{activeRoom.name}</Title>
+                {isMobile ? (
+                  <Text fw={800} size="lg" truncate>{activeRoom.name}</Text>
+                ) : (
+                  <Title order={3}>{activeRoom.name}</Title>
+                )}
                 {isMobile ? (
                   <Text size="xs" c="dimmed" truncate>
                     {activeTyping.length > 0 ? `${activeTyping.join(', ')} ${t('typing')}` : ''}
@@ -2094,7 +2106,7 @@ export default function MessengerPage() {
               <Text size="xs" c="dimmed">{t('callStatus')}: {callPeerName || t(callState === 'calling' ? 'calling' : 'connected')}</Text>
             )}
 
-            {memberIdentities.data && memberIdentities.data.length > 0 && (
+            {!isMobile && memberIdentities.data && memberIdentities.data.length > 0 && (
               <Group gap={6}>
                 {peers.map((member) => {
                   const current = presence[member.userId]
@@ -2134,16 +2146,20 @@ export default function MessengerPage() {
               </Alert>
             )}
 
-            <Divider />
-            <TextInput
-              placeholder="Search messages"
-              value={messageSearch}
-              onChange={(event) => setMessageSearch(event.currentTarget.value)}
-            />
+            {!isMobile && (
+              <>
+                <Divider />
+                <TextInput
+                  placeholder="Search messages"
+                  value={messageSearch}
+                  onChange={(event) => setMessageSearch(event.currentTarget.value)}
+                />
+              </>
+            )}
 
             <Box style={{ flex: 1, minHeight: 0 }}>
               <ScrollArea h="100%" type="auto" offsetScrollbars viewportRef={messagesViewportRef}>
-                <Stack gap="xs" pr="sm">
+                <Stack gap="xs" pr={isMobile ? 0 : 'sm'}>
                   {visibleMessages.map((msg) => (
                     <Card key={msg.id} withBorder radius="sm" p="sm">
                       {msg.body?.system ? (

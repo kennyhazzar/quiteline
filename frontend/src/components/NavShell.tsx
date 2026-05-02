@@ -17,13 +17,13 @@ export function NavShell({ children, onToggleTheme }: { children: React.ReactNod
 
   return (
     <AppShell padding={compact ? 'xs' : 'md'}>
-      <AppShell.Header h={56} px="md">
+      <AppShell.Header h={compact ? 44 : 56} px={compact ? 'xs' : 'md'}>
         <Group h="100%" justify="space-between" wrap="nowrap">
           <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
-            <IconLockSquareRounded size={22} />
-            <Text fw={700} truncate>Quietline</Text>
+            <IconLockSquareRounded size={compact ? 18 : 22} />
+            <Text fw={700} size={compact ? 'sm' : 'md'} truncate>Quietline</Text>
           </Group>
-          <Group gap="xs" wrap="nowrap">
+          <Group gap={compact ? 4 : 'xs'} wrap="nowrap">
             {!compact && <Badge variant="light" color="green">{t('encryptedBadge')}</Badge>}
             <SegmentedControl
               size="xs"
@@ -40,7 +40,7 @@ export function NavShell({ children, onToggleTheme }: { children: React.ReactNod
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Main pt={72}>{children}</AppShell.Main>
+      <AppShell.Main pt={compact ? 52 : 72}>{children}</AppShell.Main>
     </AppShell>
   )
 }
