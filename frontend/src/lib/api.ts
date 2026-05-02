@@ -28,6 +28,16 @@ export interface AuthSession {
   principal: Principal
 }
 
+export interface AccountSession {
+  sessionId: string
+  userId: string
+  username: string
+  createdAt: string
+  expiresAt: string
+  revokedAt?: string
+  current?: boolean
+}
+
 export interface Room {
   roomId: string
   name: string
@@ -121,6 +131,40 @@ export async function uploadAvatar(input: {
     body: form,
   })
   return readJSON(res)
+}
+
+export async function fetchAccountSessions(token: string): Promise<{ sessions: AccountSession[] }> {
+  const res = await fetch(`${BASE}/v1/me/sessions`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function revokeAccountSession(input: {
+  token: string
+  sessionId: string
+}): Promise<void> {
+  const res = await fetch(`${BASE}/v1/me/sessions/${encodeURIComponent(input.sessionId)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'revoke_failed')
+  }
+}
+
+export async function revokeOtherAccountSessions(token: string): Promise<void> {
+  const res = await fetch(`${BASE}/v1/me/sessions/others`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'revoke_failed')
+  }
 }
 
 export function absoluteAvatarUrl(avatarUrl?: string): string {

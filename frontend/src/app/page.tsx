@@ -33,6 +33,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   absoluteAvatarUrl,
   AuthError,
+  fetchAccountSessions,
   createRoom,
   downloadEncryptedFile,
   fetchIdentity,
@@ -42,12 +43,15 @@ import {
   leaveRoom,
   loginUser,
   registerUser,
+  revokeAccountSession,
+  revokeOtherAccountSessions,
   sendEncryptedMessage,
   touchIdentity,
   uploadAvatar,
   uploadEncryptedFile,
   upsertIdentity,
   type AuthSession,
+  type AccountSession,
   type EncryptedMessage,
   type Identity,
   type MessageEnvelope,
@@ -166,6 +170,13 @@ export default function MessengerPage() {
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
   })
+  const accountSessions = useQuery({
+    queryKey: ['account-sessions', session?.accessToken],
+    queryFn: () => fetchAccountSessions(session?.accessToken ?? ''),
+    enabled: Boolean(session),
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+  })
   const history = useQuery({
     queryKey: ['zk-messages', activeRoomID, session?.accessToken],
     queryFn: () => fetchMessages(activeRoomID, session?.accessToken ?? ''),
@@ -240,9 +251,9 @@ export default function MessengerPage() {
   }, [memberIdentities.data])
 
   useEffect(() => {
-    const error = rooms.error ?? history.error ?? memberIdentities.error
+    const error = rooms.error ?? history.error ?? memberIdentities.error ?? accountSessions.error
     if (error instanceof AuthError) handleAuthExpired()
-  }, [rooms.error, history.error, memberIdentities.error])
+  }, [rooms.error, history.error, memberIdentities.error, accountSessions.error])
 
   function saveSession(next: AuthSession) {
     localStorage.setItem(SESSION_KEY, JSON.stringify(next))
@@ -373,6 +384,31 @@ export default function MessengerPage() {
       notifications.show({ title: t('avatarReady'), message: t('avatarReadyMessage'), color: 'green' })
     },
     onError: (err: Error) => handleRequestError(err, t('avatarFailed')),
+  })
+
+  const revokeSessionMutation = useMutation({
+    mutationFn: async (target: AccountSession) => {
+      if (!session) throw new Error('login_required')
+      await revokeAccountSession({ token: session.accessToken, sessionId: target.sessionId })
+      return target
+    },
+    onSuccess: (target) => {
+      if (target.current) {
+        logoutLocal()
+      } else {
+        accountSessions.refetch()
+      }
+    },
+    onError: (err: Error) => handleRequestError(err, t('sessions')),
+  })
+
+  const revokeOtherSessionsMutation = useMutation({
+    mutationFn: async () => {
+      if (!session) throw new Error('login_required')
+      await revokeOtherAccountSessions(session.accessToken)
+    },
+    onSuccess: () => accountSessions.refetch(),
+    onError: (err: Error) => handleRequestError(err, t('sessions')),
   })
 
   const createRoomMutation = useMutation({
@@ -647,7 +683,7 @@ export default function MessengerPage() {
     setRoomSecret('')
   }
 
-  function logout() {
+  function logoutLocal() {
     if (identity) {
       sendRealtime({ kind: 'presence', userId: identity.userId, displayName: identity.displayName, status: 'offline', lastSeenAt: new Date().toISOString() })
     }
@@ -655,6 +691,15 @@ export default function MessengerPage() {
     setSession(null)
     wsRef.current?.close()
     queryClient.clear()
+  }
+
+  function logout() {
+    const current = accountSessions.data?.sessions.find((item) => item.current)
+    if (current && session) {
+      revokeSessionMutation.mutate(current)
+      return
+    }
+    logoutLocal()
   }
 
   function submitAuth() {
@@ -1057,6 +1102,57 @@ export default function MessengerPage() {
             <CopyButton value={identity.userId}>
               {({ copy }) => <ActionIcon variant="subtle" onClick={copy}><IconCopy size={16} /></ActionIcon>}
             </CopyButton>
+          </Group>
+          <Divider my="sm" />
+          <Group justify="space-between" align="center" mb="xs">
+            <Text fw={700} size="sm">{t('sessions')}</Text>
+            <Button
+              size="xs"
+              variant="subtle"
+              onClick={() => accountSessions.refetch()}
+              loading={accountSessions.isFetching}
+            >
+              {t('refresh')}
+            </Button>
+          </Group>
+          <Stack gap="xs">
+            {(accountSessions.data?.sessions ?? []).map((item) => (
+              <Group key={item.sessionId} justify="space-between" gap="xs" wrap="nowrap">
+                <div style={{ minWidth: 0 }}>
+                  <Text size="xs" fw={item.current ? 700 : 500} truncate>
+                    {item.current ? t('currentSession') : item.sessionId.slice(0, 8)}
+                  </Text>
+                  <Text size="xs" c="dimmed" truncate>
+                    {t('created')}: {formatLastSeen(item.createdAt)}
+                  </Text>
+                </div>
+                <Button
+                  size="xs"
+                  variant="light"
+                  color="red"
+                  onClick={() => revokeSessionMutation.mutate(item)}
+                  loading={revokeSessionMutation.isPending}
+                >
+                  {item.current ? t('logout') : t('revoke')}
+                </Button>
+              </Group>
+            ))}
+            {(accountSessions.data?.sessions ?? []).length === 0 && (
+              <Text size="xs" c="dimmed">{t('noSessions')}</Text>
+            )}
+          </Stack>
+          <Group mt="sm" grow>
+            <Button
+              variant="light"
+              color="red"
+              onClick={() => revokeOtherSessionsMutation.mutate()}
+              loading={revokeOtherSessionsMutation.isPending}
+            >
+              {t('revokeOtherSessions')}
+            </Button>
+            <Button color="red" onClick={logout} loading={revokeSessionMutation.isPending}>
+              {t('logout')}
+            </Button>
           </Group>
         </Card>
 

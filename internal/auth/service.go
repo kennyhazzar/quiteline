@@ -3,9 +3,11 @@ package auth
 import (
 	"context"
 	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -26,13 +28,15 @@ var (
 )
 
 type Service struct {
-	cfg   config.Config
-	users UserStore
+	cfg      config.Config
+	users    UserStore
+	sessions SessionStore
 }
 
 type Principal struct {
 	ClientID    string   `json:"clientId"`
 	UserID      string   `json:"userId,omitempty"`
+	SessionID   string   `json:"sessionId,omitempty"`
 	Username    string   `json:"username,omitempty"`
 	DisplayName string   `json:"displayName,omitempty"`
 	Theme       string   `json:"theme,omitempty"`
@@ -43,6 +47,7 @@ type Principal struct {
 
 type Claims struct {
 	Subject  string   `json:"sub"`
+	Session  string   `json:"sid,omitempty"`
 	Issuer   string   `json:"iss"`
 	Issued   int64    `json:"iat"`
 	Expires  int64    `json:"exp"`
@@ -71,11 +76,35 @@ type UserStore interface {
 	UpdateUserTheme(ctx context.Context, userID string, theme string) (User, error)
 }
 
+type Session struct {
+	SessionID string    `json:"sessionId"`
+	UserID    string    `json:"userId"`
+	Username  string    `json:"username"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+	RevokedAt time.Time `json:"revokedAt,omitempty"`
+	Current   bool      `json:"current,omitempty"`
+}
+
+type SessionStore interface {
+	CreateSession(ctx context.Context, session Session) (Session, error)
+	GetSession(ctx context.Context, sessionID string) (Session, error)
+	ListSessions(ctx context.Context, userID string) ([]Session, error)
+	RevokeSession(ctx context.Context, userID string, sessionID string) error
+	RevokeOtherSessions(ctx context.Context, userID string, keepSessionID string) error
+}
+
 func NewService(cfg config.Config, users UserStore) *Service {
 	if users == nil {
 		users = NewMemoryUserStore()
 	}
-	return &Service{cfg: cfg, users: users}
+	return &Service{cfg: cfg, users: users, sessions: NewMemorySessionStore()}
+}
+
+func (s *Service) SetSessionStore(store SessionStore) {
+	if store != nil {
+		s.sessions = store
+	}
 }
 
 func (s *Service) Enabled() bool {
@@ -126,7 +155,7 @@ func (s *Service) Register(ctx context.Context, username, password, displayName 
 	if err != nil {
 		return "", Principal{}, err
 	}
-	return s.issueUserToken(user)
+	return s.issueUserToken(ctx, user)
 }
 
 func (s *Service) UpdateTheme(ctx context.Context, principal Principal, theme string) (Principal, error) {
@@ -138,7 +167,9 @@ func (s *Service) UpdateTheme(ctx context.Context, principal Principal, theme st
 	if err != nil {
 		return Principal{}, err
 	}
-	return userPrincipal(user, principal.Expires), nil
+	next := userPrincipal(user, principal.Expires)
+	next.SessionID = principal.SessionID
+	return next, nil
 }
 
 func (s *Service) UpdateAvatar(ctx context.Context, principal Principal, avatarFileID string, mimeType string, size int64) (Principal, error) {
@@ -149,7 +180,9 @@ func (s *Service) UpdateAvatar(ctx context.Context, principal Principal, avatarF
 	if err != nil {
 		return Principal{}, err
 	}
-	return userPrincipal(user, principal.Expires), nil
+	next := userPrincipal(user, principal.Expires)
+	next.SessionID = principal.SessionID
+	return next, nil
 }
 
 func (s *Service) UserByID(ctx context.Context, userID string) (User, error) {
@@ -167,7 +200,9 @@ func (s *Service) PrincipalFor(ctx context.Context, principal Principal) (Princi
 	if err != nil {
 		return Principal{}, err
 	}
-	return userPrincipal(user, principal.Expires), nil
+	next := userPrincipal(user, principal.Expires)
+	next.SessionID = principal.SessionID
+	return next, nil
 }
 
 func (s *Service) Login(ctx context.Context, username, password string) (string, Principal, error) {
@@ -178,7 +213,7 @@ func (s *Service) Login(ctx context.Context, username, password string) (string,
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return "", Principal{}, ErrInvalidCredentials
 	}
-	return s.issueUserToken(user)
+	return s.issueUserToken(ctx, user)
 }
 
 func (s *Service) AuthenticateRequest(r *http.Request) (Principal, error) {
@@ -190,10 +225,10 @@ func (s *Service) AuthenticateRequest(r *http.Request) (Principal, error) {
 	if token == "" {
 		token = strings.TrimSpace(r.URL.Query().Get("token"))
 	}
-	return s.VerifyToken(token)
+	return s.VerifyToken(r.Context(), token)
 }
 
-func (s *Service) VerifyToken(token string) (Principal, error) {
+func (s *Service) VerifyToken(ctx context.Context, token string) (Principal, error) {
 	if token == "" {
 		return Principal{}, ErrInvalidToken
 	}
@@ -224,8 +259,45 @@ func (s *Service) VerifyToken(token string) (Principal, error) {
 	if time.Now().UTC().Unix() >= claims.Expires {
 		return Principal{}, ErrTokenExpired
 	}
+	if claims.Username != "" {
+		if claims.Session == "" {
+			return Principal{}, ErrInvalidToken
+		}
+		session, err := s.sessions.GetSession(ctx, claims.Session)
+		if err != nil || session.UserID != claims.Subject || !session.RevokedAt.IsZero() || !session.ExpiresAt.After(time.Now().UTC()) {
+			return Principal{}, ErrInvalidToken
+		}
+	}
 
-	return Principal{ClientID: claims.Subject, UserID: claims.Subject, Username: claims.Username, Theme: normalizeThemeOrDefault(claims.Theme), Scopes: claims.Scopes, Expires: claims.Expires}, nil
+	return Principal{ClientID: claims.Subject, UserID: claims.Subject, SessionID: claims.Session, Username: claims.Username, Theme: normalizeThemeOrDefault(claims.Theme), Scopes: claims.Scopes, Expires: claims.Expires}, nil
+}
+
+func (s *Service) ListSessions(ctx context.Context, principal Principal) ([]Session, error) {
+	if principal.UserID == "" {
+		return nil, ErrInvalidCredentials
+	}
+	sessions, err := s.sessions.ListSessions(ctx, principal.UserID)
+	if err != nil {
+		return nil, err
+	}
+	for idx := range sessions {
+		sessions[idx].Current = sessions[idx].SessionID == principal.SessionID
+	}
+	return sessions, nil
+}
+
+func (s *Service) RevokeSession(ctx context.Context, principal Principal, sessionID string) error {
+	if principal.UserID == "" || strings.TrimSpace(sessionID) == "" {
+		return ErrInvalidCredentials
+	}
+	return s.sessions.RevokeSession(ctx, principal.UserID, strings.TrimSpace(sessionID))
+}
+
+func (s *Service) RevokeOtherSessions(ctx context.Context, principal Principal) error {
+	if principal.UserID == "" || principal.SessionID == "" {
+		return ErrInvalidCredentials
+	}
+	return s.sessions.RevokeOtherSessions(ctx, principal.UserID, principal.SessionID)
 }
 
 func (s *Service) HasScope(principal Principal, scope string) bool {
@@ -251,13 +323,25 @@ func (s *Service) sign(claims Claims) (string, error) {
 	return signed + "." + s.signature(signed), nil
 }
 
-func (s *Service) issueUserToken(user User) (string, Principal, error) {
+func (s *Service) issueUserToken(ctx context.Context, user User) (string, Principal, error) {
 	now := time.Now().UTC()
+	expires := now.Add(s.cfg.AuthTokenTTL)
+	session, err := s.sessions.CreateSession(ctx, Session{
+		SessionID: newSessionID(),
+		UserID:    user.UserID,
+		Username:  user.Username,
+		CreatedAt: now,
+		ExpiresAt: expires,
+	})
+	if err != nil {
+		return "", Principal{}, err
+	}
 	claims := Claims{
 		Subject:  user.UserID,
+		Session:  session.SessionID,
 		Issuer:   s.cfg.AuthIssuer,
 		Issued:   now.Unix(),
-		Expires:  now.Add(s.cfg.AuthTokenTTL).Unix(),
+		Expires:  expires.Unix(),
 		Scopes:   defaultScopes(),
 		Username: user.Username,
 		Theme:    normalizeThemeOrDefault(user.Theme),
@@ -269,6 +353,7 @@ func (s *Service) issueUserToken(user User) (string, Principal, error) {
 	return token, Principal{
 		ClientID:    user.UserID,
 		UserID:      user.UserID,
+		SessionID:   session.SessionID,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
 		Theme:       claims.Theme,
@@ -289,6 +374,14 @@ func userPrincipal(user User, expires int64) Principal {
 		Scopes:      defaultScopes(),
 		Expires:     expires,
 	}
+}
+
+func newSessionID() string {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
+	}
+	return hex.EncodeToString(bytes[:])
 }
 
 func avatarURL(user User) string {

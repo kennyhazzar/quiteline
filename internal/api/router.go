@@ -66,6 +66,15 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("PUT /v1/me/avatar", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleUploadAvatar(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/me/sessions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleListSessions(w, r, deps)
+	}))
+	mux.HandleFunc("DELETE /v1/me/sessions/others", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleRevokeOtherSessions(w, r, deps)
+	}))
+	mux.HandleFunc("DELETE /v1/me/sessions/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleRevokeSession(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/users/", func(w http.ResponseWriter, r *http.Request) {
 		handleUserAvatar(w, r, deps)
 	})
@@ -281,6 +290,36 @@ func handleUploadAvatar(w http.ResponseWriter, r *http.Request, deps Dependencie
 		return
 	}
 	writeJSON(w, http.StatusOK, principal)
+}
+
+func handleListSessions(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	sessions, err := deps.Auth.ListSessions(r.Context(), principalFromContext(r.Context()))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "sessions_unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sessions": sessions})
+}
+
+func handleRevokeSession(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	sessionID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/me/sessions/"), "/")
+	if sessionID == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if err := deps.Auth.RevokeSession(r.Context(), principalFromContext(r.Context()), sessionID); err != nil {
+		writeError(w, http.StatusBadRequest, "revoke_failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	if err := deps.Auth.RevokeOtherSessions(r.Context(), principalFromContext(r.Context())); err != nil {
+		writeError(w, http.StatusBadRequest, "revoke_failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleUserAvatar(w http.ResponseWriter, r *http.Request, deps Dependencies) {

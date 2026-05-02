@@ -105,3 +105,74 @@ func newUserID() string {
 	}
 	return hex.EncodeToString(bytes[:])
 }
+
+type MemorySessionStore struct {
+	mu       sync.RWMutex
+	sessions map[string]Session
+}
+
+func NewMemorySessionStore() *MemorySessionStore {
+	return &MemorySessionStore{sessions: make(map[string]Session)}
+}
+
+func (s *MemorySessionStore) CreateSession(_ context.Context, session Session) (Session, error) {
+	if session.SessionID == "" || session.UserID == "" || session.ExpiresAt.IsZero() {
+		return Session{}, ErrInvalidCredentials
+	}
+	if session.CreatedAt.IsZero() {
+		session.CreatedAt = time.Now().UTC()
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions[session.SessionID] = session
+	return session, nil
+}
+
+func (s *MemorySessionStore) GetSession(_ context.Context, sessionID string) (Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := s.sessions[sessionID]
+	if !ok {
+		return Session{}, ErrInvalidToken
+	}
+	return session, nil
+}
+
+func (s *MemorySessionStore) ListSessions(_ context.Context, userID string) ([]Session, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]Session, 0)
+	for _, session := range s.sessions {
+		if session.UserID == userID {
+			result = append(result, session)
+		}
+	}
+	return result, nil
+}
+
+func (s *MemorySessionStore) RevokeSession(_ context.Context, userID string, sessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	if !ok || session.UserID != userID {
+		return ErrInvalidToken
+	}
+	if session.RevokedAt.IsZero() {
+		session.RevokedAt = time.Now().UTC()
+	}
+	s.sessions[sessionID] = session
+	return nil
+}
+
+func (s *MemorySessionStore) RevokeOtherSessions(_ context.Context, userID string, keepSessionID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	for sessionID, session := range s.sessions {
+		if session.UserID == userID && sessionID != keepSessionID && session.RevokedAt.IsZero() {
+			session.RevokedAt = now
+			s.sessions[sessionID] = session
+		}
+	}
+	return nil
+}

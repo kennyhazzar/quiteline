@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func TestIssueAndVerifyToken(t *testing.T) {
 		t.Fatal("IssueToken() returned empty token")
 	}
 
-	verified, err := service.VerifyToken(token)
+	verified, err := service.VerifyToken(context.Background(), token)
 	if err != nil {
 		t.Fatalf("VerifyToken() error = %v", err)
 	}
@@ -35,6 +36,31 @@ func TestIssueAndVerifyToken(t *testing.T) {
 	}
 	if !service.HasScope(verified, "publish") {
 		t.Fatal("verified principal does not have publish scope")
+	}
+}
+
+func TestRevokeUserSessionRejectsToken(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(config.Config{
+		AuthEnabled:  true,
+		AuthIssuer:   "test",
+		AuthTokenTTL: time.Hour,
+		AuthSecret:   "secret",
+	}, nil)
+
+	token, principal, err := service.Register(context.Background(), "alice", "password123", "Alice")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	if principal.SessionID == "" {
+		t.Fatal("Register() returned empty session id")
+	}
+	if err := service.RevokeSession(context.Background(), principal, principal.SessionID); err != nil {
+		t.Fatalf("RevokeSession() error = %v", err)
+	}
+	if _, err := service.VerifyToken(context.Background(), token); err == nil {
+		t.Fatal("VerifyToken() error = nil, want revoked token rejected")
 	}
 }
 

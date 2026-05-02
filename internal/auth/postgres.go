@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -52,6 +53,16 @@ ALTER TABLE users ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT 'dark';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_file_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime_type TEXT NOT NULL DEFAULT '';
 ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_size BIGINT NOT NULL DEFAULT 0;
+
+CREATE TABLE IF NOT EXISTS auth_sessions (
+	session_id TEXT PRIMARY KEY,
+	user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+	username TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	expires_at TIMESTAMPTZ NOT NULL,
+	revoked_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS auth_sessions_user_id_idx ON auth_sessions(user_id);
 `)
 	return err
 }
@@ -144,4 +155,78 @@ func (s *PostgresUserStore) UpdateUserAvatar(ctx context.Context, userID string,
 		return User{}, ErrUserNotFound
 	}
 	return result, err
+}
+
+func (s *PostgresUserStore) CreateSession(ctx context.Context, session Session) (Session, error) {
+	if session.SessionID == "" || session.UserID == "" || session.ExpiresAt.IsZero() {
+		return Session{}, ErrInvalidCredentials
+	}
+	if session.CreatedAt.IsZero() {
+		session.CreatedAt = time.Now().UTC()
+	}
+	var result Session
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO auth_sessions (session_id, user_id, username, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING session_id, user_id, username, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
+	`, session.SessionID, session.UserID, session.Username, session.CreatedAt, session.ExpiresAt).
+		Scan(&result.SessionID, &result.UserID, &result.Username, &result.CreatedAt, &result.ExpiresAt, &result.RevokedAt)
+	return result, err
+}
+
+func (s *PostgresUserStore) GetSession(ctx context.Context, sessionID string) (Session, error) {
+	var result Session
+	err := s.pool.QueryRow(ctx, `
+		SELECT session_id, user_id, username, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
+		FROM auth_sessions WHERE session_id = $1
+	`, strings.TrimSpace(sessionID)).
+		Scan(&result.SessionID, &result.UserID, &result.Username, &result.CreatedAt, &result.ExpiresAt, &result.RevokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Session{}, ErrInvalidToken
+	}
+	return result, err
+}
+
+func (s *PostgresUserStore) ListSessions(ctx context.Context, userID string) ([]Session, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT session_id, user_id, username, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
+		FROM auth_sessions
+		WHERE user_id = $1 AND expires_at > now()
+		ORDER BY created_at DESC
+	`, strings.TrimSpace(userID))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []Session
+	for rows.Next() {
+		var session Session
+		if err := rows.Scan(&session.SessionID, &session.UserID, &session.Username, &session.CreatedAt, &session.ExpiresAt, &session.RevokedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, session)
+	}
+	return result, rows.Err()
+}
+
+func (s *PostgresUserStore) RevokeSession(ctx context.Context, userID string, sessionID string) error {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, now())
+		WHERE user_id = $1 AND session_id = $2
+	`, strings.TrimSpace(userID), strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrInvalidToken
+	}
+	return nil
+}
+
+func (s *PostgresUserStore) RevokeOtherSessions(ctx context.Context, userID string, keepSessionID string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE auth_sessions SET revoked_at = COALESCE(revoked_at, now())
+		WHERE user_id = $1 AND session_id <> $2 AND revoked_at IS NULL
+	`, strings.TrimSpace(userID), strings.TrimSpace(keepSessionID))
+	return err
 }

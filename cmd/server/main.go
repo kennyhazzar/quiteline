@@ -32,6 +32,7 @@ func main() {
 
 	var zkStore zk.Store
 	var userStore auth.UserStore
+	var sessionStore auth.SessionStore
 	if cfg.PostgresDSN != "" {
 		pgStore, err := zk.NewPostgresStore(ctx, cfg.PostgresDSN)
 		if err != nil {
@@ -47,13 +48,17 @@ func main() {
 		}
 		defer pgUsers.Close()
 		userStore = pgUsers
+		sessionStore = pgUsers
 		logger.Info("using postgres store")
 	} else {
 		zkStore = zk.NewMemoryStore()
-		userStore = auth.NewMemoryUserStore()
+		memUsers := auth.NewMemoryUserStore()
+		userStore = memUsers
+		sessionStore = auth.NewMemorySessionStore()
 		logger.Info("using memory store")
 	}
 	authService := auth.NewService(cfg, userStore)
+	authService.SetSessionStore(sessionStore)
 	fileStore, err := files.NewS3Store(ctx, cfg)
 	if err != nil {
 		logger.Error("failed to create s3 file store", "error", err)
