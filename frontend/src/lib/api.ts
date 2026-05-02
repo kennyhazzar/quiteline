@@ -69,6 +69,12 @@ export interface EncryptedMessage {
   deletedAt?: string
   readBy?: string[]
   read?: boolean
+  reactions?: MessageReaction[]
+}
+
+export interface MessageReaction {
+  emoji: string
+  count: number
 }
 
 export interface MessageEnvelope {
@@ -400,6 +406,20 @@ export async function deleteEncryptedMessageForAll(input: {
   const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${input.token}` },
+  })
+  return readJSON(res)
+}
+
+export async function toggleMessageReaction(input: {
+  roomId: string
+  messageId: string
+  emoji: string
+  token: string
+}): Promise<EncryptedMessage> {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}/reactions`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ emoji: input.emoji }),
   })
   return readJSON(res)
 }

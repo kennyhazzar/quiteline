@@ -59,6 +59,12 @@ type EncryptedMessage struct {
 	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
 	ReadBy     []string   `json:"readBy,omitempty"`
 	Read       bool       `json:"read,omitempty"`
+	Reactions  []Reaction `json:"reactions,omitempty"`
+}
+
+type Reaction struct {
+	Emoji string `json:"emoji"`
+	Count int    `json:"count"`
 }
 
 type Store interface {
@@ -73,6 +79,7 @@ type Store interface {
 	AppendMessage(ctx context.Context, msg EncryptedMessage) (EncryptedMessage, error)
 	UpdateMessage(ctx context.Context, roomID string, messageID string, userID string, msg EncryptedMessage) (EncryptedMessage, error)
 	DeleteMessageForAll(ctx context.Context, roomID string, messageID string, userID string) (EncryptedMessage, error)
+	ToggleMessageReaction(ctx context.Context, roomID string, messageID string, userID string, emoji string) (EncryptedMessage, error)
 	ListMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error)
 	ListFriends(ctx context.Context, userID string) ([]Friend, error)
 	RequestFriend(ctx context.Context, fromUserID string, toUserID string) error
@@ -85,6 +92,7 @@ type MemoryStore struct {
 	identities map[string]Identity
 	rooms      map[string]Room
 	messages   map[string][]EncryptedMessage
+	reactions  map[string]map[string]string
 	roomReads  map[string]map[string]time.Time
 	friends    map[string]friendEdge
 }
@@ -102,6 +110,7 @@ func NewMemoryStore() *MemoryStore {
 		identities: make(map[string]Identity),
 		rooms:      make(map[string]Room),
 		messages:   make(map[string][]EncryptedMessage),
+		reactions:  make(map[string]map[string]string),
 		roomReads:  make(map[string]map[string]time.Time),
 		friends:    make(map[string]friendEdge),
 	}
@@ -366,6 +375,40 @@ func (s *MemoryStore) DeleteMessageForAll(_ context.Context, roomID string, mess
 	return EncryptedMessage{}, ErrNotFound
 }
 
+func (s *MemoryStore) ToggleMessageReaction(_ context.Context, roomID string, messageID string, userID string, emoji string) (EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	messageID = normalizeID(messageID)
+	userID = normalizeID(userID)
+	emoji = strings.TrimSpace(emoji)
+	if roomID == "" || messageID == "" || userID == "" || emoji == "" || len([]rune(emoji)) > 8 {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, current := range s.messages[roomID] {
+		if current.ID != messageID {
+			continue
+		}
+		if current.DeletedAt != nil {
+			return EncryptedMessage{}, ErrBadRequest
+		}
+		if s.reactions[messageID] == nil {
+			s.reactions[messageID] = make(map[string]string)
+		}
+		if s.reactions[messageID][userID] == emoji {
+			delete(s.reactions[messageID], userID)
+		} else {
+			s.reactions[messageID][userID] = emoji
+		}
+		result := current
+		s.decorateReadState(&result)
+		s.decorateReactions(&result)
+		return result, nil
+	}
+	return EncryptedMessage{}, ErrNotFound
+}
+
 func validateMessagePayload(msg EncryptedMessage) error {
 	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Algorithm == "" {
 		return ErrBadRequest
@@ -437,6 +480,22 @@ func (s *MemoryStore) decorateReadState(msg *EncryptedMessage) {
 	sort.Strings(readBy)
 	msg.ReadBy = readBy
 	msg.Read = len(readBy) >= max(len(room.Members)-1, 0)
+	s.decorateReactions(msg)
+}
+
+func (s *MemoryStore) decorateReactions(msg *EncryptedMessage) {
+	counts := map[string]int{}
+	for _, emoji := range s.reactions[msg.ID] {
+		counts[emoji]++
+	}
+	reactions := make([]Reaction, 0, len(counts))
+	for emoji, count := range counts {
+		reactions = append(reactions, Reaction{Emoji: emoji, Count: count})
+	}
+	sort.Slice(reactions, func(i, j int) bool {
+		return reactions[i].Emoji < reactions[j].Emoji
+	})
+	msg.Reactions = reactions
 }
 
 func (s *MemoryStore) ListFriends(_ context.Context, userID string) ([]Friend, error) {

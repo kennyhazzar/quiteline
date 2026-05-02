@@ -228,6 +228,10 @@ type encryptedMessageRequest struct {
 	KeyID      string `json:"keyId"`
 }
 
+type reactionRequest struct {
+	Emoji string `json:"emoji"`
+}
+
 type fileUploadResponse struct {
 	FileID string `json:"fileId"`
 	Size   int64  `json:"size"`
@@ -634,6 +638,13 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 		switch {
 		case tail == "messages":
 			handleAppendEncryptedMessage(w, r, deps, roomID)
+		case strings.HasPrefix(tail, "messages/") && strings.HasSuffix(tail, "/reactions"):
+			messageID := strings.TrimSuffix(strings.TrimPrefix(tail, "messages/"), "/reactions")
+			if messageID == "" || strings.ContainsAny(messageID, " \t\r\n/") {
+				writeError(w, http.StatusNotFound, "not_found")
+				return
+			}
+			handleToggleMessageReaction(w, r, deps, roomID, messageID)
 		case tail == "read":
 			handleMarkRoomRead(w, r, deps, roomID)
 		case tail == "friends":
@@ -794,6 +805,26 @@ func handleUpdateEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 
 func handleDeleteEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, messageID string) {
 	msg, err := deps.ZKStore.DeleteMessageForAll(r.Context(), roomID, messageID, principalFromContext(r.Context()).UserID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if err := deps.Broker.Publish(r.Context(), zk.Envelope(msg, deps.Config.NodeID)); err != nil {
+		deps.Metrics.BrokerPublishErrors.Inc()
+		writeError(w, http.StatusBadGateway, "publish_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, msg)
+}
+
+func handleToggleMessageReaction(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, messageID string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+	var req reactionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	msg, err := deps.ZKStore.ToggleMessageReaction(r.Context(), roomID, messageID, principalFromContext(r.Context()).UserID, req.Emoji)
 	if err != nil {
 		writeStoreError(w, err)
 		return

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -83,6 +84,16 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS messages_room_created ON messages(room_id, created_at);
+
+CREATE TABLE IF NOT EXISTS message_reactions (
+	message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+	room_id    TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
+	user_id    TEXT NOT NULL,
+	emoji      TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (message_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS message_reactions_room_idx ON message_reactions(room_id);
 
 CREATE TABLE IF NOT EXISTS friendships (
 	user_a TEXT NOT NULL,
@@ -464,6 +475,47 @@ func (s *PostgresStore) DeleteMessageForAll(ctx context.Context, roomID string, 
 	return result, err
 }
 
+func (s *PostgresStore) ToggleMessageReaction(ctx context.Context, roomID string, messageID string, userID string, emoji string) (EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	messageID = normalizeID(messageID)
+	userID = normalizeID(userID)
+	emoji = strings.TrimSpace(emoji)
+	if roomID == "" || messageID == "" || userID == "" || emoji == "" || len([]rune(emoji)) > 8 {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+
+	var existing string
+	err := s.pool.QueryRow(ctx, `
+		SELECT emoji FROM message_reactions WHERE room_id = $1 AND message_id = $2 AND user_id = $3
+	`, roomID, messageID, userID).Scan(&existing)
+	switch {
+	case err == nil && existing == emoji:
+		_, err = s.pool.Exec(ctx, `DELETE FROM message_reactions WHERE room_id = $1 AND message_id = $2 AND user_id = $3`, roomID, messageID, userID)
+	case err == nil:
+		_, err = s.pool.Exec(ctx, `UPDATE message_reactions SET emoji = $4, created_at = now() WHERE room_id = $1 AND message_id = $2 AND user_id = $3`, roomID, messageID, userID, emoji)
+	case errors.Is(err, pgx.ErrNoRows):
+		_, err = s.pool.Exec(ctx, `
+			INSERT INTO message_reactions (message_id, room_id, user_id, emoji)
+			SELECT id, room_id, $3, $4 FROM messages WHERE room_id = $1 AND id = $2 AND deleted_at IS NULL
+		`, roomID, messageID, userID, emoji)
+	default:
+		return EncryptedMessage{}, err
+	}
+	if err != nil {
+		return EncryptedMessage{}, err
+	}
+	messages, err := s.ListMessages(ctx, roomID, 500)
+	if err != nil {
+		return EncryptedMessage{}, err
+	}
+	for _, msg := range messages {
+		if msg.ID == messageID {
+			return msg, nil
+		}
+	}
+	return EncryptedMessage{}, ErrNotFound
+}
+
 func assignOptionalMessageTimes(msg *EncryptedMessage, editedAt sql.NullTime, deletedAt sql.NullTime) {
 	if editedAt.Valid {
 		value := editedAt.Time
@@ -490,7 +542,8 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 		SELECT recent.id, recent.room_id, recent.sender_id, recent.ciphertext, recent.nonce,
 		       recent.algorithm, recent.key_id, recent.created_at, recent.edited_at, recent.deleted_at,
 		       COALESCE(reads.read_by, '') AS read_by,
-		       COALESCE(reads.read_count, 0) >= GREATEST(member_counts.member_count - 1, 0) AS read
+		       COALESCE(reads.read_count, 0) >= GREATEST(member_counts.member_count - 1, 0) AS read,
+		       COALESCE(reactions.summary, '') AS reactions
 		FROM recent
 		LEFT JOIN LATERAL (
 			SELECT string_agg(rr.user_id, ',' ORDER BY rr.user_id) AS read_by,
@@ -504,6 +557,15 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 		LEFT JOIN LATERAL (
 			SELECT COUNT(*) AS member_count FROM room_members WHERE room_id = recent.room_id
 		) member_counts ON true
+		LEFT JOIN LATERAL (
+			SELECT string_agg(emoji || ':' || count, ',' ORDER BY emoji) AS summary
+			FROM (
+				SELECT emoji, COUNT(*) AS count
+				FROM message_reactions
+				WHERE room_id = recent.room_id AND message_id = recent.id
+				GROUP BY emoji
+			) grouped
+		) reactions ON true
 		ORDER BY recent.created_at ASC
 	`, roomID, limit)
 	if err != nil {
@@ -514,12 +576,12 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 	msgs := []EncryptedMessage{}
 	for rows.Next() {
 		var m EncryptedMessage
-		var readByCSV string
+		var readByCSV, reactionsCSV string
 		var editedAt, deletedAt sql.NullTime
 		if err := rows.Scan(
 			&m.ID, &m.RoomID, &m.SenderID,
 			&m.Ciphertext, &m.Nonce, &m.Algorithm, &m.KeyID,
-			&m.CreatedAt, &editedAt, &deletedAt, &readByCSV, &m.Read,
+			&m.CreatedAt, &editedAt, &deletedAt, &readByCSV, &m.Read, &reactionsCSV,
 		); err != nil {
 			return nil, err
 		}
@@ -527,9 +589,30 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 		if readByCSV != "" {
 			m.ReadBy = strings.Split(readByCSV, ",")
 		}
+		m.Reactions = parseReactionSummary(reactionsCSV)
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+func parseReactionSummary(value string) []Reaction {
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]Reaction, 0, len(parts))
+	for _, part := range parts {
+		emoji, countText, ok := strings.Cut(part, ":")
+		if !ok {
+			continue
+		}
+		var count int
+		_, _ = fmt.Sscanf(countText, "%d", &count)
+		if emoji != "" && count > 0 {
+			result = append(result, Reaction{Emoji: emoji, Count: count})
+		}
+	}
+	return result
 }
 
 func (s *PostgresStore) ListFriends(ctx context.Context, userID string) ([]Friend, error) {

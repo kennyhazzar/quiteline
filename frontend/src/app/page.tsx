@@ -57,6 +57,7 @@ import {
   sendEncryptedMessage,
   touchIdentity,
   deleteEncryptedMessageForAll,
+  toggleMessageReaction,
   updateEncryptedMessage,
   uploadAvatar,
   uploadEncryptedFile,
@@ -90,6 +91,7 @@ interface DecryptedMessage {
   deletedAt?: string
   readBy?: string[]
   read?: boolean
+  reactions?: EncryptedMessage['reactions']
   status?: 'sending' | 'sent' | 'read' | 'failed'
   failed?: boolean
 }
@@ -117,6 +119,7 @@ const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'
 const SESSION_KEY = 'zk.session.v1'
 const LOCAL_DELETED_MESSAGES_KEY = 'quietline.deletedMessages.v1'
 const MAX_FILE_BYTES = 100 * 1024 * 1024
+const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '✅']
 
 function accountScopedKey(base: string, accountId: string) {
   return `${base}.${accountId}`
@@ -149,6 +152,10 @@ function formatLastSeen(value?: string) {
 
 function messageVersion(msg: EncryptedMessage) {
   return Date.parse(msg.deletedAt || msg.editedAt || msg.createdAt)
+}
+
+function reactionSignature(msg: EncryptedMessage) {
+  return (msg.reactions ?? []).map((reaction) => `${reaction.emoji}:${reaction.count}`).join('|')
 }
 
 function isPersistedMessageID(messageID: string) {
@@ -188,6 +195,8 @@ export default function MessengerPage() {
   const [editText, setEditText] = useState('')
   const [deleteTarget, setDeleteTarget] = useState<DecryptedMessage | null>(null)
   const [deleteForEveryone, setDeleteForEveryone] = useState(false)
+  const [roomSearch, setRoomSearch] = useState('')
+  const [messageSearch, setMessageSearch] = useState('')
   const [typingUsers, setTypingUsers] = useState<Record<string, { displayName: string; until: number }>>({})
   const [presence, setPresence] = useState<Record<string, { displayName: string; status: 'online' | 'offline'; lastSeenAt: string }>>({})
   const [callState, setCallState] = useState<CallState>('idle')
@@ -330,6 +339,12 @@ export default function MessengerPage() {
     if (!activeInvite || typeof window === 'undefined') return ''
     return `${window.location.origin}${window.location.pathname}?invite=${encodeURIComponent(activeInvite)}`
   }, [activeInvite])
+  const filteredRooms = useMemo(() => {
+    const query = roomSearch.trim().toLowerCase()
+    const list = rooms.data?.rooms ?? []
+    if (!query) return list
+    return list.filter((room) => `${room.name} ${room.roomId}`.toLowerCase().includes(query))
+  }, [roomSearch, rooms.data?.rooms])
 
   useEffect(() => {
     const error = rooms.error ?? history.error ?? memberIdentities.error ?? accountSessions.error ?? friends.error
@@ -715,11 +730,33 @@ export default function MessengerPage() {
     onError: (err: Error) => handleRequestError(err, 'Could not delete message'),
   })
 
+  const reactionMutation = useMutation({
+    mutationFn: async ({ message, emoji }: { message: DecryptedMessage; emoji: string }) => {
+      if (!session) throw new Error('message_not_ready')
+      return toggleMessageReaction({
+        roomId: message.roomId,
+        messageId: message.id,
+        emoji,
+        token: session.accessToken,
+      })
+    },
+    onSuccess: (message) => {
+      setLiveMessages((prev) => [...prev, message].slice(-200))
+      queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
+    },
+    onError: (err: Error) => handleRequestError(err, 'Could not react'),
+  })
+
   const encryptedMessages = useMemo(() => {
     const byID = new Map<string, EncryptedMessage>()
     const put = (msg: EncryptedMessage) => {
       const current = byID.get(msg.id)
-      if (!current || messageVersion(msg) > messageVersion(current) || (messageVersion(msg) === messageVersion(current) && Boolean(msg.read) && !current.read)) {
+      if (
+        !current ||
+        messageVersion(msg) > messageVersion(current) ||
+        (messageVersion(msg) === messageVersion(current) && Boolean(msg.read) && !current.read) ||
+        (messageVersion(msg) === messageVersion(current) && reactionSignature(msg) !== reactionSignature(current))
+      ) {
         byID.set(msg.id, msg)
       }
     }
@@ -751,6 +788,7 @@ export default function MessengerPage() {
               deletedAt: msg.deletedAt,
               readBy: msg.readBy ?? [],
               read: Boolean(msg.read),
+              reactions: msg.reactions ?? [],
               status,
             }
           } catch {
@@ -764,6 +802,7 @@ export default function MessengerPage() {
               deletedAt: msg.deletedAt,
               readBy: msg.readBy ?? [],
               read: Boolean(msg.read),
+              reactions: msg.reactions ?? [],
               status,
               failed: true,
             }
@@ -788,6 +827,23 @@ export default function MessengerPage() {
     }
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   }, [activeRoomID, decryptedMessages, localDeletedMessageIDs, pendingMessages])
+  const visibleMessages = useMemo(() => {
+    const query = messageSearch.trim().toLowerCase()
+    if (!query) return displayMessages
+    return displayMessages.filter((msg) => {
+      const haystack = [
+        msg.body?.senderName,
+        msg.body?.text,
+        msg.body?.attachment?.name,
+        msg.body?.replyTo?.text,
+      ].filter(Boolean).join(' ').toLowerCase()
+      return haystack.includes(query)
+    })
+  }, [displayMessages, messageSearch])
+  const attachmentMessages = useMemo(
+    () => displayMessages.filter((msg) => !msg.deletedAt && msg.body?.attachment),
+    [displayMessages],
+  )
 
   useEffect(() => {
     const viewport = messagesViewportRef.current
@@ -1496,6 +1552,22 @@ export default function MessengerPage() {
               <Text fw={700} truncate>{activeRoom.name}</Text>
               <Text size="xs" c="dimmed" truncate>room:{maskedRoomId(activeRoom.roomId)}</Text>
               <Button variant="light" onClick={() => setSidebarView('rooms')}>{t('rooms')}</Button>
+              <Divider />
+              <Text fw={700} size="sm">Attachments</Text>
+              <Stack gap={6}>
+                {attachmentMessages.slice(0, 8).map((msg) => (
+                  <Group key={msg.id} gap="xs" wrap="nowrap">
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Text size="sm" truncate>{msg.body?.attachment?.name}</Text>
+                      <Text size="xs" c="dimmed" truncate>{msg.body?.senderName} · {formatBytes(msg.body?.attachment?.size ?? 0)}</Text>
+                    </div>
+                    <ActionIcon variant="light" size="sm" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
+                      <IconDownload size={15} />
+                    </ActionIcon>
+                  </Group>
+                ))}
+                {attachmentMessages.length === 0 && <Text size="xs" c="dimmed">No attachments yet.</Text>}
+              </Stack>
             </Stack>
           ) : (
             <Stack gap="xs">
@@ -1700,9 +1772,15 @@ export default function MessengerPage() {
               <IconRefresh size={16} />
             </ActionIcon>
           </Group>
+          <TextInput
+            mb="sm"
+            placeholder="Search rooms"
+            value={roomSearch}
+            onChange={(event) => setRoomSearch(event.currentTarget.value)}
+          />
           <ScrollArea type="auto" offsetScrollbars style={{ flex: 1, minHeight: 0 }}>
             <Stack gap="xs" pr="xs">
-              {(rooms.data?.rooms ?? []).map((room) => {
+              {filteredRooms.map((room) => {
                 const hiddenId = maskedRoomId(room.roomId)
                 return (
                   <Group key={room.roomId} gap={6} wrap="nowrap">
@@ -1734,7 +1812,7 @@ export default function MessengerPage() {
                   </Group>
                 )
               })}
-              {(rooms.data?.rooms ?? []).length === 0 && <Text size="sm" c="dimmed">{t('noRooms')}</Text>}
+              {filteredRooms.length === 0 && <Text size="sm" c="dimmed">{t('noRooms')}</Text>}
             </Stack>
           </ScrollArea>
         </Card>
@@ -1878,11 +1956,16 @@ export default function MessengerPage() {
             )}
 
             <Divider />
+            <TextInput
+              placeholder="Search messages"
+              value={messageSearch}
+              onChange={(event) => setMessageSearch(event.currentTarget.value)}
+            />
 
             <Box style={{ flex: 1, minHeight: 0 }}>
               <ScrollArea h="100%" type="auto" offsetScrollbars viewportRef={messagesViewportRef}>
                 <Stack gap="xs" pr="sm">
-                  {displayMessages.map((msg) => (
+                  {visibleMessages.map((msg) => (
                     <Card key={msg.id} withBorder radius="sm" p="sm">
                       {msg.body?.system ? (
                         <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
@@ -1919,6 +2002,12 @@ export default function MessengerPage() {
                             <Menu.Dropdown>
                               {!msg.deletedAt && (
                                 <>
+                                  {QUICK_REACTIONS.map((emoji) => (
+                                    <Menu.Item key={emoji} onClick={() => reactionMutation.mutate({ message: msg, emoji })}>
+                                      {emoji}
+                                    </Menu.Item>
+                                  ))}
+                                  <Menu.Divider />
                                   <Menu.Item leftSection={<IconMessageCircle size={15} />} onClick={() => setReplyTarget(msg)}>
                                     Reply
                                   </Menu.Item>
@@ -1956,6 +2045,20 @@ export default function MessengerPage() {
                             </Card>
                           )}
                           {msg.body?.text && <Text>{msg.body.text}</Text>}
+                          {Boolean(msg.reactions?.length) && (
+                            <Group gap={4}>
+                              {msg.reactions?.map((reaction) => (
+                                <Button
+                                  key={reaction.emoji}
+                                  size="compact-xs"
+                                  variant="light"
+                                  onClick={() => reactionMutation.mutate({ message: msg, emoji: reaction.emoji })}
+                                >
+                                  {reaction.emoji} {reaction.count}
+                                </Button>
+                              ))}
+                            </Group>
+                          )}
                           {msg.body?.attachment && (
                             <Card withBorder radius="sm" p="xs">
                               <Group justify="space-between" align="center">
@@ -1997,7 +2100,7 @@ export default function MessengerPage() {
                       )}
                     </Card>
                   ))}
-                  {displayMessages.length === 0 && (
+                  {visibleMessages.length === 0 && (
                     <Text c="dimmed" ta="center" mt="xl">{t('noMessages')}</Text>
                   )}
                 </Stack>
