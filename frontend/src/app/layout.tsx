@@ -1,5 +1,6 @@
 import '@mantine/core/styles.css'
 import '@mantine/notifications/styles.css'
+import './globals.css'
 import { ColorSchemeScript } from '@mantine/core'
 import { Providers } from './providers'
 import type { Metadata } from 'next'

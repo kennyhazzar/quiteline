@@ -1082,11 +1082,11 @@ export default function MessengerPage() {
         />
       )}
       <Group
-      align="stretch"
-      gap="md"
-      wrap={isMobile ? 'wrap' : 'nowrap'}
-      style={{ height: isMobile ? 'auto' : 'calc(100vh - 96px)', minHeight: 0 }}
-    >
+        align="stretch"
+        gap="md"
+        wrap={isMobile ? 'wrap' : 'nowrap'}
+        style={{ height: isMobile ? 'auto' : 'calc(100dvh - 96px)', minHeight: 0 }}
+      >
       <Stack
         w={isMobile ? '100%' : isTablet ? 300 : 340}
         gap="md"
@@ -1299,6 +1299,7 @@ export default function MessengerPage() {
           width: isMobile ? '100%' : undefined,
           minWidth: 0,
           height: isMobile ? 'calc(100dvh - 132px)' : undefined,
+          maxHeight: isMobile ? 'calc(100dvh - 132px)' : undefined,
           minHeight: isMobile ? 0 : 0,
         }}
       >
@@ -1540,6 +1541,7 @@ export default function MessengerPage() {
                   }}
                   disabled={!activeSecret}
                   style={{ flex: 1, minWidth: 0 }}
+                  styles={{ input: { fontSize: isMobile ? 16 : undefined } }}
                 />
                 <ActionIcon
                   variant="filled"
