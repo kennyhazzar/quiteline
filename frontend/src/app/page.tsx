@@ -94,6 +94,19 @@ const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'
 const SESSION_KEY = 'zk.session.v1'
 const MAX_FILE_BYTES = 100 * 1024 * 1024
 
+function accountScopedKey(base: string, accountId: string) {
+  return `${base}.${accountId}`
+}
+
+function readStoredJSON<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) as T : null
+  } catch {
+    return null
+  }
+}
+
 function maskedRoomId(roomId: string) {
   if (roomId.length <= 8) return '*'.repeat(roomId.length)
   return `${roomId.slice(0, 4)}${'*'.repeat(Math.min(14, roomId.length - 8))}${roomId.slice(-4)}`
@@ -153,12 +166,12 @@ export default function MessengerPage() {
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
 
   useEffect(() => {
-    const savedSession = localStorage.getItem(SESSION_KEY)
-    const savedIdentity = localStorage.getItem(IDENTITY_KEY)
-    const savedSecrets = localStorage.getItem(ROOM_SECRETS_KEY)
-    if (savedSession) setSession(JSON.parse(savedSession) as AuthSession)
-    if (savedIdentity) setIdentity(JSON.parse(savedIdentity) as LocalIdentity)
-    if (savedSecrets) setRoomSecrets(JSON.parse(savedSecrets) as Record<string, string>)
+    const savedSession = readStoredJSON<AuthSession>(SESSION_KEY)
+    if (!savedSession) return
+    setSession(savedSession)
+    setColorScheme(savedSession.principal.theme)
+    setDisplayName(savedSession.principal.displayName || savedSession.principal.username)
+    loadAccountLocalState(savedSession)
   }, [])
 
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 5000 })
@@ -257,15 +270,56 @@ export default function MessengerPage() {
     if (error instanceof AuthError) handleAuthExpired()
   }, [rooms.error, history.error, memberIdentities.error, accountSessions.error])
 
-  function saveSession(next: AuthSession) {
+  function saveSession(next: AuthSession, options: { reloadLocalState?: boolean } = { reloadLocalState: true }) {
     localStorage.setItem(SESSION_KEY, JSON.stringify(next))
     authExpiredNotifiedRef.current = false
     setSession(next)
+    if (options.reloadLocalState !== false) loadAccountLocalState(next)
+  }
+
+  function accountStorageID(target: AuthSession | null = session) {
+    return target?.principal.userId || target?.principal.clientId || ''
+  }
+
+  function loadAccountLocalState(target: AuthSession) {
+    const accountId = accountStorageID(target)
+    const savedIdentity = accountId ? readStoredJSON<LocalIdentity>(accountScopedKey(IDENTITY_KEY, accountId)) : null
+    const savedSecrets = accountId ? readStoredJSON<Record<string, string>>(accountScopedKey(ROOM_SECRETS_KEY, accountId)) : null
+
+    setIdentity(savedIdentity)
+    setRoomSecrets(savedSecrets ?? {})
+    setActiveRoomID('')
+    setLiveMessages([])
+    setTypingUsers({})
+    setPresence({})
+    setMobileChatActionsOpened(false)
+    setLeaveConfirmOpened(false)
+    if (isMobile) setMobileView('rooms')
+    else setSidebarView('rooms')
+  }
+
+  function clearAccountLocalState() {
+    setIdentity(null)
+    setRoomSecrets({})
+    setActiveRoomID('')
+    setLiveMessages([])
+    setTypingUsers({})
+    setPresence({})
+    setMobileView('rooms')
+    setSidebarView('rooms')
+    setMobileChatActionsOpened(false)
+    setLeaveConfirmOpened(false)
+  }
+
+  function persistRoomSecrets(nextSecrets: Record<string, string>) {
+    setRoomSecrets(nextSecrets)
+    const accountId = accountStorageID()
+    if (accountId) localStorage.setItem(accountScopedKey(ROOM_SECRETS_KEY, accountId), JSON.stringify(nextSecrets))
   }
 
   function updateSessionPrincipal(principal: AuthSession['principal']) {
     if (!session) return
-    saveSession({ ...session, principal })
+    saveSession({ ...session, principal }, { reloadLocalState: false })
   }
 
   function sendRealtime(event: RealtimeEvent) {
@@ -291,11 +345,7 @@ export default function MessengerPage() {
     authExpiredNotifiedRef.current = true
     localStorage.removeItem(SESSION_KEY)
     setSession(null)
-    setActiveRoomID('')
-    setMobileView('rooms')
-    setSidebarView('rooms')
-    setMobileChatActionsOpened(false)
-    setLeaveConfirmOpened(false)
+    clearAccountLocalState()
     wsRef.current?.close()
     queryClient.clear()
     notifications.show({ title: t('sessionExpired'), message: t('sessionExpiredMessage'), color: 'yellow' })
@@ -367,7 +417,8 @@ export default function MessengerPage() {
       return next
     },
     onSuccess: (next) => {
-      localStorage.setItem(IDENTITY_KEY, JSON.stringify(next))
+      const accountId = accountStorageID()
+      if (accountId) localStorage.setItem(accountScopedKey(IDENTITY_KEY, accountId), JSON.stringify(next))
       setIdentity(next)
       notifications.show({ title: t('identityCreated'), message: t('identityCreatedMessage'), color: 'green' })
     },
@@ -423,8 +474,7 @@ export default function MessengerPage() {
     },
     onSuccess: ({ room, secret }) => {
       const nextSecrets = { ...roomSecrets, [room.roomId]: secret }
-      setRoomSecrets(nextSecrets)
-      localStorage.setItem(ROOM_SECRETS_KEY, JSON.stringify(nextSecrets))
+      persistRoomSecrets(nextSecrets)
       setActiveRoomID(room.roomId)
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
@@ -445,8 +495,7 @@ export default function MessengerPage() {
     },
     onSuccess: ({ room, secret }) => {
       const nextSecrets = { ...roomSecrets, [room.roomId]: secret }
-      setRoomSecrets(nextSecrets)
-      localStorage.setItem(ROOM_SECRETS_KEY, JSON.stringify(nextSecrets))
+      persistRoomSecrets(nextSecrets)
       setActiveRoomID(room.roomId)
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
@@ -653,8 +702,7 @@ export default function MessengerPage() {
       await leaveRoom({ roomId: activeRoomID, userId: identity.userId, token: session.accessToken })
       const nextSecrets = { ...roomSecrets }
       delete nextSecrets[activeRoomID]
-      setRoomSecrets(nextSecrets)
-      localStorage.setItem(ROOM_SECRETS_KEY, JSON.stringify(nextSecrets))
+      persistRoomSecrets(nextSecrets)
       setActiveRoomID('')
       setMobileView('rooms')
       setSidebarView('rooms')
@@ -686,8 +734,7 @@ export default function MessengerPage() {
   function saveManualSecret() {
     if (!activeRoomID || !roomSecret.trim()) return
     const nextSecrets = { ...roomSecrets, [activeRoomID]: roomSecret.trim() }
-    setRoomSecrets(nextSecrets)
-    localStorage.setItem(ROOM_SECRETS_KEY, JSON.stringify(nextSecrets))
+    persistRoomSecrets(nextSecrets)
     setRoomSecret('')
   }
 
@@ -697,6 +744,7 @@ export default function MessengerPage() {
     }
     localStorage.removeItem(SESSION_KEY)
     setSession(null)
+    clearAccountLocalState()
     wsRef.current?.close()
     queryClient.clear()
   }
