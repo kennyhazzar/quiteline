@@ -1650,7 +1650,18 @@ export default function MessengerPage() {
           )}
         </Card>
 
-        <Card withBorder radius="sm" p="md" style={{ display: leftView === 'profile' ? undefined : 'none' }}>
+        <Card
+          withBorder
+          radius="sm"
+          p="md"
+          style={{
+            display: leftView === 'profile' ? 'block' : 'none',
+            flex: isMobile ? 'unset' : 1,
+            minHeight: 0,
+            maxHeight: isMobile ? 'calc(100dvh - 132px)' : undefined,
+            overflowY: 'auto',
+          }}
+        >
           <Group justify="space-between" align="flex-start" mb="xs" wrap="nowrap">
             <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
               <Avatar src={ownAvatarSrc} name={session.principal.displayName || identity.displayName} radius="xl" size={52} />
