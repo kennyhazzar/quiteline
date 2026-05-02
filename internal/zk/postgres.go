@@ -367,7 +367,10 @@ func (s *PostgresStore) AppendMessage(ctx context.Context, msg EncryptedMessage)
 	msg.Nonce = strings.TrimSpace(msg.Nonce)
 	msg.Algorithm = strings.TrimSpace(msg.Algorithm)
 	msg.KeyID = strings.TrimSpace(msg.KeyID)
-	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Nonce == "" || msg.Algorithm == "" {
+	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Algorithm == "" {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+	if msg.Nonce == "" && !allowsEmptyNonce(msg.Algorithm) {
 		return EncryptedMessage{}, ErrBadRequest
 	}
 	if msg.ID == "" {

@@ -272,7 +272,10 @@ func (s *MemoryStore) AppendMessage(_ context.Context, msg EncryptedMessage) (En
 	msg.Nonce = strings.TrimSpace(msg.Nonce)
 	msg.Algorithm = strings.TrimSpace(msg.Algorithm)
 	msg.KeyID = strings.TrimSpace(msg.KeyID)
-	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Nonce == "" || msg.Algorithm == "" {
+	if msg.RoomID == "" || msg.SenderID == "" || msg.Ciphertext == "" || msg.Algorithm == "" {
+		return EncryptedMessage{}, ErrBadRequest
+	}
+	if msg.Nonce == "" && !allowsEmptyNonce(msg.Algorithm) {
 		return EncryptedMessage{}, ErrBadRequest
 	}
 	if msg.ID == "" {
@@ -289,6 +292,10 @@ func (s *MemoryStore) AppendMessage(_ context.Context, msg EncryptedMessage) (En
 	}
 	s.messages[msg.RoomID] = append(s.messages[msg.RoomID], msg)
 	return msg, nil
+}
+
+func allowsEmptyNonce(algorithm string) bool {
+	return strings.HasPrefix(algorithm, "PLAIN-")
 }
 
 func (s *MemoryStore) MarkRoomRead(_ context.Context, roomID string, userID string) error {
