@@ -15,9 +15,11 @@ services:
 
   redis:
     image: redis:7.4-alpine
+    env_file:
+      - ${APP_ENV_FILE:-.env.prod}
     expose:
       - "6379"
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: ["sh", "-c", "redis-server --save '' --appendonly no --requirepass \"$REDIS_PASSWORD\""]
 
   minio:
     image: minio/minio:RELEASE.2025-04-22T22-12-26Z

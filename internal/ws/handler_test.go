@@ -25,3 +25,32 @@ func TestNormalizeTopic(t *testing.T) {
 		})
 	}
 }
+
+func TestRoomIDFromTopic(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		id   string
+		ok   bool
+	}{
+		{name: "room topic", in: "room:abc123", id: "abc123", ok: true},
+		{name: "non room topic", in: "general", ok: false},
+		{name: "empty room", in: "room:", ok: true},
+		{name: "path traversal shape", in: "room:abc/def", ok: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			id, ok := roomIDFromTopic(tt.in)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if id != tt.id {
+				t.Fatalf("id = %q, want %q", id, tt.id)
+			}
+		})
+	}
+}

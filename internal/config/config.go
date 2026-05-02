@@ -35,6 +35,7 @@ type Config struct {
 	S3Bucket           string
 	S3UseSSL           bool
 	MaxFileBytes       int64
+	Production         bool
 }
 
 func Load() Config {
@@ -66,7 +67,34 @@ func Load() Config {
 		S3Bucket:           stringEnv("S3_BUCKET", "zk-messenger"),
 		S3UseSSL:           boolEnv("S3_USE_SSL", false),
 		MaxFileBytes:       int64(intEnv("MAX_FILE_BYTES", 100*1024*1024+4096)),
+		Production:         boolEnv("PRODUCTION", false),
 	}
+}
+
+func (c Config) Validate() error {
+	if c.Production {
+		if !c.AuthEnabled {
+			return errConfig("AUTH_ENABLED must be true in production")
+		}
+		if c.AuthSecret == "" || c.AuthSecret == "local-dev-secret-change-me" || c.AuthSecret == "local-compose-secret-change-me" || len(c.AuthSecret) < 32 {
+			return errConfig("AUTH_SECRET must be set to a strong random value of at least 32 characters")
+		}
+		for _, origin := range c.CORSAllowedOrigins {
+			if !strings.HasPrefix(origin, "https://") {
+				return errConfig("CORS_ALLOWED_ORIGINS must use https:// origins in production")
+			}
+		}
+		if c.PostgresDSN == "" {
+			return errConfig("POSTGRES_DSN is required in production")
+		}
+	}
+	return nil
+}
+
+type errConfig string
+
+func (e errConfig) Error() string {
+	return string(e)
 }
 
 func stringEnv(key, fallback string) string {

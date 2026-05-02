@@ -35,7 +35,7 @@ type Dependencies struct {
 
 func New(deps Dependencies) http.Handler {
 	mux := http.NewServeMux()
-	wsHandler := ws.NewHandler(deps.Config, deps.Hub, deps.Broker, deps.Metrics, deps.Logger, deps.Auth)
+	wsHandler := ws.NewHandler(deps.Config, deps.Hub, deps.Broker, deps.Metrics, deps.Logger, deps.Auth, deps.ZKStore)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -179,7 +179,7 @@ func New(deps Dependencies) http.Handler {
 		})(w, r)
 	})
 
-	return recoveryMiddleware(corsMiddleware(deps.Config, loggingMiddleware(deps.Logger, mux)))
+	return recoveryMiddleware(securityHeadersMiddleware(corsMiddleware(deps.Config, loggingMiddleware(deps.Logger, mux))))
 }
 
 type tokenRequest struct {
@@ -644,6 +644,10 @@ func handleTouchIdentity(w http.ResponseWriter, r *http.Request, deps Dependenci
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
+	if userID != principalFromContext(r.Context()).UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 
 	identity, err := deps.ZKStore.TouchIdentity(r.Context(), userID)
 	if err != nil {
@@ -738,6 +742,9 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 }
 
 func handleMarkRoomRead(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
 	if err := deps.ZKStore.MarkRoomRead(r.Context(), roomID, principalFromContext(r.Context()).UserID); err != nil {
 		writeStoreError(w, err)
 		return
@@ -799,6 +806,9 @@ func handleLeaveRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, 
 }
 
 func handleListEncryptedMessages(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
 	messages, err := deps.ZKStore.ListMessages(r.Context(), roomID, 100)
 	if err != nil {
 		writeStoreError(w, err)
@@ -808,6 +818,9 @@ func handleListEncryptedMessages(w http.ResponseWriter, r *http.Request, deps De
 }
 
 func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, deps.Config.MaxMessageBytes)
 	var req encryptedMessageRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -838,6 +851,9 @@ func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 }
 
 func handleUpdateEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, messageID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, deps.Config.MaxMessageBytes)
 	var req encryptedMessageRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -866,6 +882,9 @@ func handleUpdateEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 }
 
 func handleDeleteEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, messageID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
 	msg, err := deps.ZKStore.DeleteMessageForAll(r.Context(), roomID, messageID, principalFromContext(r.Context()).UserID)
 	if err != nil {
 		writeStoreError(w, err)
@@ -880,6 +899,9 @@ func handleDeleteEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 }
 
 func handleToggleMessageReaction(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string, messageID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
 	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
 	var req reactionRequest
 	if err := decodeJSON(r, &req); err != nil {
@@ -939,6 +961,24 @@ func handleDownloadEncryptedFile(w http.ResponseWriter, r *http.Request, deps De
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, reader)
+}
+
+func requireRoomMember(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) bool {
+	principal := principalFromContext(r.Context())
+	if principal.UserID == "" {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return false
+	}
+	ok, err := deps.ZKStore.IsRoomMember(r.Context(), roomID, principal.UserID)
+	if err != nil {
+		writeStoreError(w, err)
+		return false
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return false
+	}
+	return true
 }
 
 func topicFromPath(path string) (string, bool) {
@@ -1101,6 +1141,19 @@ func corsMiddleware(cfg config.Config, next http.Handler) http.Handler {
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		if strings.HasPrefix(r.URL.Path, "/v1/auth/") || strings.HasPrefix(r.URL.Path, "/v1/me") {
+			w.Header().Set("Cache-Control", "no-store")
 		}
 		next.ServeHTTP(w, r)
 	})

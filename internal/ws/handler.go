@@ -25,9 +25,14 @@ type Handler struct {
 	logger   *slog.Logger
 	auth     *auth.Service
 	upgrader websocket.Upgrader
+	rooms    RoomAuthorizer
 }
 
-func NewHandler(cfg config.Config, hub *Hub, broker broker.Broker, metrics *metrics.Registry, logger *slog.Logger, authService *auth.Service) *Handler {
+type RoomAuthorizer interface {
+	IsRoomMember(ctx context.Context, roomID string, userID string) (bool, error)
+}
+
+func NewHandler(cfg config.Config, hub *Hub, broker broker.Broker, metrics *metrics.Registry, logger *slog.Logger, authService *auth.Service, rooms RoomAuthorizer) *Handler {
 	return &Handler{
 		cfg:     cfg,
 		hub:     hub,
@@ -35,6 +40,7 @@ func NewHandler(cfg config.Config, hub *Hub, broker broker.Broker, metrics *metr
 		metrics: metrics,
 		logger:  logger,
 		auth:    authService,
+		rooms:   rooms,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -71,7 +77,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := NewClient(h.cfg, topicsFromQuery(r))
+	client := NewClient(h.cfg, h.authorizedTopics(r.Context(), principal, topicsFromQuery(r)))
 	h.hub.Register(client)
 
 	go h.writePump(conn, client)
@@ -108,6 +114,10 @@ func (h *Handler) readPump(ctx context.Context, conn *websocket.Conn, client *Cl
 				client.SendError("topic_required")
 				continue
 			}
+			if !h.authorizeTopic(ctx, principal, topic) {
+				client.SendError("forbidden")
+				continue
+			}
 			h.hub.Subscribe(client, topic)
 		case "unsubscribe":
 			if topic == "" {
@@ -124,6 +134,10 @@ func (h *Handler) readPump(ctx context.Context, conn *websocket.Conn, client *Cl
 				client.SendError("topic_and_data_required")
 				continue
 			}
+			if !h.authorizeTopic(ctx, principal, topic) {
+				client.SendError("forbidden")
+				continue
+			}
 			msg := message.New(topic, command.Data, h.cfg.NodeID)
 			if err := h.broker.Publish(ctx, msg); err != nil {
 				h.metrics.BrokerPublishErrors.Inc()
@@ -135,6 +149,32 @@ func (h *Handler) readPump(ctx context.Context, conn *websocket.Conn, client *Cl
 			client.SendError("unknown_command")
 		}
 	}
+}
+
+func (h *Handler) authorizedTopics(ctx context.Context, principal auth.Principal, topics []string) []string {
+	result := make([]string, 0, len(topics))
+	for _, topic := range topics {
+		if h.authorizeTopic(ctx, principal, topic) {
+			result = append(result, topic)
+		}
+	}
+	return result
+}
+
+func (h *Handler) authorizeTopic(ctx context.Context, principal auth.Principal, topic string) bool {
+	roomID, ok := roomIDFromTopic(topic)
+	if !ok {
+		return true
+	}
+	if principal.UserID == "" || h.rooms == nil {
+		return false
+	}
+	allowed, err := h.rooms.IsRoomMember(ctx, roomID, principal.UserID)
+	if err != nil {
+		h.logger.Warn("websocket room authorization failed", "room", roomID, "user", principal.UserID, "error", err)
+		return false
+	}
+	return allowed
 }
 
 func (h *Handler) writePump(conn *websocket.Conn, client *Client) {
@@ -182,4 +222,16 @@ func normalizeTopic(topic string) string {
 		return ""
 	}
 	return topic
+}
+
+func roomIDFromTopic(topic string) (string, bool) {
+	const prefix = "room:"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", false
+	}
+	roomID := strings.TrimSpace(strings.TrimPrefix(topic, prefix))
+	if roomID == "" || strings.ContainsAny(roomID, " \t\r\n/") {
+		return "", true
+	}
+	return roomID, true
 }

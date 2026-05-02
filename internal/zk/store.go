@@ -72,6 +72,7 @@ type Store interface {
 	GetIdentity(ctx context.Context, userID string) (Identity, error)
 	TouchIdentity(ctx context.Context, userID string) (Identity, error)
 	CreateRoom(ctx context.Context, room Room) (Room, error)
+	IsRoomMember(ctx context.Context, roomID string, userID string) (bool, error)
 	AddRoomMember(ctx context.Context, roomID string, userID string) error
 	LeaveRoom(ctx context.Context, roomID string, userID string) error
 	ListRooms(ctx context.Context, userID string) ([]Room, error)
@@ -207,6 +208,21 @@ func (s *MemoryStore) CreateRoom(_ context.Context, room Room) (Room, error) {
 	}
 	s.rooms[room.RoomID] = room
 	return room, nil
+}
+
+func (s *MemoryStore) IsRoomMember(_ context.Context, roomID string, userID string) (bool, error) {
+	roomID = normalizeID(roomID)
+	userID = normalizeID(userID)
+	if roomID == "" || userID == "" {
+		return false, ErrBadRequest
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return false, ErrNotFound
+	}
+	return hasMember(room.Members, userID), nil
 }
 
 func (s *MemoryStore) AddRoomMember(_ context.Context, roomID string, userID string) error {

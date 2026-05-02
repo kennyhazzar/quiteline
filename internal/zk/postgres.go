@@ -221,6 +221,20 @@ func (s *PostgresStore) CreateRoom(ctx context.Context, room Room) (Room, error)
 	return room, tx.Commit(ctx)
 }
 
+func (s *PostgresStore) IsRoomMember(ctx context.Context, roomID string, userID string) (bool, error) {
+	roomID = normalizeID(roomID)
+	userID = normalizeID(userID)
+	if roomID == "" || userID == "" {
+		return false, ErrBadRequest
+	}
+	var exists bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2)`,
+		roomID, userID,
+	).Scan(&exists)
+	return exists, err
+}
+
 func (s *PostgresStore) AddRoomMember(ctx context.Context, roomID string, userID string) error {
 	roomID = normalizeID(roomID)
 	userID = normalizeID(userID)
