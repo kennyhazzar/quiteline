@@ -29,6 +29,8 @@ export interface EncryptedAttachment {
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
+export const PLAIN_MESSAGE_ALGORITHM = 'PLAIN-JSON-V1'
+export const PLAIN_FILE_ALGORITHM = 'PLAIN-FILE-V1'
 
 export async function createLocalIdentity(displayName: string): Promise<LocalIdentity> {
   const pair = await crypto.subtle.generateKey(
@@ -74,6 +76,28 @@ export async function encryptMessage(roomSecret: string, message: PlainMessage) 
   }
 }
 
+export function encodePlainMessage(message: PlainMessage) {
+  return {
+    ciphertext: bytesToBase64URL(encoder.encode(JSON.stringify(message))),
+    nonce: '',
+    algorithm: PLAIN_MESSAGE_ALGORITHM,
+    keyId: 'plain',
+  }
+}
+
+export async function decodeMessagePayload(input: {
+  roomSecret?: string
+  ciphertext: string
+  nonce: string
+  algorithm: string
+}): Promise<PlainMessage> {
+  if (input.algorithm === PLAIN_MESSAGE_ALGORITHM) {
+    return JSON.parse(decoder.decode(base64URLToBytes(input.ciphertext))) as PlainMessage
+  }
+  if (!input.roomSecret) throw new Error('room_secret_required')
+  return decryptMessage(input.roomSecret, input.ciphertext, input.nonce)
+}
+
 export async function decryptMessage(roomSecret: string, ciphertext: string, nonce: string): Promise<PlainMessage> {
   const key = await importRoomKey(roomSecret)
   const nonceBytes = base64URLToBytes(nonce)
@@ -110,6 +134,20 @@ export async function decryptFile(roomSecret: string, encrypted: Blob, nonce: st
     await encrypted.arrayBuffer(),
   )
   return new Blob([plain], { type: type || 'application/octet-stream' })
+}
+
+export async function decodeFilePayload(input: {
+  roomSecret?: string
+  encrypted: Blob
+  nonce: string
+  type: string
+  algorithm: string
+}): Promise<Blob> {
+  if (input.algorithm === PLAIN_FILE_ALGORITHM) {
+    return input.encrypted.slice(0, input.encrypted.size, input.type || 'application/octet-stream')
+  }
+  if (!input.roomSecret) throw new Error('room_secret_required')
+  return decryptFile(input.roomSecret, input.encrypted, input.nonce, input.type)
 }
 
 async function importRoomKey(roomSecret: string): Promise<CryptoKey> {

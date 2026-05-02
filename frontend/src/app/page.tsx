@@ -68,10 +68,10 @@ import { compressAvatar } from '@/lib/avatar'
 import { useI18n } from '@/lib/i18n'
 import {
   createRoomSecret,
-  decryptFile,
-  decryptMessage,
-  encryptFile,
-  encryptMessage,
+  decodeFilePayload,
+  decodeMessagePayload,
+  encodePlainMessage,
+  PLAIN_FILE_ALGORITHM,
   type PlainMessage,
 } from '@/lib/crypto'
 
@@ -569,22 +569,21 @@ export default function MessengerPage() {
 
   const sendMutation = useMutation({
     mutationFn: async () => {
-      if (!identity || !session || !activeRoomID || !activeSecret) throw new Error('room_not_ready')
+      if (!identity || !session || !activeRoomID) throw new Error('room_not_ready')
       let attachment: PlainMessage['attachment']
       if (selectedFile) {
-        const encryptedFile = await encryptFile(activeSecret, selectedFile)
-        const uploaded = await uploadEncryptedFile({ token: session.accessToken, blob: encryptedFile.blob })
+        const uploaded = await uploadEncryptedFile({ token: session.accessToken, blob: selectedFile })
         attachment = {
           fileId: uploaded.fileId,
           name: selectedFile.name,
           type: selectedFile.type,
           size: selectedFile.size,
           ciphertextSize: uploaded.size,
-          nonce: encryptedFile.nonce,
-          algorithm: encryptedFile.algorithm,
+          nonce: '',
+          algorithm: PLAIN_FILE_ALGORITHM,
         }
       }
-      const encrypted = await encryptMessage(activeSecret, {
+      const payload = encodePlainMessage({
         text: messageText,
         senderName: identity.displayName,
         senderAvatarUrl: session.principal.avatarUrl,
@@ -595,7 +594,7 @@ export default function MessengerPage() {
         roomId: activeRoomID,
         senderId: identity.userId,
         token: session.accessToken,
-        ...encrypted,
+        ...payload,
       })
     },
     onSuccess: () => {
@@ -620,17 +619,18 @@ export default function MessengerPage() {
   useEffect(() => {
     let cancelled = false
     async function run() {
-      if (!activeSecret) {
-        setDecryptedMessages([])
-        return
-      }
       const next = await Promise.all(
         encryptedMessages.map(async (msg) => {
           try {
             return {
               id: msg.id,
               senderId: msg.senderId,
-              body: await decryptMessage(activeSecret, msg.ciphertext, msg.nonce),
+              body: await decodeMessagePayload({
+                roomSecret: activeSecret,
+                ciphertext: msg.ciphertext,
+                nonce: msg.nonce,
+                algorithm: msg.algorithm,
+              }),
               createdAt: msg.createdAt,
             }
           } catch {
@@ -747,10 +747,10 @@ export default function MessengerPage() {
     else setSidebarView('chat')
   }
 
-  async function sendSystemMessage(roomID: string, secret: string, type: 'join' | 'leave') {
-    if (!identity || !session || !roomID || !secret) return
+  async function sendSystemMessage(roomID: string, _secret: string, type: 'join' | 'leave') {
+    if (!identity || !session || !roomID) return
     const text = type === 'join' ? t('systemJoined') : t('systemLeft')
-    const encrypted = await encryptMessage(secret, {
+    const payload = encodePlainMessage({
       text: '',
       senderName: identity.displayName,
       senderAvatarUrl: session.principal.avatarUrl,
@@ -761,7 +761,7 @@ export default function MessengerPage() {
       roomId: roomID,
       senderId: identity.userId,
       token: session.accessToken,
-      ...encrypted,
+      ...payload,
     })
     queryClient.invalidateQueries({ queryKey: ['chat-messages', roomID] })
   }
@@ -836,7 +836,7 @@ export default function MessengerPage() {
   }
 
   function submitMessage() {
-    if ((!messageText.trim() && !selectedFile) || !activeSecret || sendMutation.isPending) return
+    if ((!messageText.trim() && !selectedFile) || !activeRoomID || sendMutation.isPending) return
     if (selectedFile && selectedFile.size > MAX_FILE_BYTES) {
       notifications.show({ title: t('fileTooLarge'), message: t('fileTooLargeMessage'), color: 'red' })
       return
@@ -876,11 +876,17 @@ export default function MessengerPage() {
   }
 
   async function previewAttachment(msg: DecryptedMessage) {
-    if (!session || !activeSecret || !msg.body?.attachment) return
+    if (!session || !msg.body?.attachment) return
     const attachment = msg.body.attachment
     try {
       const encrypted = await downloadEncryptedFile({ token: session.accessToken, fileId: attachment.fileId })
-      const decrypted = await decryptFile(activeSecret, encrypted, attachment.nonce, attachment.type)
+      const decrypted = await decodeFilePayload({
+        roomSecret: activeSecret,
+        encrypted,
+        nonce: attachment.nonce,
+        type: attachment.type,
+        algorithm: attachment.algorithm,
+      })
       const url = URL.createObjectURL(decrypted)
       setPreviews((prev) => {
         if (prev[msg.id]) URL.revokeObjectURL(prev[msg.id])
@@ -896,11 +902,17 @@ export default function MessengerPage() {
   }
 
   async function downloadAttachment(msg: DecryptedMessage) {
-    if (!session || !activeSecret || !msg.body?.attachment) return
+    if (!session || !msg.body?.attachment) return
     const attachment = msg.body.attachment
     try {
       const encrypted = await downloadEncryptedFile({ token: session.accessToken, fileId: attachment.fileId })
-      const decrypted = await decryptFile(activeSecret, encrypted, attachment.nonce, attachment.type)
+      const decrypted = await decodeFilePayload({
+        roomSecret: activeSecret,
+        encrypted,
+        nonce: attachment.nonce,
+        type: attachment.type,
+        algorithm: attachment.algorithm,
+      })
       const url = URL.createObjectURL(decrypted)
       const link = document.createElement('a')
       link.href = url
@@ -1127,7 +1139,7 @@ export default function MessengerPage() {
               leftSection={callState === 'idle' ? <IconPhone size={16} /> : <IconPhoneOff size={16} />}
               onClick={callState === 'idle' ? startCall : () => endCall(true)}
               fullWidth
-              disabled={!activeSecret}
+              disabled={!activeRoomID}
             >
               {callState === 'idle' ? t('startCall') : t('endCall')}
             </Button>
@@ -1521,7 +1533,7 @@ export default function MessengerPage() {
                     color={callState === 'idle' ? 'green' : 'red'}
                     leftSection={callState === 'idle' ? <IconPhone size={16} /> : <IconPhoneOff size={16} />}
                     onClick={callState === 'idle' ? startCall : () => endCall(true)}
-                    disabled={!activeSecret}
+                    disabled={!activeRoomID}
                   >
                     {callState === 'idle' ? t('startCall') : t('endCall')}
                   </Button>
@@ -1585,7 +1597,7 @@ export default function MessengerPage() {
               </Text>
             </Box>}
 
-            {!activeSecret && (
+            {!activeSecret && decryptedMessages.some((msg) => msg.failed) && (
               <Alert color="yellow" title={t('roomSecretRequired')}>
                 <Group align="flex-end" mt="xs" wrap={isMobile ? 'wrap' : 'nowrap'}>
                   <PasswordInput
@@ -1695,7 +1707,7 @@ export default function MessengerPage() {
                 </Group>
               )}
               <Group align="center" gap="xs" wrap="nowrap">
-                <FileButton onChange={selectFile} accept="*/*" disabled={!activeSecret || sendMutation.isPending}>
+                <FileButton onChange={selectFile} accept="*/*" disabled={!activeRoomID || sendMutation.isPending}>
                   {(props) => (
                     <ActionIcon
                       {...props}
@@ -1710,7 +1722,7 @@ export default function MessengerPage() {
                 </FileButton>
                 <TextInput
                   aria-label={t('message')}
-                  placeholder={activeSecret ? t('typeMessage') : t('unlockFirst')}
+                  placeholder={activeRoomID ? t('typeMessage') : t('unlockFirst')}
                   value={messageText}
                   onChange={(event) => updateMessageText(event.currentTarget.value)}
                   onKeyDown={(event) => {
@@ -1719,7 +1731,7 @@ export default function MessengerPage() {
                       submitMessage()
                     }
                   }}
-                  disabled={!activeSecret}
+                  disabled={!activeRoomID}
                   style={{ flex: 1, minWidth: 0 }}
                   styles={{ input: { fontSize: isMobile ? 16 : undefined } }}
                 />
@@ -1728,7 +1740,7 @@ export default function MessengerPage() {
                   size="lg"
                   onClick={submitMessage}
                   loading={sendMutation.isPending}
-                  disabled={(!messageText.trim() && !selectedFile) || !activeSecret}
+                  disabled={(!messageText.trim() && !selectedFile) || !activeRoomID}
                   aria-label={t('send')}
                   title={t('send')}
                 >
