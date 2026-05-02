@@ -1,0 +1,14 @@
+chat.2vault.site {
+	encode zstd gzip
+	reverse_proxy frontend:3000
+}
+
+api.chat.2vault.site {
+	encode zstd gzip
+
+	request_body {
+		max_size 110MB
+	}
+
+	reverse_proxy server-a:8080
+}

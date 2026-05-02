@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 !.env.prod.example
+!.env.deploy.example
 frontend/.env.local
 frontend/.env.*.local
 
