@@ -367,6 +367,17 @@ export default function MessengerPage() {
     () => (memberIdentities.data ?? []).filter((member) => member.userId !== identity?.userId),
     [identity?.userId, memberIdentities.data],
   )
+  const mobilePeerStatus = useMemo(() => {
+    if (peers.length === 0) return ''
+    const onlinePeers = peers.filter((member) => presence[member.userId]?.status === 'online')
+    const statusText = onlinePeers.length > 0
+      ? `${onlinePeers.map((member) => member.displayName).join(', ')}: ${t('online')}`
+      : peers.length === 1
+        ? `${peers[0].displayName}: ${t('lastSeen')} ${formatLastSeen(presence[peers[0].userId]?.lastSeenAt || peers[0].lastSeenAt)}`
+        : `${peers.length}: ${t('offline')}`
+    if (activeTyping.length === 0) return statusText
+    return `${statusText} · ${activeTyping.join(', ')} ${t('typing')}`
+  }, [activeTyping, peers, presence, t])
   const identitiesByID = useMemo(() => {
     const result = new Map<string, Identity>()
     for (const item of memberIdentities.data ?? []) result.set(item.userId, item)
@@ -2089,7 +2100,7 @@ export default function MessengerPage() {
                 )}
                 {isMobile ? (
                   <Text size="xs" c="dimmed" truncate>
-                    {activeTyping.length > 0 ? `${activeTyping.join(', ')} ${t('typing')}` : ''}
+                    {mobilePeerStatus || ' '}
                   </Text>
                 ) : (
                   <Group gap={6} wrap="nowrap">
