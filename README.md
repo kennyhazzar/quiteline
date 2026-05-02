@@ -315,6 +315,7 @@ Services:
 - MinIO Console: `http://localhost:19001` (`minioadmin` / `minioadmin`)
 
 For production deployment to `chat.2vault.site`, see [DEPLOY.md](DEPLOY.md).
+For Dokploy-based deployment, see [DEPLOY_DOKPLOY.md](DEPLOY_DOKPLOY.md).
 
 ## Using the App
 
