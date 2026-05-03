@@ -115,10 +115,16 @@ interface MessageDraft {
 type RealtimeEvent =
   | { kind: 'typing'; userId: string; displayName: string; typing: boolean; at: string }
   | { kind: 'presence'; userId: string; displayName: string; status: 'online' | 'offline'; lastSeenAt: string }
-  | { kind: 'call-offer'; callId: string; fromUserId: string; displayName: string; offer: RTCSessionDescriptionInit }
-  | { kind: 'call-answer'; callId: string; fromUserId: string; answer: RTCSessionDescriptionInit }
-  | { kind: 'call-ice'; callId: string; fromUserId: string; candidate: RTCIceCandidateInit }
-  | { kind: 'call-hangup'; callId: string; fromUserId: string }
+  | { kind: 'rooms.changed'; roomId?: string; userId?: string; at: string }
+  | { kind: 'friends.changed'; userId?: string; at: string }
+  | { kind: 'sessions.changed'; userId?: string; at: string }
+  | { kind: 'session.revoked'; userId?: string; sessionId?: string; at: string }
+  | { kind: 'message.read'; roomId: string; userId: string; at: string }
+  | { kind: 'call-offer'; callId: string; roomId: string; fromUserId: string; toUserId: string; displayName: string; offer: RTCSessionDescriptionInit }
+  | { kind: 'call-answer'; callId: string; roomId: string; fromUserId: string; toUserId: string; answer: RTCSessionDescriptionInit }
+  | { kind: 'call-ice'; callId: string; roomId: string; fromUserId: string; toUserId: string; candidate: RTCIceCandidateInit }
+  | { kind: 'call-hangup'; callId: string; roomId: string; fromUserId: string; toUserId: string }
+  | { kind: 'call-decline'; callId: string; roomId: string; fromUserId: string; toUserId: string; reason?: 'busy' | 'declined' }
 
 type CallState = 'idle' | 'calling' | 'ringing' | 'connected'
 
@@ -217,6 +223,7 @@ export default function MessengerPage() {
   const [callState, setCallState] = useState<CallState>('idle')
   const [incomingCall, setIncomingCall] = useState<Extract<RealtimeEvent, { kind: 'call-offer' }> | null>(null)
   const [callPeerName, setCallPeerName] = useState('')
+  const [callPeerID, setCallPeerID] = useState('')
   const [profileUser, setProfileUser] = useState<Identity | null>(null)
   const [leavingRoom, setLeavingRoom] = useState(false)
   const [mobileChatActionsOpened, setMobileChatActionsOpened] = useState(false)
@@ -232,6 +239,7 @@ export default function MessengerPage() {
   const peerRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const activeCallIDRef = useRef('')
+  const activeCallPeerIDRef = useRef('')
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
   const readMarksRef = useRef<Record<string, number>>({})
 
@@ -250,12 +258,11 @@ export default function MessengerPage() {
     }
   }, [])
 
-  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 5000 })
+  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 30000 })
   const rooms = useQuery({
     queryKey: ['chat-rooms', identity?.userId, session?.accessToken],
     queryFn: () => fetchRooms(session?.accessToken ?? ''),
     enabled: Boolean(identity && session),
-    refetchInterval: 3000,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -271,7 +278,6 @@ export default function MessengerPage() {
     queryKey: ['friends', session?.accessToken],
     queryFn: () => fetchFriends(session?.accessToken ?? ''),
     enabled: Boolean(session),
-    refetchInterval: 5000,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   })
@@ -279,7 +285,6 @@ export default function MessengerPage() {
     queryKey: ['chat-messages', activeRoomID, session?.accessToken],
     queryFn: () => fetchMessages(activeRoomID, session?.accessToken ?? ''),
     enabled: Boolean(activeRoomID && session),
-    refetchInterval: activeRoomID ? 3000 : false,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -301,7 +306,6 @@ export default function MessengerPage() {
       return identities.filter((item): item is Identity => Boolean(item))
     },
     enabled: Boolean(activeRoom && session),
-    refetchInterval: 10000,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -371,6 +375,10 @@ export default function MessengerPage() {
     () => (memberIdentities.data ?? []).filter((member) => member.userId !== identity?.userId),
     [identity?.userId, memberIdentities.data],
   )
+  const preferredCallPeer = useMemo(() => {
+    const onlinePeer = peers.find((member) => presence[member.userId]?.status === 'online')
+    return onlinePeer ?? peers[0] ?? null
+  }, [peers, presence])
   const mobilePeerStatus = useMemo(() => {
     if (peers.length === 0) return ''
     const onlinePeers = peers.filter((member) => presence[member.userId]?.status === 'online')
@@ -802,8 +810,6 @@ export default function MessengerPage() {
       if (identity) {
         sendRealtime({ kind: 'typing', userId: identity.userId, displayName: identity.displayName, typing: false, at: new Date().toISOString() })
       }
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
-      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       setReplyTarget(null)
     },
     onError: (err: Error, draft) => {
@@ -832,7 +838,6 @@ export default function MessengerPage() {
       setLiveMessages((prev) => [...prev, message].slice(-200))
       setEditTarget(null)
       setEditText('')
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
     },
     onError: (err: Error) => handleRequestError(err, 'Could not edit message'),
   })
@@ -855,7 +860,6 @@ export default function MessengerPage() {
         persistLocalDeletedMessages({ ...localDeletedMessageIDs, [message.id]: true })
       } else {
         setLiveMessages((prev) => [...prev, message].slice(-200))
-        queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
       }
       setDeleteTarget(null)
       setDeleteForEveryone(false)
@@ -875,7 +879,6 @@ export default function MessengerPage() {
     },
     onSuccess: (message) => {
       setLiveMessages((prev) => [...prev, message].slice(-200))
-      queryClient.invalidateQueries({ queryKey: ['chat-messages', message.roomId] })
     },
     onError: (err: Error) => handleRequestError(err, 'Could not react'),
   })
@@ -994,10 +997,6 @@ export default function MessengerPage() {
     if (lastSeenLength === decryptedMessages.length) return
     readMarksRef.current[activeRoomID] = decryptedMessages.length
     markRoomRead({ token: session.accessToken, roomId: activeRoomID })
-      .then(() => {
-        queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
-        queryClient.invalidateQueries({ queryKey: ['chat-messages', activeRoomID] })
-      })
       .catch((err: Error) => {
         if (err instanceof AuthError) handleAuthExpired()
       })
@@ -1005,9 +1004,9 @@ export default function MessengerPage() {
 
   function handleRealtimeEvent(event: RealtimeEvent) {
     if (!identity) return
-    if ('userId' in event && event.userId === identity.userId) return
     if ('fromUserId' in event && event.fromUserId === identity.userId) return
     if (event.kind === 'typing') {
+      if (event.userId === identity.userId) return
       setTypingUsers((prev) => ({
         ...prev,
         [event.userId]: { displayName: event.displayName, until: event.typing ? Date.now() + 3500 : 0 },
@@ -1015,6 +1014,7 @@ export default function MessengerPage() {
       return
     }
     if (event.kind === 'presence') {
+      if (event.userId === identity.userId) return
       setPresence((prev) => ({
         ...prev,
         [event.userId]: {
@@ -1024,6 +1024,47 @@ export default function MessengerPage() {
         },
       }))
       notifyChat(event.status === 'online' ? t('userJoined') : t('userLeft'), event.displayName)
+      return
+    }
+    if (event.kind === 'rooms.changed') {
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+      if (event.roomId && event.roomId === activeRoomID) {
+        queryClient.invalidateQueries({ queryKey: ['chat-identities', event.roomId] })
+      }
+      return
+    }
+    if (event.kind === 'friends.changed') {
+      queryClient.invalidateQueries({ queryKey: ['friends'] })
+      return
+    }
+    if (event.kind === 'sessions.changed') {
+      queryClient.invalidateQueries({ queryKey: ['account-sessions'] })
+      return
+    }
+    if (event.kind === 'session.revoked') {
+      if (event.sessionId && event.sessionId === session?.principal.sessionId) {
+        handleAuthExpired()
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['account-sessions'] })
+      return
+    }
+    if (event.kind === 'message.read') {
+      if (event.userId === identity.userId) {
+        queryClient.setQueriesData<{ rooms: Room[] }>({ queryKey: ['chat-rooms'] }, (current) => {
+          if (!current) return current
+          return {
+            rooms: current.rooms.map((room) => (
+              room.roomId === event.roomId ? { ...room, unreadCount: 0 } : room
+            )),
+          }
+        })
+        return
+      }
+      if (event.roomId === activeRoomID) {
+        queryClient.invalidateQueries({ queryKey: ['chat-messages', event.roomId] })
+      }
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       return
     }
     handleCallEvent(event)
@@ -1038,15 +1079,18 @@ export default function MessengerPage() {
     const msg = data as EncryptedMessage
     if (msg.senderId !== identity?.userId) notifyChat(t('newMessage'), activeRoom?.name)
     setLiveMessages((prev) => [...prev, msg].slice(-200))
+    queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
   }
 
   const connectWS = useCallback((roomID: string) => {
-    if (!session) return
+    if (!session || !identity) return
     wsRef.current?.close()
     setLiveMessages([])
     setPendingMessages([])
     const url = new URL(`${WS_BASE}/ws`)
-    url.searchParams.set('topics', `room:${roomID}`)
+    const topics = [`user:${identity.userId}`]
+    if (roomID) topics.push(`room:${roomID}`)
+    url.searchParams.set('topics', topics.join(','))
     url.searchParams.set('token', session.accessToken)
     const ws = new WebSocket(url.toString())
     wsRef.current = ws
@@ -1063,7 +1107,7 @@ export default function MessengerPage() {
     ws.onmessage = (event) => {
       try {
         const envelope = JSON.parse(event.data) as MessageEnvelope
-        if (envelope.topic === `room:${roomID}`) {
+        if (envelope.topic === `room:${roomID}` || envelope.topic === `user:${identity.userId}`) {
           handleIncomingData(envelope.data)
         }
       } catch {
@@ -1071,12 +1115,12 @@ export default function MessengerPage() {
       }
     }
     ws.onerror = () => notifications.show({ title: t('wsError'), message: t('liveDisconnected'), color: 'red' })
-  }, [session, identity, activeTopic])
+  }, [session, identity, activeTopic, activeRoomID])
 
   useEffect(() => {
-    if (activeRoomID) connectWS(activeRoomID)
+    if (identity && session) connectWS(activeRoomID)
     return () => wsRef.current?.close()
-  }, [activeRoomID, connectWS, identity])
+  }, [activeRoomID, connectWS, identity, session])
 
   function selectRoom(room: Room) {
     setActiveRoomID(room.roomId)
@@ -1102,7 +1146,6 @@ export default function MessengerPage() {
       token: session.accessToken,
       ...payload,
     })
-    queryClient.invalidateQueries({ queryKey: ['chat-messages', roomID] })
   }
 
   async function leaveActiveRoom() {
@@ -1341,13 +1384,21 @@ export default function MessengerPage() {
     }
   }
 
-  async function ensurePeer(callId: string) {
+  async function ensurePeer(callId: string, targetUserId: string) {
     if (peerRef.current) return peerRef.current
     const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
     activeCallIDRef.current = callId
+    activeCallPeerIDRef.current = targetUserId
     peer.onicecandidate = (event) => {
-      if (!event.candidate || !identity) return
-      sendRealtime({ kind: 'call-ice', callId, fromUserId: identity.userId, candidate: event.candidate.toJSON() })
+      if (!event.candidate || !identity || !activeRoomID || !activeCallPeerIDRef.current) return
+      sendRealtime({
+        kind: 'call-ice',
+        callId,
+        roomId: activeRoomID,
+        fromUserId: identity.userId,
+        toUserId: activeCallPeerIDRef.current,
+        candidate: event.candidate.toJSON(),
+      })
     }
     peer.ontrack = (event) => {
       if (remoteAudioRef.current) {
@@ -1361,15 +1412,30 @@ export default function MessengerPage() {
     return peer
   }
 
-  async function startCall() {
+  async function startCall(targetUserId = preferredCallPeer?.userId ?? '') {
     if (!identity || !activeRoomID || callState !== 'idle') return
+    const target = peers.find((member) => member.userId === targetUserId)
+    if (!target) {
+      notifications.show({ title: t('callFailed'), message: locale === 'ru' ? 'В этой комнате нет собеседника для звонка.' : 'There is nobody to call in this room.', color: 'yellow' })
+      return
+    }
     try {
       const callId = crypto.randomUUID()
-      const peer = await ensurePeer(callId)
+      const peer = await ensurePeer(callId, target.userId)
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
+      setCallPeerID(target.userId)
+      setCallPeerName(target.displayName)
       setCallState('calling')
-      sendRealtime({ kind: 'call-offer', callId, fromUserId: identity.userId, displayName: identity.displayName, offer })
+      sendRealtime({
+        kind: 'call-offer',
+        callId,
+        roomId: activeRoomID,
+        fromUserId: identity.userId,
+        toUserId: target.userId,
+        displayName: identity.displayName,
+        offer,
+      })
     } catch (err) {
       notifications.show({ title: t('callFailed'), message: err instanceof Error ? err.message : 'call_failed', color: 'red' })
       endCall(false)
@@ -1379,13 +1445,21 @@ export default function MessengerPage() {
   async function answerCall() {
     if (!incomingCall || !identity) return
     try {
-      const peer = await ensurePeer(incomingCall.callId)
+      const peer = await ensurePeer(incomingCall.callId, incomingCall.fromUserId)
       await peer.setRemoteDescription(incomingCall.offer)
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
+      setCallPeerID(incomingCall.fromUserId)
       setCallState('connected')
       setCallPeerName(incomingCall.displayName)
-      sendRealtime({ kind: 'call-answer', callId: incomingCall.callId, fromUserId: identity.userId, answer })
+      sendRealtime({
+        kind: 'call-answer',
+        callId: incomingCall.callId,
+        roomId: incomingCall.roomId,
+        fromUserId: identity.userId,
+        toUserId: incomingCall.fromUserId,
+        answer,
+      })
       setIncomingCall(null)
     } catch (err) {
       notifications.show({ title: t('callFailed'), message: err instanceof Error ? err.message : 'call_failed', color: 'red' })
@@ -1394,26 +1468,60 @@ export default function MessengerPage() {
   }
 
   function endCall(notifyPeer = true) {
-    if (notifyPeer && identity && activeCallIDRef.current) {
-      sendRealtime({ kind: 'call-hangup', callId: activeCallIDRef.current, fromUserId: identity.userId })
+    if (notifyPeer && identity && activeRoomID && activeCallIDRef.current && activeCallPeerIDRef.current) {
+      sendRealtime({
+        kind: 'call-hangup',
+        callId: activeCallIDRef.current,
+        roomId: activeRoomID,
+        fromUserId: identity.userId,
+        toUserId: activeCallPeerIDRef.current,
+      })
     }
     peerRef.current?.close()
     peerRef.current = null
     localStreamRef.current?.getTracks().forEach((track) => track.stop())
     localStreamRef.current = null
     activeCallIDRef.current = ''
+    activeCallPeerIDRef.current = ''
     setCallState('idle')
     setIncomingCall(null)
     setCallPeerName('')
+    setCallPeerID('')
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
+  }
+
+  function declineIncomingCall() {
+    if (incomingCall && identity) {
+      sendRealtime({
+        kind: 'call-decline',
+        callId: incomingCall.callId,
+        roomId: incomingCall.roomId,
+        fromUserId: identity.userId,
+        toUserId: incomingCall.fromUserId,
+        reason: 'declined',
+      })
+    }
+    endCall(false)
   }
 
   async function handleCallEvent(event: RealtimeEvent) {
     if (!identity || !('fromUserId' in event) || event.fromUserId === identity.userId) return
+    if ('toUserId' in event && event.toUserId !== identity.userId) return
     if (event.kind === 'call-offer') {
-      if (callState !== 'idle') return
+      if (callState !== 'idle') {
+        sendRealtime({
+          kind: 'call-decline',
+          callId: event.callId,
+          roomId: event.roomId,
+          fromUserId: identity.userId,
+          toUserId: event.fromUserId,
+          reason: 'busy',
+        })
+        return
+      }
       setIncomingCall(event)
       setCallState('ringing')
+      setCallPeerID(event.fromUserId)
       setCallPeerName(event.displayName)
       return
     }
@@ -1428,6 +1536,17 @@ export default function MessengerPage() {
       return
     }
     if (event.kind === 'call-hangup') {
+      endCall(false)
+      return
+    }
+    if (event.kind === 'call-decline') {
+      notifications.show({
+        title: t('declineCall'),
+        message: event.reason === 'busy'
+          ? (locale === 'ru' ? 'Собеседник уже в звонке.' : 'The user is already in a call.')
+          : t('declineCall'),
+        color: 'yellow',
+      })
       endCall(false)
     }
   }
@@ -1688,7 +1807,7 @@ export default function MessengerPage() {
               variant={callState === 'idle' ? 'light' : 'filled'}
               color={callState === 'idle' ? 'green' : 'red'}
               leftSection={callState === 'idle' ? <IconPhone size={16} /> : <IconPhoneOff size={16} />}
-              onClick={callState === 'idle' ? startCall : () => endCall(true)}
+              onClick={callState === 'idle' ? () => startCall() : () => endCall(true)}
               fullWidth
               disabled={!activeRoomID}
             >
@@ -2269,7 +2388,7 @@ export default function MessengerPage() {
                     variant={callState === 'idle' ? 'light' : 'filled'}
                     color={callState === 'idle' ? 'green' : 'red'}
                     leftSection={callState === 'idle' ? <IconPhone size={16} /> : <IconPhoneOff size={16} />}
-                    onClick={callState === 'idle' ? startCall : () => endCall(true)}
+                    onClick={callState === 'idle' ? () => startCall() : () => endCall(true)}
                     disabled={!activeRoomID}
                   >
                     {callState === 'idle' ? t('startCall') : t('endCall')}
@@ -2300,12 +2419,14 @@ export default function MessengerPage() {
               <Alert color="green" title={`${t('incomingCall')}: ${incomingCall.displayName}`}>
                 <Group mt="xs">
                   <Button leftSection={<IconPhone size={16} />} onClick={answerCall}>{t('answerCall')}</Button>
-                  <Button variant="light" color="red" onClick={() => endCall(true)}>{t('declineCall')}</Button>
+                  <Button variant="light" color="red" onClick={declineIncomingCall}>{t('declineCall')}</Button>
                 </Group>
               </Alert>
             )}
             {callState !== 'idle' && callState !== 'ringing' && (
-              <Text size="xs" c="dimmed">{t('callStatus')}: {callPeerName || t(callState === 'calling' ? 'calling' : 'connected')}</Text>
+              <Text size="xs" c="dimmed">
+                {t('callStatus')}: {callPeerName || identitiesByID.get(callPeerID)?.displayName || t(callState === 'calling' ? 'calling' : 'connected')}
+              </Text>
             )}
 
             {!isMobile && memberIdentities.data && memberIdentities.data.length > 0 && (

@@ -245,6 +245,33 @@ func (s *PostgresStore) IsRoomMember(ctx context.Context, roomID string, userID 
 	return exists, err
 }
 
+func (s *PostgresStore) ListRoomMembers(ctx context.Context, roomID string) ([]string, error) {
+	roomID = normalizeID(roomID)
+	if roomID == "" {
+		return nil, ErrBadRequest
+	}
+	rows, err := s.pool.Query(ctx, `SELECT user_id FROM room_members WHERE room_id = $1 ORDER BY user_id`, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	members := []string{}
+	for rows.Next() {
+		var userID string
+		if err := rows.Scan(&userID); err != nil {
+			return nil, err
+		}
+		members = append(members, userID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(members) == 0 {
+		return nil, ErrNotFound
+	}
+	return members, nil
+}
+
 func (s *PostgresStore) AddRoomMember(ctx context.Context, roomID string, userID string) error {
 	roomID = normalizeID(roomID)
 	userID = normalizeID(userID)

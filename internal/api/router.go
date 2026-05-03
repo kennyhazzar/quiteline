@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"highload-ws-pubsub/internal/auth"
 	"highload-ws-pubsub/internal/broker"
@@ -256,6 +257,14 @@ type fileUploadResponse struct {
 	Size   int64  `json:"size"`
 }
 
+type realtimeStateEvent struct {
+	Kind      string `json:"kind"`
+	RoomID    string `json:"roomId,omitempty"`
+	UserID    string `json:"userId,omitempty"`
+	SessionID string `json:"sessionId,omitempty"`
+	At        string `json:"at"`
+}
+
 const maxAvatarBytes int64 = 1024 * 1024
 
 func handleToken(w http.ResponseWriter, r *http.Request, deps Dependencies) {
@@ -436,6 +445,7 @@ func handleRevokeSession(w http.ResponseWriter, r *http.Request, deps Dependenci
 		writeError(w, http.StatusBadRequest, "revoke_failed")
 		return
 	}
+	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "session.revoked", "", sessionID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -444,6 +454,7 @@ func handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request, deps Depe
 		writeError(w, http.StatusBadRequest, "revoke_failed")
 		return
 	}
+	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "sessions.changed", "", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -511,6 +522,8 @@ func handleRequestFriend(w http.ResponseWriter, r *http.Request, deps Dependenci
 		writeStoreError(w, err)
 		return
 	}
+	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "friends.changed", "", "")
+	publishUserEvent(r.Context(), deps, targetID, "friends.changed", "", "")
 	handleListFriends(w, r, deps)
 }
 
@@ -525,6 +538,8 @@ func handleRespondFriend(w http.ResponseWriter, r *http.Request, deps Dependenci
 		writeStoreError(w, err)
 		return
 	}
+	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "friends.changed", "", "")
+	publishUserEvent(r.Context(), deps, friendID, "friends.changed", "", "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -675,6 +690,7 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request, deps Dependencies)
 		writeStoreError(w, err)
 		return
 	}
+	publishRoomMembersEvent(r.Context(), deps, room.RoomID, "rooms.changed")
 	writeJSON(w, http.StatusCreated, room)
 }
 
@@ -749,6 +765,7 @@ func handleMarkRoomRead(w http.ResponseWriter, r *http.Request, deps Dependencie
 		writeStoreError(w, err)
 		return
 	}
+	publishRoomEvent(r.Context(), deps, roomID, "message.read", principalFromContext(r.Context()).UserID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -790,6 +807,8 @@ func handleInviteFriendToRoom(w http.ResponseWriter, r *http.Request, deps Depen
 		writeStoreError(w, err)
 		return
 	}
+	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
+	publishUserEvent(r.Context(), deps, friendID, "rooms.changed", roomID, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -802,6 +821,9 @@ func handleLeaveRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, 
 		writeStoreError(w, err)
 		return
 	}
+	publishRoomEvent(r.Context(), deps, roomID, "rooms.changed", principalFromContext(r.Context()).UserID)
+	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
+	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "rooms.changed", roomID, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -846,6 +868,7 @@ func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
+	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
 	deps.Metrics.MessagesPublished.Inc()
 	writeJSON(w, http.StatusAccepted, msg)
 }
@@ -878,6 +901,7 @@ func handleUpdateEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
+	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -895,6 +919,7 @@ func handleDeleteEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
+	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -918,6 +943,7 @@ func handleToggleMessageReaction(w http.ResponseWriter, r *http.Request, deps De
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
+	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -961,6 +987,51 @@ func handleDownloadEncryptedFile(w http.ResponseWriter, r *http.Request, deps De
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, reader)
+}
+
+func publishRoomMembersEvent(ctx context.Context, deps Dependencies, roomID string, kind string) {
+	members, err := deps.ZKStore.ListRoomMembers(ctx, roomID)
+	if err != nil {
+		deps.Logger.Warn("list room members for realtime event failed", "room", roomID, "kind", kind, "error", err)
+		return
+	}
+	for _, member := range members {
+		publishUserEvent(ctx, deps, member, kind, roomID, "")
+	}
+}
+
+func publishRoomEvent(ctx context.Context, deps Dependencies, roomID string, kind string, userID string) {
+	publishStateEvent(ctx, deps, "room:"+roomID, realtimeStateEvent{
+		Kind:   kind,
+		RoomID: roomID,
+		UserID: userID,
+	})
+}
+
+func publishUserEvent(ctx context.Context, deps Dependencies, userID string, kind string, roomID string, sessionID string) {
+	userID = strings.TrimSpace(userID)
+	if userID == "" {
+		return
+	}
+	publishStateEvent(ctx, deps, "user:"+userID, realtimeStateEvent{
+		Kind:      kind,
+		RoomID:    roomID,
+		UserID:    userID,
+		SessionID: sessionID,
+	})
+}
+
+func publishStateEvent(ctx context.Context, deps Dependencies, topic string, event realtimeStateEvent) {
+	event.At = time.Now().UTC().Format(time.RFC3339Nano)
+	payload, err := json.Marshal(event)
+	if err != nil {
+		deps.Logger.Warn("marshal realtime event failed", "topic", topic, "kind", event.Kind, "error", err)
+		return
+	}
+	if err := deps.Broker.Publish(ctx, message.New(topic, payload, deps.Config.NodeID)); err != nil {
+		deps.Metrics.BrokerPublishErrors.Inc()
+		deps.Logger.Warn("publish realtime event failed", "topic", topic, "kind", event.Kind, "error", err)
+	}
 }
 
 func requireRoomMember(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) bool {

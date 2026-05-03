@@ -13,6 +13,7 @@ export interface Identity {
 export interface Principal {
   clientId: string
   userId: string
+  sessionId?: string
   username: string
   displayName: string
   theme: 'light' | 'dark'
@@ -87,7 +88,7 @@ export interface MessageReaction {
 export interface MessageEnvelope {
   id: string
   topic: string
-  data: EncryptedMessage
+  data: unknown
   source: string
   createdAt: string
 }

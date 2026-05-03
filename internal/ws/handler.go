@@ -164,6 +164,9 @@ func (h *Handler) authorizedTopics(ctx context.Context, principal auth.Principal
 func (h *Handler) authorizeTopic(ctx context.Context, principal auth.Principal, topic string) bool {
 	roomID, ok := roomIDFromTopic(topic)
 	if !ok {
+		if userID, userTopic := userIDFromTopic(topic); userTopic {
+			return principal.UserID != "" && principal.UserID == userID
+		}
 		return true
 	}
 	if principal.UserID == "" || h.rooms == nil {
@@ -175,6 +178,18 @@ func (h *Handler) authorizeTopic(ctx context.Context, principal auth.Principal, 
 		return false
 	}
 	return allowed
+}
+
+func userIDFromTopic(topic string) (string, bool) {
+	const prefix = "user:"
+	if !strings.HasPrefix(topic, prefix) {
+		return "", false
+	}
+	userID := strings.TrimSpace(strings.TrimPrefix(topic, prefix))
+	if userID == "" || strings.ContainsAny(userID, " \t\r\n/") {
+		return "", true
+	}
+	return userID, true
 }
 
 func (h *Handler) writePump(conn *websocket.Conn, client *Client) {
