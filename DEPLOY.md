@@ -68,7 +68,7 @@ cp deploy/nginx/conf.d/chat.2vault.site.http.conf.example deploy/nginx/conf.d/ch
 Start the stack enough for nginx and ACME challenge:
 
 ```bash
-APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod --profile bundled-nginx up -d postgres redis minio server-a frontend nginx
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod --profile bundled-nginx up -d postgres redis minio backend frontend nginx
 ```
 
 Check nginx:
@@ -123,7 +123,7 @@ APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env
 View logs:
 
 ```bash
-APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f server-a frontend
+APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env.prod logs -f backend frontend
 ```
 
 ## 8. Verify
@@ -171,7 +171,7 @@ APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env
 
 ## Troubleshooting
 
-If port `8080` is busy on the host, it is fine. Production does not publish `8080`; nginx proxies to `server-a:8080` inside Docker.
+If port `8080` is busy on the host, it is fine. Production does not publish `8080`; nginx proxies to `backend:8080` inside Docker.
 
 If `80` or `443` is busy, stop the other nginx/container using those ports or attach this app to your existing nginx Docker network and copy the server block into that nginx setup.
 

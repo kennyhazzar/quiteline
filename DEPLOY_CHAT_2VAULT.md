@@ -6,7 +6,7 @@ Important constraints for this server:
 
 - host port `8080` is already busy, so the Go backend is not published to the host
 - host port `443` is already busy, so this project does not start its own public nginx by default
-- the existing nginx container will proxy to `frontend:3000` and `server-a:8080` inside Docker
+- the existing nginx container will proxy to `frontend:3000` and `backend:8080` inside Docker
 
 ## 1. DNS
 
@@ -78,7 +78,7 @@ APP_ENV_FILE=.env.prod docker compose -f docker-compose.prod.yml --env-file .env
 
 Expected app containers:
 
-- `server-a`
+- `backend`
 - `frontend`
 - `postgres`
 - `redis`
@@ -109,7 +109,7 @@ docker network ls | grep quietline
 If the network name is not obvious, inspect the app container:
 
 ```bash
-docker inspect quietline-server-a-1 --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}'
+docker inspect quietline-backend-1 --format '{{range $name, $_ := .NetworkSettings.Networks}}{{$name}}{{end}}'
 ```
 
 Set the network name:
@@ -174,7 +174,7 @@ server {
     client_max_body_size 110m;
 
     location /v1/ {
-        proxy_pass http://server-a:8080;
+        proxy_pass http://backend:8080;
         proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -183,12 +183,12 @@ server {
     }
 
     location /healthz {
-        proxy_pass http://server-a:8080;
+        proxy_pass http://backend:8080;
         proxy_set_header Host $host;
     }
 
     location /ws {
-        proxy_pass http://server-a:8080;
+        proxy_pass http://backend:8080;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
@@ -319,7 +319,7 @@ If you use the `docker run` style from this guide, add a cron entry:
 
 ## Troubleshooting
 
-If nginx cannot resolve `server-a` or `frontend`, it is not connected to the Quietline Docker network. Repeat step 5.
+If nginx cannot resolve `backend` or `frontend`, it is not connected to the Quietline Docker network. Repeat step 5.
 
 If WebSocket fails, check `/ws` has `Upgrade` and `Connection "upgrade"` headers.
 

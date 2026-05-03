@@ -10,5 +10,5 @@ api.chat.2vault.site {
 		max_size 110MB
 	}
 
-	reverse_proxy server-a:8080
+	reverse_proxy backend:8080
 }

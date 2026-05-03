@@ -144,7 +144,7 @@ Caddy will request certificates automatically for:
 ```bash
 docker compose -f docker-compose.deploy.yml --env-file .env ps
 docker compose -f docker-compose.deploy.yml --env-file .env logs -f caddy
-docker compose -f docker-compose.deploy.yml --env-file .env logs -f server-a
+docker compose -f docker-compose.deploy.yml --env-file .env logs -f backend
 ```
 
 Backend should log that the server started.
@@ -260,7 +260,7 @@ Check `REDIS_PASSWORD` is the same for Redis and backend:
 
 ```bash
 docker compose -f docker-compose.deploy.yml --env-file .env logs redis
-docker compose -f docker-compose.deploy.yml --env-file .env logs server-a
+docker compose -f docker-compose.deploy.yml --env-file .env logs backend
 ```
 
 ### File upload fails
@@ -269,7 +269,7 @@ Check MinIO and backend:
 
 ```bash
 docker compose -f docker-compose.deploy.yml --env-file .env logs minio
-docker compose -f docker-compose.deploy.yml --env-file .env logs server-a
+docker compose -f docker-compose.deploy.yml --env-file .env logs backend
 ```
 
 Backend uses:

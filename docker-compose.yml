@@ -34,12 +34,12 @@ services:
       timeout: 5s
       retries: 10
 
-  server-a:
+  backend:
     build: .
     environment:
       HTTP_ADDR: ":8080"
       REDIS_ADDR: "redis:6379"
-      NODE_ID: "server-a"
+      NODE_ID: "backend-local"
       CORS_ALLOWED_ORIGINS: "http://localhost:3000"
       AUTH_ENABLED: "true"
       AUTH_SECRET: "local-compose-secret-change-me"
@@ -60,32 +60,6 @@ services:
       minio:
         condition: service_healthy
 
-  server-b:
-    build: .
-    environment:
-      HTTP_ADDR: ":8080"
-      REDIS_ADDR: "redis:6379"
-      NODE_ID: "server-b"
-      CORS_ALLOWED_ORIGINS: "http://localhost:3000"
-      AUTH_ENABLED: "true"
-      AUTH_SECRET: "local-compose-secret-change-me"
-      POSTGRES_DSN: "postgres://pubsub:pubsub@postgres:5432/pubsub?sslmode=disable"
-      S3_ENDPOINT: "minio:9000"
-      S3_ACCESS_KEY: "minioadmin"
-      S3_SECRET_KEY: "minioadmin"
-      S3_BUCKET: "zk-messenger"
-      S3_USE_SSL: "false"
-      MAX_FILE_BYTES: "104861696"
-    ports:
-      - "18081:8080"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_started
-      minio:
-        condition: service_healthy
-
   frontend:
     build:
       context: ./frontend
@@ -95,4 +69,4 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - server-a
+      - backend

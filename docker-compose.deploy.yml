@@ -48,14 +48,14 @@ services:
       timeout: 5s
       retries: 10
 
-  server-a:
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
     restart: unless-stopped
     environment:
       HTTP_ADDR: ":8080"
-      NODE_ID: server-a
+      NODE_ID: backend
       AUTH_ENABLED: ${AUTH_ENABLED}
       AUTH_SECRET: ${AUTH_SECRET}
       API_KEYS: ${API_KEYS}
@@ -99,7 +99,7 @@ services:
     expose:
       - "3000"
     depends_on:
-      - server-a
+      - backend
 
   caddy:
     image: caddy:2.8-alpine
@@ -114,7 +114,7 @@ services:
       - caddy-config:/config
     depends_on:
       - frontend
-      - server-a
+      - backend
 
 volumes:
   postgres-data:

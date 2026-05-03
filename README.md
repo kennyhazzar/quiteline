@@ -307,8 +307,7 @@ docker compose up --build
 Services:
 
 - Frontend: `http://localhost:3000`
-- Backend A: `http://localhost:18080`
-- Backend B: `http://localhost:18081`
+- Backend: `http://localhost:18080`
 - Redis: host port `6380`
 - Postgres: host port `5432`
 - MinIO S3 API: `http://localhost:19000`
