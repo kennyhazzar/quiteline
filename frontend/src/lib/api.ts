@@ -1,4 +1,4 @@
-﻿const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8080'
 export const WS_BASE = process.env.NEXT_PUBLIC_WS_URL ?? 'ws://localhost:8080'
 export const API_BASE = BASE
 
@@ -333,7 +333,7 @@ export async function createRoom(input: {
   roomSecret?: string
   token: string
 }): Promise<Room> {
-  const res = await fetch(`${BASE}/v1/chats`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms`, {
     method: 'POST',
     headers: authHeaders(input.token),
     body: JSON.stringify({
@@ -347,7 +347,7 @@ export async function createRoom(input: {
 }
 
 export async function fetchRooms(token: string): Promise<{ rooms: Room[] }> {
-  const res = await fetch(`${BASE}/v1/chats`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms`, {
     headers: authHeaders(token),
   })
   return readJSON(res)
@@ -358,7 +358,7 @@ export async function leaveRoom(input: {
   userId: string
   token: string
 }): Promise<void> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(input.roomId)}/members/${encodeURIComponent(input.userId)}`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/members/${encodeURIComponent(input.userId)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${input.token}` },
   })
@@ -374,7 +374,7 @@ export async function inviteFriendToRoom(input: {
   roomId: string
   userId: string
 }): Promise<void> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(input.roomId)}/friends`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/friends`, {
     method: 'POST',
     headers: authHeaders(input.token),
     body: JSON.stringify({ userId: input.userId }),
@@ -390,7 +390,7 @@ export async function markRoomRead(input: {
   token: string
   roomId: string
 }): Promise<void> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(input.roomId)}/read`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/read`, {
     method: 'POST',
     headers: authHeaders(input.token),
     body: JSON.stringify({}),
@@ -403,7 +403,7 @@ export async function markRoomRead(input: {
 }
 
 export async function fetchMessages(roomId: string, token: string): Promise<{ messages: EncryptedMessage[] }> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(roomId)}/messages`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(roomId)}/messages`, {
     headers: authHeaders(token),
   })
   return readJSON(res)
@@ -418,7 +418,7 @@ export async function sendEncryptedMessage(input: {
   keyId: string
   token: string
 }): Promise<EncryptedMessage> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(input.roomId)}/messages`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages`, {
     method: 'POST',
     headers: authHeaders(input.token),
     body: JSON.stringify({
@@ -441,7 +441,7 @@ export async function updateEncryptedMessage(input: {
   keyId: string
   token: string
 }): Promise<EncryptedMessage> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}`, {
     method: 'PUT',
     headers: authHeaders(input.token),
     body: JSON.stringify({
@@ -459,7 +459,7 @@ export async function deleteEncryptedMessageForAll(input: {
   messageId: string
   token: string
 }): Promise<EncryptedMessage> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${input.token}` },
   })
@@ -472,7 +472,7 @@ export async function toggleMessageReaction(input: {
   emoji: string
   token: string
 }): Promise<EncryptedMessage> {
-  const res = await fetch(`${BASE}/v1/chats/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}/reactions`, {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/messages/${encodeURIComponent(input.messageId)}/reactions`, {
     method: 'POST',
     headers: authHeaders(input.token),
     body: JSON.stringify({ emoji: input.emoji }),
