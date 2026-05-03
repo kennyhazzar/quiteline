@@ -120,6 +120,7 @@ type RealtimeEvent =
   | { kind: 'sessions.changed'; userId?: string; at: string }
   | { kind: 'session.revoked'; userId?: string; sessionId?: string; at: string }
   | { kind: 'message.read'; roomId: string; userId: string; at: string }
+  | { kind: 'message.created'; roomId: string; messageId: string; senderId: string; at: string }
   | { kind: 'call-offer'; callId: string; roomId: string; fromUserId: string; toUserId: string; displayName: string; offer: RTCSessionDescriptionInit }
   | { kind: 'call-answer'; callId: string; roomId: string; fromUserId: string; toUserId: string; answer: RTCSessionDescriptionInit }
   | { kind: 'call-ice'; callId: string; roomId: string; fromUserId: string; toUserId: string; candidate: RTCIceCandidateInit }
@@ -544,6 +545,22 @@ export default function MessengerPage() {
       return
     }
     notifications.show({ title, message: err.message, color: 'red' })
+  }
+
+  function patchRoomActivity(roomId: string, options: { at?: string; incrementUnread?: boolean; clearUnread?: boolean }) {
+    queryClient.setQueriesData<{ rooms: Room[] }>({ queryKey: ['chat-rooms'] }, (current) => {
+      if (!current) return current
+      const rooms = current.rooms.map((room) => {
+        if (room.roomId !== roomId) return room
+        return {
+          ...room,
+          lastMessageAt: options.at ?? room.lastMessageAt,
+          unreadCount: options.clearUnread ? 0 : (room.unreadCount ?? 0) + (options.incrementUnread ? 1 : 0),
+        }
+      })
+      rooms.sort((a, b) => Date.parse(b.lastMessageAt || b.createdAt) - Date.parse(a.lastMessageAt || a.createdAt))
+      return { rooms }
+    })
   }
 
   useEffect(() => {
@@ -1033,10 +1050,18 @@ export default function MessengerPage() {
       return
     }
     if (event.kind === 'rooms.changed') {
-      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+      void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
       if (event.roomId && event.roomId === activeRoomID) {
-        queryClient.invalidateQueries({ queryKey: ['chat-identities', event.roomId] })
+        void queryClient.refetchQueries({ queryKey: ['chat-identities', event.roomId] })
       }
+      return
+    }
+    if (event.kind === 'message.created') {
+      patchRoomActivity(event.roomId, {
+        at: event.at,
+        incrementUnread: event.senderId !== identity.userId && event.roomId !== activeRoomID,
+      })
+      void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
       return
     }
     if (event.kind === 'friends.changed') {
@@ -1057,42 +1082,33 @@ export default function MessengerPage() {
     }
     if (event.kind === 'message.read') {
       if (event.userId === identity.userId) {
-        queryClient.setQueriesData<{ rooms: Room[] }>({ queryKey: ['chat-rooms'] }, (current) => {
-          if (!current) return current
-          return {
-            rooms: current.rooms.map((room) => (
-              room.roomId === event.roomId ? { ...room, unreadCount: 0 } : room
-            )),
-          }
-        })
+        patchRoomActivity(event.roomId, { clearUnread: true })
+        void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
         return
       }
       if (event.roomId === activeRoomID) {
-        queryClient.invalidateQueries({ queryKey: ['chat-messages', event.roomId] })
+        void queryClient.refetchQueries({ queryKey: ['chat-messages', event.roomId] })
       }
-      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+      void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
       return
     }
     handleCallEvent(event)
   }
 
-  function handleIncomingData(data: unknown, topic: string) {
+  function handleIncomingData(data: unknown) {
     const maybeEvent = data as Partial<RealtimeEvent>
     if (typeof maybeEvent.kind === 'string') {
-      if (
-        topic === `user:${identity?.userId}` &&
-        maybeEvent.kind === 'message.read' &&
-        maybeEvent.roomId === activeRoomID
-      ) {
-        return
-      }
       handleRealtimeEvent(maybeEvent as RealtimeEvent)
       return
     }
     const msg = data as EncryptedMessage
     if (msg.senderId !== identity?.userId) notifyChat(t('newMessage'), activeRoom?.name)
     setLiveMessages((prev) => [...prev, msg].slice(-200))
-    queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+    patchRoomActivity(msg.roomId, {
+      at: msg.createdAt,
+      incrementUnread: msg.senderId !== identity?.userId && msg.roomId !== activeRoomID,
+    })
+    void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
   }
 
   const connectWS = useCallback((roomID: string) => {
@@ -1121,7 +1137,7 @@ export default function MessengerPage() {
       try {
         const envelope = JSON.parse(event.data) as MessageEnvelope
         if (envelope.topic === `room:${roomID}` || envelope.topic === `user:${identity.userId}`) {
-          handleIncomingData(envelope.data, envelope.topic)
+          handleIncomingData(envelope.data)
         }
       } catch {
         // ignore malformed frames

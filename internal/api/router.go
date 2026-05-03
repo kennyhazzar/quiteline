@@ -262,6 +262,8 @@ type realtimeStateEvent struct {
 	RoomID    string `json:"roomId,omitempty"`
 	UserID    string `json:"userId,omitempty"`
 	SessionID string `json:"sessionId,omitempty"`
+	MessageID string `json:"messageId,omitempty"`
+	SenderID  string `json:"senderId,omitempty"`
 	At        string `json:"at"`
 }
 
@@ -882,7 +884,13 @@ func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
-	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
+	publishRoomMembersStateEvent(r.Context(), deps, roomID, realtimeStateEvent{
+		Kind:      "message.created",
+		RoomID:    roomID,
+		MessageID: msg.ID,
+		SenderID:  msg.SenderID,
+		At:        msg.CreatedAt.Format(time.RFC3339Nano),
+	})
 	deps.Metrics.MessagesPublished.Inc()
 	writeJSON(w, http.StatusAccepted, msg)
 }
@@ -1040,7 +1048,9 @@ func publishUserEvent(ctx context.Context, deps Dependencies, userID string, kin
 }
 
 func publishStateEvent(ctx context.Context, deps Dependencies, topic string, event realtimeStateEvent) {
-	event.At = time.Now().UTC().Format(time.RFC3339Nano)
+	if event.At == "" {
+		event.At = time.Now().UTC().Format(time.RFC3339Nano)
+	}
 	payload, err := json.Marshal(event)
 	if err != nil {
 		deps.Logger.Warn("marshal realtime event failed", "topic", topic, "kind", event.Kind, "error", err)
