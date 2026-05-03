@@ -503,9 +503,15 @@ export default function MessengerPage() {
     saveSession({ ...session, principal }, { reloadLocalState: false })
   }
 
+  function eventTopic(event: RealtimeEvent) {
+    if ('roomId' in event && event.roomId) return `room:${event.roomId}`
+    return activeTopic
+  }
+
   function sendRealtime(event: RealtimeEvent) {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !activeTopic) return
-    wsRef.current.send(JSON.stringify({ type: 'publish', topic: activeTopic, data: event }))
+    const topic = eventTopic(event)
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !topic) return
+    wsRef.current.send(JSON.stringify({ type: 'publish', topic, data: event }))
   }
 
   function notifyChat(title: string, message?: string) {
@@ -1070,9 +1076,16 @@ export default function MessengerPage() {
     handleCallEvent(event)
   }
 
-  function handleIncomingData(data: unknown) {
+  function handleIncomingData(data: unknown, topic: string) {
     const maybeEvent = data as Partial<RealtimeEvent>
     if (typeof maybeEvent.kind === 'string') {
+      if (
+        topic === `user:${identity?.userId}` &&
+        maybeEvent.kind === 'message.read' &&
+        maybeEvent.roomId === activeRoomID
+      ) {
+        return
+      }
       handleRealtimeEvent(maybeEvent as RealtimeEvent)
       return
     }
@@ -1108,7 +1121,7 @@ export default function MessengerPage() {
       try {
         const envelope = JSON.parse(event.data) as MessageEnvelope
         if (envelope.topic === `room:${roomID}` || envelope.topic === `user:${identity.userId}`) {
-          handleIncomingData(envelope.data)
+          handleIncomingData(envelope.data, envelope.topic)
         }
       } catch {
         // ignore malformed frames

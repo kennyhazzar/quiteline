@@ -54,3 +54,32 @@ func TestRoomIDFromTopic(t *testing.T) {
 		})
 	}
 }
+
+func TestUserIDFromTopic(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		id   string
+		ok   bool
+	}{
+		{name: "user topic", in: "user:abc123", id: "abc123", ok: true},
+		{name: "non user topic", in: "room:abc123", ok: false},
+		{name: "empty user", in: "user:", ok: true},
+		{name: "path traversal shape", in: "user:abc/def", ok: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			id, ok := userIDFromTopic(tt.in)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if id != tt.id {
+				t.Fatalf("id = %q, want %q", id, tt.id)
+			}
+		})
+	}
+}

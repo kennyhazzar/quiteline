@@ -580,6 +580,10 @@ func handlePublish(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
+	if !canPublishTopic(r.Context(), deps, principalFromContext(r.Context()), topic) {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, deps.Config.MaxMessageBytes)
 	var req publishRequest
@@ -761,11 +765,18 @@ func handleMarkRoomRead(w http.ResponseWriter, r *http.Request, deps Dependencie
 	if !requireRoomMember(w, r, deps, roomID) {
 		return
 	}
-	if err := deps.ZKStore.MarkRoomRead(r.Context(), roomID, principalFromContext(r.Context()).UserID); err != nil {
+	principal := principalFromContext(r.Context())
+	if err := deps.ZKStore.MarkRoomRead(r.Context(), roomID, principal.UserID); err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	publishRoomEvent(r.Context(), deps, roomID, "message.read", principalFromContext(r.Context()).UserID)
+	event := realtimeStateEvent{
+		Kind:   "message.read",
+		RoomID: roomID,
+		UserID: principal.UserID,
+	}
+	publishRoomEvent(r.Context(), deps, roomID, event)
+	publishRoomMembersStateEvent(r.Context(), deps, roomID, event)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -808,7 +819,6 @@ func handleInviteFriendToRoom(w http.ResponseWriter, r *http.Request, deps Depen
 		return
 	}
 	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
-	publishUserEvent(r.Context(), deps, friendID, "rooms.changed", roomID, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -821,7 +831,11 @@ func handleLeaveRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, 
 		writeStoreError(w, err)
 		return
 	}
-	publishRoomEvent(r.Context(), deps, roomID, "rooms.changed", principalFromContext(r.Context()).UserID)
+	publishRoomEvent(r.Context(), deps, roomID, realtimeStateEvent{
+		Kind:   "rooms.changed",
+		RoomID: roomID,
+		UserID: principalFromContext(r.Context()).UserID,
+	})
 	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
 	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "rooms.changed", roomID, "")
 	w.WriteHeader(http.StatusNoContent)
@@ -990,22 +1004,26 @@ func handleDownloadEncryptedFile(w http.ResponseWriter, r *http.Request, deps De
 }
 
 func publishRoomMembersEvent(ctx context.Context, deps Dependencies, roomID string, kind string) {
+	publishRoomMembersStateEvent(ctx, deps, roomID, realtimeStateEvent{
+		Kind:   kind,
+		RoomID: roomID,
+	})
+}
+
+func publishRoomMembersStateEvent(ctx context.Context, deps Dependencies, roomID string, event realtimeStateEvent) {
 	members, err := deps.ZKStore.ListRoomMembers(ctx, roomID)
 	if err != nil {
-		deps.Logger.Warn("list room members for realtime event failed", "room", roomID, "kind", kind, "error", err)
+		deps.Logger.Warn("list room members for realtime event failed", "room", roomID, "kind", event.Kind, "error", err)
 		return
 	}
 	for _, member := range members {
-		publishUserEvent(ctx, deps, member, kind, roomID, "")
+		publishStateEvent(ctx, deps, "user:"+member, event)
 	}
 }
 
-func publishRoomEvent(ctx context.Context, deps Dependencies, roomID string, kind string, userID string) {
-	publishStateEvent(ctx, deps, "room:"+roomID, realtimeStateEvent{
-		Kind:   kind,
-		RoomID: roomID,
-		UserID: userID,
-	})
+func publishRoomEvent(ctx context.Context, deps Dependencies, roomID string, event realtimeStateEvent) {
+	event.RoomID = roomID
+	publishStateEvent(ctx, deps, "room:"+roomID, event)
 }
 
 func publishUserEvent(ctx context.Context, deps Dependencies, userID string, kind string, roomID string, sessionID string) {
@@ -1032,6 +1050,26 @@ func publishStateEvent(ctx context.Context, deps Dependencies, topic string, eve
 		deps.Metrics.BrokerPublishErrors.Inc()
 		deps.Logger.Warn("publish realtime event failed", "topic", topic, "kind", event.Kind, "error", err)
 	}
+}
+
+func canPublishTopic(ctx context.Context, deps Dependencies, principal auth.Principal, topic string) bool {
+	if roomID, ok := strings.CutPrefix(topic, "room:"); ok {
+		roomID = strings.TrimSpace(roomID)
+		if roomID == "" || strings.ContainsAny(roomID, " \t\r\n/") || principal.UserID == "" {
+			return false
+		}
+		allowed, err := deps.ZKStore.IsRoomMember(ctx, roomID, principal.UserID)
+		if err != nil {
+			deps.Logger.Warn("REST room publish authorization failed", "room", roomID, "user", principal.UserID, "error", err)
+			return false
+		}
+		return allowed
+	}
+	if userID, ok := strings.CutPrefix(topic, "user:"); ok {
+		userID = strings.TrimSpace(userID)
+		return userID != "" && !strings.ContainsAny(userID, " \t\r\n/") && principal.UserID == userID
+	}
+	return true
 }
 
 func requireRoomMember(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) bool {
