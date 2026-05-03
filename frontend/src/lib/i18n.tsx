@@ -8,6 +8,11 @@ const LOCALE_KEY = 'quietline.locale.v1'
 
 const dictionary = {
   ru: {
+    authFeatureText: 'Комнаты, файлы, сессии, 2FA и живые статусы собраны в одном приватном рабочем пространстве.',
+    authFeatureTitle: 'Безопасные сообщения в реальном времени',
+    invalidTwoFactor: 'Неверный код 2FA. Проверьте текущий код и попробуйте снова.',
+    twoFactorCode: 'Код 2FA',
+    twoFactorPrompt: 'Введите код 2FA.',
     accept: 'Принять',
     addFriend: 'Добавить друга',
     copyInviteLink: 'Скопировать ссылку',
@@ -131,6 +136,11 @@ const dictionary = {
     wsError: 'Ошибка WebSocket',
   },
   en: {
+    authFeatureText: 'Rooms, files, sessions, 2FA and live chat presence in one private workspace.',
+    authFeatureTitle: 'Secure realtime messaging',
+    invalidTwoFactor: 'Invalid 2FA code. Check the current code and try again.',
+    twoFactorCode: '2FA code',
+    twoFactorPrompt: 'Enter your 2FA code.',
     accept: 'Accept',
     addFriend: 'Add friend',
     copyInviteLink: 'Copy invite link',

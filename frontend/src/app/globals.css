@@ -8,6 +8,50 @@ body {
   margin: 0;
 }
 
+.auth-page {
+  min-height: 100dvh;
+  padding: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 18% 12%, light-dark(rgba(34, 139, 230, 0.14), rgba(34, 139, 230, 0.18)), transparent 30%),
+    radial-gradient(circle at 86% 80%, light-dark(rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.14)), transparent 26%),
+    light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
+}
+
+.auth-shell {
+  width: min(1040px, 100%);
+  min-height: 640px;
+  padding: 18px;
+  border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
+  border-radius: 28px;
+  background: light-dark(rgba(255, 255, 255, 0.74), rgba(20, 21, 23, 0.76));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.18);
+  backdrop-filter: blur(18px);
+}
+
+.auth-copy {
+  flex: 1;
+  min-width: 0;
+  padding: 34px;
+}
+
+.auth-title {
+  font-size: clamp(40px, 7vw, 72px);
+  line-height: 0.95;
+  letter-spacing: 0;
+}
+
+.auth-card {
+  width: min(430px, 100%);
+  align-self: center;
+  padding: 28px;
+  border-radius: 22px !important;
+  background: light-dark(rgba(255, 255, 255, 0.92), rgba(31, 31, 33, 0.92)) !important;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.16);
+}
+
 .app-workspace {
   height: 100dvh;
   min-height: 100dvh;
@@ -78,6 +122,39 @@ body {
 
   .mantine-Input-input {
     min-height: 44px;
+  }
+
+  .auth-page {
+    height: 100dvh;
+    min-height: 100dvh;
+    padding: max(env(safe-area-inset-top), 16px) 14px max(env(safe-area-inset-bottom), 16px);
+    overflow-y: auto;
+  }
+
+  .auth-shell {
+    min-height: auto;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .auth-copy {
+    padding: 8px 4px 0;
+  }
+
+  .auth-title {
+    font-size: 40px;
+  }
+
+  .auth-card {
+    width: 100%;
+    padding: 18px;
+    border-radius: 20px !important;
   }
 
   .mobile-app-shell {

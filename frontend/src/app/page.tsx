@@ -179,6 +179,7 @@ export default function MessengerPage() {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [totpCode, setTotpCode] = useState('')
+  const [authError, setAuthError] = useState('')
   const [totpRequired, setTotpRequired] = useState(false)
   const [identity, setIdentity] = useState<Identity | null>(null)
   const [displayName, setDisplayName] = useState('')
@@ -565,6 +566,9 @@ export default function MessengerPage() {
   }, [memberIdentities.data])
 
   const authMutation = useMutation({
+    onMutate: () => {
+      setAuthError('')
+    },
     mutationFn: () => {
       if (authMode === 'register') {
         return registerUser({ username, password, displayName: displayName.trim() || username })
@@ -574,7 +578,8 @@ export default function MessengerPage() {
     onSuccess: (next) => {
       if (isTwoFactorChallenge(next)) {
         setTotpRequired(true)
-        notifications.show({ title: t('login'), message: 'Enter your 2FA code.', color: 'blue' })
+        setAuthError('')
+        notifications.show({ title: t('login'), message: t('twoFactorPrompt'), color: 'blue' })
         return
       }
       saveSession(next)
@@ -582,9 +587,16 @@ export default function MessengerPage() {
       setDisplayName(next.principal.username || username)
       setTotpRequired(false)
       setTotpCode('')
+      setAuthError('')
       notifications.show({ title: authMode === 'register' ? t('createAccount') : t('login'), message: t('sessionReady'), color: 'green' })
     },
-    onError: (err: Error) => handleRequestError(err, t('login')),
+    onError: (err: Error) => {
+      if (err instanceof AuthError) {
+        handleAuthExpired()
+        return
+      }
+      setAuthError(totpRequired ? t('invalidTwoFactor') : err.message)
+    },
   })
 
   const avatarMutation = useMutation({
@@ -1419,66 +1431,118 @@ export default function MessengerPage() {
 
   if (!session) {
     return (
-      <Stack maw={520} mx={isMobile ? 'auto' : 0} px={isMobile ? 'xs' : 0}>
-        <Title order={1}>Quietline</Title>
-        <Text c="dimmed">{t('quietlineIntro')}</Text>
-        <TextInput
-          label={t('loginName')}
-          placeholder="alice"
-          value={username}
-          onChange={(event) => setUsername(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') submitAuth()
-          }}
-        />
-            {authMode === 'register' && (
-          <TextInput
-            label={t('displayName')}
-            placeholder="Alice"
-            value={displayName}
-            onChange={(event) => setDisplayName(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') submitAuth()
-            }}
-          />
-        )}
-        <PasswordInput
-          label={t('password')}
-          value={password}
-          onChange={(event) => setPassword(event.currentTarget.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') submitAuth()
-          }}
-        />
-        {totpRequired && authMode === 'login' && (
-          <TextInput
-            label="2FA code"
-            placeholder="123456"
-            value={totpCode}
-            onChange={(event) => setTotpCode(event.currentTarget.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') submitAuth()
-            }}
-          />
-        )}
-        <Group>
-          <Button
-            onClick={submitAuth}
-            loading={authMutation.isPending}
-            disabled={!username.trim() || password.length < 8 || (totpRequired && totpCode.trim().length < 6)}
-          >
-            {authMode === 'register' ? t('createAccount') : t('login')}
-          </Button>
-          <Button variant="subtle" onClick={() => {
-            setAuthMode(authMode === 'login' ? 'register' : 'login')
-            setTotpRequired(false)
-            setTotpCode('')
-          }}>
-            {authMode === 'login' ? t('needAccount') : t('alreadyHaveAccount')}
-          </Button>
+      <Box className="auth-page">
+        <Group className="auth-shell" align="stretch" wrap="nowrap">
+          <Stack className="auth-copy" justify="space-between">
+            <div>
+              <Badge variant="light" color="blue" mb="md">{t('encryptedBadge')}</Badge>
+              <Title order={1} className="auth-title">Quietline</Title>
+              <Text c="dimmed" size="lg" maw={520}>{t('quietlineIntro')}</Text>
+            </div>
+            {!isMobile && (
+              <Stack gap="xs">
+                <Text fw={700}>{t('authFeatureTitle')}</Text>
+                <Text size="sm" c="dimmed">{t('authFeatureText')}</Text>
+              </Stack>
+            )}
+          </Stack>
+
+          <Card className="auth-card" withBorder>
+            <Stack gap="md">
+              <div>
+                <Title order={2}>{authMode === 'register' ? t('createAccount') : t('login')}</Title>
+                <Text size="sm" c="dimmed">{authMode === 'register' ? t('passwordHint') : t('quietlineIntro')}</Text>
+              </div>
+              <SegmentedControl
+                fullWidth
+                value={authMode}
+                onChange={(value) => {
+                  setAuthMode(value as 'login' | 'register')
+                  setTotpRequired(false)
+                  setTotpCode('')
+                  setAuthError('')
+                }}
+                data={[
+                  { value: 'login', label: t('login') },
+                  { value: 'register', label: t('createAccount') },
+                ]}
+              />
+              <TextInput
+                label={t('loginName')}
+                placeholder="alice"
+                value={username}
+                onChange={(event) => {
+                  setUsername(event.currentTarget.value)
+                  setAuthError('')
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') submitAuth()
+                }}
+              />
+              {authMode === 'register' && (
+                <TextInput
+                  label={t('displayName')}
+                  placeholder="Alice"
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') submitAuth()
+                  }}
+                />
+              )}
+              <PasswordInput
+                label={t('password')}
+                value={password}
+                onChange={(event) => {
+                  setPassword(event.currentTarget.value)
+                  setAuthError('')
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') submitAuth()
+                }}
+              />
+              {totpRequired && authMode === 'login' && (
+                <TextInput
+                  label={t('twoFactorCode')}
+                  placeholder="123456"
+                  value={totpCode}
+                  error={authError || undefined}
+                  onChange={(event) => {
+                    setTotpCode(event.currentTarget.value)
+                    setAuthError('')
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') submitAuth()
+                  }}
+                />
+              )}
+              {authError && !totpRequired && (
+                <Alert color="red" variant="light">
+                  {authError}
+                </Alert>
+              )}
+              <Button
+                fullWidth
+                size="md"
+                onClick={submitAuth}
+                loading={authMutation.isPending}
+                disabled={!username.trim() || password.length < 8 || (totpRequired && totpCode.trim().length < 6)}
+              >
+                {authMode === 'register' ? t('createAccount') : t('login')}
+              </Button>
+              <Button variant="subtle" fullWidth onClick={() => {
+                setAuthMode(authMode === 'login' ? 'register' : 'login')
+                setTotpRequired(false)
+                setTotpCode('')
+                setAuthError('')
+              }}>
+                {authMode === 'login' ? t('needAccount') : t('alreadyHaveAccount')}
+              </Button>
+              <Text size="xs" c="dimmed" ta="center">{t('passwordHint')}</Text>
+            </Stack>
+          </Card>
         </Group>
-        <Text size="xs" c="dimmed">{t('passwordHint')}</Text>
-      </Stack>
+      </Box>
     )
   }
 
