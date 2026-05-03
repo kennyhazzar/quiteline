@@ -96,6 +96,7 @@ interface DecryptedMessage {
   editedAt?: string
   deletedAt?: string
   readBy?: string[]
+  readReceipts?: EncryptedMessage['readReceipts']
   read?: boolean
   reactions?: EncryptedMessage['reactions']
   status?: 'sending' | 'sent' | 'read' | 'failed'
@@ -919,6 +920,7 @@ export default function MessengerPage() {
               editedAt: msg.editedAt,
               deletedAt: msg.deletedAt,
               readBy: msg.readBy ?? [],
+              readReceipts: msg.readReceipts ?? [],
               read: Boolean(msg.read),
               reactions: msg.reactions ?? [],
               status,
@@ -933,6 +935,7 @@ export default function MessengerPage() {
               editedAt: msg.editedAt,
               deletedAt: msg.deletedAt,
               readBy: msg.readBy ?? [],
+              readReceipts: msg.readReceipts ?? [],
               read: Boolean(msg.read),
               reactions: msg.reactions ?? [],
               status,
@@ -1582,6 +1585,23 @@ export default function MessengerPage() {
             <Text size="sm">Sent: {new Date(messageInfo.createdAt).toLocaleString()}</Text>
             {messageInfo.editedAt && <Text size="sm">Edited: {new Date(messageInfo.editedAt).toLocaleString()}</Text>}
             {messageInfo.deletedAt && <Text size="sm">Deleted: {new Date(messageInfo.deletedAt).toLocaleString()}</Text>}
+            <Divider />
+            <Text size="sm" fw={700}>{t('views')}</Text>
+            {(messageInfo.readReceipts ?? []).length > 0 ? (
+              <Stack gap={6}>
+                {(messageInfo.readReceipts ?? []).map((receipt) => {
+                  const reader = identitiesByID.get(receipt.userId)
+                  return (
+                    <Group key={`${messageInfo.id}-${receipt.userId}`} justify="space-between" gap="xs" wrap="nowrap">
+                      <Text size="sm" truncate>{reader?.displayName ?? receipt.userId}</Text>
+                      <Text size="xs" c="dimmed" ta="right">{new Date(receipt.readAt).toLocaleString()}</Text>
+                    </Group>
+                  )
+                })}
+              </Stack>
+            ) : (
+              <Text size="sm" c="dimmed">{t('noViews')}</Text>
+            )}
             <Code block>{messageInfo.id}</Code>
           </Stack>
         )}

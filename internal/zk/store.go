@@ -47,19 +47,25 @@ type Friend struct {
 }
 
 type EncryptedMessage struct {
-	ID         string     `json:"id"`
-	RoomID     string     `json:"roomId"`
-	SenderID   string     `json:"senderId"`
-	Ciphertext string     `json:"ciphertext"`
-	Nonce      string     `json:"nonce"`
-	Algorithm  string     `json:"algorithm"`
-	KeyID      string     `json:"keyId"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	EditedAt   *time.Time `json:"editedAt,omitempty"`
-	DeletedAt  *time.Time `json:"deletedAt,omitempty"`
-	ReadBy     []string   `json:"readBy,omitempty"`
-	Read       bool       `json:"read,omitempty"`
-	Reactions  []Reaction `json:"reactions,omitempty"`
+	ID           string        `json:"id"`
+	RoomID       string        `json:"roomId"`
+	SenderID     string        `json:"senderId"`
+	Ciphertext   string        `json:"ciphertext"`
+	Nonce        string        `json:"nonce"`
+	Algorithm    string        `json:"algorithm"`
+	KeyID        string        `json:"keyId"`
+	CreatedAt    time.Time     `json:"createdAt"`
+	EditedAt     *time.Time    `json:"editedAt,omitempty"`
+	DeletedAt    *time.Time    `json:"deletedAt,omitempty"`
+	ReadBy       []string      `json:"readBy,omitempty"`
+	ReadReceipts []ReadReceipt `json:"readReceipts,omitempty"`
+	Read         bool          `json:"read,omitempty"`
+	Reactions    []Reaction    `json:"reactions,omitempty"`
+}
+
+type ReadReceipt struct {
+	UserID string    `json:"userId"`
+	ReadAt time.Time `json:"readAt"`
 }
 
 type Reaction struct {
@@ -89,13 +95,14 @@ type Store interface {
 }
 
 type MemoryStore struct {
-	mu         sync.RWMutex
-	identities map[string]Identity
-	rooms      map[string]Room
-	messages   map[string][]EncryptedMessage
-	reactions  map[string]map[string]string
-	roomReads  map[string]map[string]time.Time
-	friends    map[string]friendEdge
+	mu           sync.RWMutex
+	identities   map[string]Identity
+	rooms        map[string]Room
+	messages     map[string][]EncryptedMessage
+	reactions    map[string]map[string]string
+	roomReads    map[string]map[string]time.Time
+	messageReads map[string]map[string]time.Time
+	friends      map[string]friendEdge
 }
 
 type friendEdge struct {
@@ -108,12 +115,13 @@ type friendEdge struct {
 
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		identities: make(map[string]Identity),
-		rooms:      make(map[string]Room),
-		messages:   make(map[string][]EncryptedMessage),
-		reactions:  make(map[string]map[string]string),
-		roomReads:  make(map[string]map[string]time.Time),
-		friends:    make(map[string]friendEdge),
+		identities:   make(map[string]Identity),
+		rooms:        make(map[string]Room),
+		messages:     make(map[string][]EncryptedMessage),
+		reactions:    make(map[string]map[string]string),
+		roomReads:    make(map[string]map[string]time.Time),
+		messageReads: make(map[string]map[string]time.Time),
+		friends:      make(map[string]friendEdge),
 	}
 }
 
@@ -453,7 +461,17 @@ func (s *MemoryStore) MarkRoomRead(_ context.Context, roomID string, userID stri
 	if s.roomReads[roomID] == nil {
 		s.roomReads[roomID] = make(map[string]time.Time)
 	}
-	s.roomReads[roomID][userID] = time.Now().UTC()
+	now := time.Now().UTC()
+	s.roomReads[roomID][userID] = now
+	for _, msg := range s.messages[roomID] {
+		if msg.SenderID == userID || msg.DeletedAt != nil {
+			continue
+		}
+		if s.messageReads[msg.ID] == nil {
+			s.messageReads[msg.ID] = make(map[string]time.Time)
+		}
+		s.messageReads[msg.ID][userID] = now
+	}
 	return nil
 }
 
@@ -484,17 +502,30 @@ func (s *MemoryStore) decorateReadState(msg *EncryptedMessage) {
 	}
 	reads := s.roomReads[msg.RoomID]
 	readBy := make([]string, 0, len(room.Members))
+	receipts := make([]ReadReceipt, 0, len(room.Members))
 	for _, memberID := range room.Members {
 		memberID = normalizeID(memberID)
 		if memberID == "" || memberID == msg.SenderID {
 			continue
 		}
-		if readAt, ok := reads[memberID]; ok && !readAt.Before(msg.CreatedAt) {
+		readAt, ok := s.messageReads[msg.ID][memberID]
+		if !ok {
+			readAt, ok = reads[memberID]
+		}
+		if ok && !readAt.Before(msg.CreatedAt) {
 			readBy = append(readBy, memberID)
+			receipts = append(receipts, ReadReceipt{UserID: memberID, ReadAt: readAt})
 		}
 	}
 	sort.Strings(readBy)
+	sort.Slice(receipts, func(i, j int) bool {
+		if receipts[i].ReadAt.Equal(receipts[j].ReadAt) {
+			return receipts[i].UserID < receipts[j].UserID
+		}
+		return receipts[i].ReadAt.Before(receipts[j].ReadAt)
+	})
 	msg.ReadBy = readBy
+	msg.ReadReceipts = receipts
 	msg.Read = len(readBy) >= max(len(room.Members)-1, 0)
 	s.decorateReactions(msg)
 }

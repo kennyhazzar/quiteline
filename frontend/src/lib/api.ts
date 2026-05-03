@@ -69,8 +69,14 @@ export interface EncryptedMessage {
   editedAt?: string
   deletedAt?: string
   readBy?: string[]
+  readReceipts?: MessageReadReceipt[]
   read?: boolean
   reactions?: MessageReaction[]
+}
+
+export interface MessageReadReceipt {
+  userId: string
+  readAt: string
 }
 
 export interface MessageReaction {

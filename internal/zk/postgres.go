@@ -3,6 +3,7 @@ package zk
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -84,6 +85,15 @@ ALTER TABLE messages ADD COLUMN IF NOT EXISTS edited_at TIMESTAMPTZ;
 ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 
 CREATE INDEX IF NOT EXISTS messages_room_created ON messages(room_id, created_at);
+
+CREATE TABLE IF NOT EXISTS message_reads (
+	message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+	room_id    TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
+	user_id    TEXT NOT NULL,
+	read_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+	PRIMARY KEY (message_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS message_reads_room_user_idx ON message_reads(room_id, user_id, read_at);
 
 CREATE TABLE IF NOT EXISTS message_reactions (
 	message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -296,6 +306,11 @@ func (s *PostgresStore) ListRooms(ctx context.Context, userID string) ([]Room, e
 				FROM messages m
 				WHERE m.room_id = r.room_id
 				  AND m.sender_id <> $1
+				  AND m.deleted_at IS NULL
+				  AND NOT EXISTS (
+					SELECT 1 FROM message_reads mr
+					WHERE mr.message_id = m.id AND mr.user_id = $1
+				  )
 				  AND (rr.last_read_at IS NULL OR m.created_at > rr.last_read_at)
 			) uc ON true
 			ORDER BY COALESCE(lm.last_message_at, r.created_at) DESC
@@ -360,10 +375,25 @@ func (s *PostgresStore) MarkRoomRead(ctx context.Context, roomID string, userID 
 		return ErrBadRequest
 	}
 	tag, err := s.pool.Exec(ctx, `
-		INSERT INTO room_reads (room_id, user_id, last_read_at)
-		SELECT $1, $2, now()
-		WHERE EXISTS(SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2)
-		ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_at = EXCLUDED.last_read_at
+		WITH member AS (
+			SELECT 1 FROM room_members WHERE room_id = $1 AND user_id = $2
+		), mark_room AS (
+			INSERT INTO room_reads (room_id, user_id, last_read_at)
+			SELECT $1, $2, now() WHERE EXISTS(SELECT 1 FROM member)
+			ON CONFLICT (room_id, user_id) DO UPDATE SET last_read_at = EXCLUDED.last_read_at
+			RETURNING 1
+		), mark_messages AS (
+			INSERT INTO message_reads (message_id, room_id, user_id, read_at)
+			SELECT m.id, m.room_id, $2, now()
+			FROM messages m
+			WHERE m.room_id = $1
+			  AND m.sender_id <> $2
+			  AND m.deleted_at IS NULL
+			  AND EXISTS(SELECT 1 FROM member)
+			ON CONFLICT (message_id, user_id) DO UPDATE SET read_at = EXCLUDED.read_at
+			RETURNING 1
+		)
+		SELECT 1 FROM mark_room
 	`, roomID, userID)
 	if err != nil {
 		return err
@@ -556,17 +586,23 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 		SELECT recent.id, recent.room_id, recent.sender_id, recent.ciphertext, recent.nonce,
 		       recent.algorithm, recent.key_id, recent.created_at, recent.edited_at, recent.deleted_at,
 		       COALESCE(reads.read_by, '') AS read_by,
+		       COALESCE(reads.read_receipts, '[]') AS read_receipts,
 		       COALESCE(reads.read_count, 0) >= GREATEST(member_counts.member_count - 1, 0) AS read,
 		       COALESCE(reactions.summary, '') AS reactions
 		FROM recent
 		LEFT JOIN LATERAL (
-			SELECT string_agg(rr.user_id, ',' ORDER BY rr.user_id) AS read_by,
+			SELECT string_agg(reader.user_id, ',' ORDER BY reader.user_id) AS read_by,
+			       COALESCE(json_agg(json_build_object('userId', reader.user_id, 'readAt', reader.read_at) ORDER BY reader.read_at, reader.user_id), '[]') AS read_receipts,
 			       COUNT(*) AS read_count
-			FROM room_members rm
-			JOIN room_reads rr ON rr.room_id = recent.room_id AND rr.user_id = rm.user_id
-			WHERE rm.room_id = recent.room_id
-			  AND rm.user_id <> recent.sender_id
-			  AND rr.last_read_at >= recent.created_at
+			FROM (
+				SELECT rm.user_id, COALESCE(mr.read_at, rr.last_read_at) AS read_at
+				FROM room_members rm
+				LEFT JOIN message_reads mr ON mr.room_id = recent.room_id AND mr.message_id = recent.id AND mr.user_id = rm.user_id
+				LEFT JOIN room_reads rr ON rr.room_id = recent.room_id AND rr.user_id = rm.user_id AND rr.last_read_at >= recent.created_at
+				WHERE rm.room_id = recent.room_id
+				  AND rm.user_id <> recent.sender_id
+				  AND COALESCE(mr.read_at, rr.last_read_at) IS NOT NULL
+			) reader
 		) reads ON true
 		LEFT JOIN LATERAL (
 			SELECT COUNT(*) AS member_count FROM room_members WHERE room_id = recent.room_id
@@ -590,12 +626,12 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 	msgs := []EncryptedMessage{}
 	for rows.Next() {
 		var m EncryptedMessage
-		var readByCSV, reactionsCSV string
+		var readByCSV, readReceiptsJSON, reactionsCSV string
 		var editedAt, deletedAt sql.NullTime
 		if err := rows.Scan(
 			&m.ID, &m.RoomID, &m.SenderID,
 			&m.Ciphertext, &m.Nonce, &m.Algorithm, &m.KeyID,
-			&m.CreatedAt, &editedAt, &deletedAt, &readByCSV, &m.Read, &reactionsCSV,
+			&m.CreatedAt, &editedAt, &deletedAt, &readByCSV, &readReceiptsJSON, &m.Read, &reactionsCSV,
 		); err != nil {
 			return nil, err
 		}
@@ -603,10 +639,22 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 		if readByCSV != "" {
 			m.ReadBy = strings.Split(readByCSV, ",")
 		}
+		m.ReadReceipts = parseReadReceipts(readReceiptsJSON)
 		m.Reactions = parseReactionSummary(reactionsCSV)
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+func parseReadReceipts(value string) []ReadReceipt {
+	if value == "" || value == "[]" {
+		return nil
+	}
+	var receipts []ReadReceipt
+	if err := json.Unmarshal([]byte(value), &receipts); err != nil {
+		return nil
+	}
+	return receipts
 }
 
 func parseReactionSummary(value string) []Reaction {

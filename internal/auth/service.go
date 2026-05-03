@@ -33,6 +33,10 @@ var (
 	ErrTwoFactorRequired  = errors.New("two factor required")
 )
 
+const maxPasswordBytes = 256
+
+var dummyPasswordHash = []byte("$2a$10$7EqJtq98hPqEX7fNZaFWoOhiIUhO5lAVot6gM2VqK4lP0HpxUq1Eim")
+
 type Service struct {
 	cfg      config.Config
 	users    UserStore
@@ -154,7 +158,7 @@ func (s *Service) Register(ctx context.Context, username, password, displayName 
 	if displayName == "" {
 		displayName = username
 	}
-	if username == "" || len(password) < 8 {
+	if username == "" || len(password) < 8 || len(password) > maxPasswordBytes {
 		return "", Principal{}, ErrInvalidCredentials
 	}
 
@@ -230,6 +234,10 @@ func (s *Service) PrincipalFor(ctx context.Context, principal Principal) (Princi
 func (s *Service) Login(ctx context.Context, username, password string, totpCode string) (string, Principal, error) {
 	user, err := s.users.GetUserByUsername(ctx, normalizeUsername(username))
 	if err != nil {
+		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
+		return "", Principal{}, ErrInvalidCredentials
+	}
+	if len(password) > maxPasswordBytes {
 		return "", Principal{}, ErrInvalidCredentials
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
@@ -473,7 +481,7 @@ func userPrincipal(user User, expires int64) Principal {
 }
 
 func newSessionID() string {
-	var bytes [16]byte
+	var bytes [32]byte
 	if _, err := rand.Read(bytes[:]); err != nil {
 		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
 	}
