@@ -115,6 +115,7 @@ interface MessageDraft {
 type RealtimeEvent =
   | { kind: 'typing'; userId: string; displayName: string; typing: boolean; at: string }
   | { kind: 'presence'; userId: string; displayName: string; status: 'online' | 'offline'; lastSeenAt: string }
+  | { kind: 'chats.changed'; roomId?: string; userId?: string; at: string }
   | { kind: 'rooms.changed'; roomId?: string; userId?: string; at: string }
   | { kind: 'friends.changed'; userId?: string; at: string }
   | { kind: 'sessions.changed'; userId?: string; at: string }
@@ -237,6 +238,7 @@ export default function MessengerPage() {
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const authExpiredNotifiedRef = useRef(false)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const peerRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
   const activeCallIDRef = useRef('')
@@ -314,6 +316,8 @@ export default function MessengerPage() {
   const activeSecret = activeRoom?.roomSecret || (activeRoomID ? roomSecrets[activeRoomID] : '')
   const activeInvite = activeRoomID && activeSecret ? `${activeRoomID}:${activeSecret}` : ''
   const activeTopic = activeRoomID ? `room:${activeRoomID}` : ''
+  const currentUserID = identity?.userId || session?.principal.userId || ''
+  const currentDisplayName = identity?.displayName || session?.principal.displayName || session?.principal.username || ''
   const leftView = isMobile ? mobileView : sidebarView
   const ownAvatarSrc = useMemo(() => {
     const url = absoluteAvatarUrl(session?.principal.avatarUrl)
@@ -534,7 +538,9 @@ export default function MessengerPage() {
     localStorage.removeItem(SESSION_KEY)
     setSession(null)
     clearAccountLocalState()
-    wsRef.current?.close()
+    const previousWS = wsRef.current
+    wsRef.current = null
+    previousWS?.close()
     queryClient.clear()
     notifications.show({ title: t('sessionExpired'), message: t('sessionExpiredMessage'), color: 'yellow' })
   }
@@ -544,7 +550,24 @@ export default function MessengerPage() {
       handleAuthExpired()
       return
     }
-    notifications.show({ title, message: err.message, color: 'red' })
+    notifications.show({ title, message: errorMessage(err.message), color: 'red' })
+  }
+
+  function errorMessage(code: string) {
+    const normalized = code.trim()
+    const messages: Record<string, string> = {
+      account_required: t('errorAccountRequired'),
+      avatar_too_large_after_compression: t('errorAvatarTooLarge'),
+      call_failed: t('errorCallFailed'),
+      invite_format_must_be_roomId_secret: t('errorInviteFormat'),
+      leave_failed: t('errorLeaveFailed'),
+      login_required: t('errorLoginRequired'),
+      message_not_ready: t('errorMessageNotReady'),
+      room_not_ready: t('errorChatNotReady'),
+      username_required: t('errorUsernameRequired'),
+      user_not_found: t('errorUserNotFound'),
+    }
+    return messages[normalized] ?? normalized
   }
 
   function patchRoomActivity(roomId: string, options: { at?: string; incrementUnread?: boolean; clearUnread?: boolean }) {
@@ -1026,10 +1049,10 @@ export default function MessengerPage() {
   }, [session, activeRoomID, decryptedMessages.length])
 
   function handleRealtimeEvent(event: RealtimeEvent) {
-    if (!identity) return
-    if ('fromUserId' in event && event.fromUserId === identity.userId) return
+    if (!currentUserID) return
+    if ('fromUserId' in event && event.fromUserId === currentUserID) return
     if (event.kind === 'typing') {
-      if (event.userId === identity.userId) return
+      if (event.userId === currentUserID) return
       setTypingUsers((prev) => ({
         ...prev,
         [event.userId]: { displayName: event.displayName, until: event.typing ? Date.now() + 3500 : 0 },
@@ -1037,7 +1060,7 @@ export default function MessengerPage() {
       return
     }
     if (event.kind === 'presence') {
-      if (event.userId === identity.userId) return
+      if (event.userId === currentUserID) return
       setPresence((prev) => ({
         ...prev,
         [event.userId]: {
@@ -1049,7 +1072,7 @@ export default function MessengerPage() {
       notifyChat(event.status === 'online' ? t('userJoined') : t('userLeft'), event.displayName)
       return
     }
-    if (event.kind === 'rooms.changed') {
+    if (event.kind === 'chats.changed' || event.kind === 'rooms.changed') {
       void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
       if (event.roomId && event.roomId === activeRoomID) {
         void queryClient.refetchQueries({ queryKey: ['chat-identities', event.roomId] })
@@ -1059,7 +1082,7 @@ export default function MessengerPage() {
     if (event.kind === 'message.created') {
       patchRoomActivity(event.roomId, {
         at: event.at,
-        incrementUnread: event.senderId !== identity.userId && event.roomId !== activeRoomID,
+        incrementUnread: event.senderId !== currentUserID && event.roomId !== activeRoomID,
       })
       void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
       return
@@ -1081,7 +1104,7 @@ export default function MessengerPage() {
       return
     }
     if (event.kind === 'message.read') {
-      if (event.userId === identity.userId) {
+      if (event.userId === currentUserID) {
         patchRoomActivity(event.roomId, { clearUnread: true })
         void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
         return
@@ -1102,33 +1125,38 @@ export default function MessengerPage() {
       return
     }
     const msg = data as EncryptedMessage
-    if (msg.senderId !== identity?.userId) notifyChat(t('newMessage'), activeRoom?.name)
+    if (msg.senderId !== currentUserID) notifyChat(t('newMessage'), activeRoom?.name)
     setLiveMessages((prev) => [...prev, msg].slice(-200))
     patchRoomActivity(msg.roomId, {
       at: msg.createdAt,
-      incrementUnread: msg.senderId !== identity?.userId && msg.roomId !== activeRoomID,
+      incrementUnread: msg.senderId !== currentUserID && msg.roomId !== activeRoomID,
     })
     void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
   }
 
   const connectWS = useCallback((roomID: string) => {
-    if (!session || !identity) return
+    const userID = session?.principal.userId
+    if (!session || !userID) return
+    if (wsReconnectTimerRef.current) {
+      clearTimeout(wsReconnectTimerRef.current)
+      wsReconnectTimerRef.current = null
+    }
     wsRef.current?.close()
     setLiveMessages([])
     setPendingMessages([])
     const url = new URL(`${WS_BASE}/ws`)
-    const topics = [`user:${identity.userId}`]
+    const topics = [`user:${userID}`]
     if (roomID) topics.push(`room:${roomID}`)
     url.searchParams.set('topics', topics.join(','))
     url.searchParams.set('token', session.accessToken)
     const ws = new WebSocket(url.toString())
     wsRef.current = ws
     ws.onopen = () => {
-      if (!identity) return
+      if (!currentDisplayName) return
       sendRealtime({
         kind: 'presence',
-        userId: identity.userId,
-        displayName: identity.displayName,
+        userId: userID,
+        displayName: currentDisplayName,
         status: 'online',
         lastSeenAt: new Date().toISOString(),
       })
@@ -1136,7 +1164,7 @@ export default function MessengerPage() {
     ws.onmessage = (event) => {
       try {
         const envelope = JSON.parse(event.data) as MessageEnvelope
-        if (envelope.topic === `room:${roomID}` || envelope.topic === `user:${identity.userId}`) {
+        if (envelope.topic === `room:${roomID}` || envelope.topic === `user:${userID}`) {
           handleIncomingData(envelope.data)
         }
       } catch {
@@ -1144,12 +1172,24 @@ export default function MessengerPage() {
       }
     }
     ws.onerror = () => notifications.show({ title: t('wsError'), message: t('liveDisconnected'), color: 'red' })
-  }, [session, identity, activeTopic, activeRoomID])
+    ws.onclose = () => {
+      if (!session?.accessToken || wsRef.current !== ws) return
+      wsReconnectTimerRef.current = setTimeout(() => connectWS(roomID), 1500)
+    }
+  }, [session, currentDisplayName, activeTopic, activeRoomID, currentUserID])
 
   useEffect(() => {
-    if (identity && session) connectWS(activeRoomID)
-    return () => wsRef.current?.close()
-  }, [activeRoomID, connectWS, identity, session])
+    if (session?.principal.userId) connectWS(activeRoomID)
+    return () => {
+      if (wsReconnectTimerRef.current) {
+        clearTimeout(wsReconnectTimerRef.current)
+        wsReconnectTimerRef.current = null
+      }
+      const currentWS = wsRef.current
+      wsRef.current = null
+      currentWS?.close()
+    }
+  }, [activeRoomID, connectWS, session?.principal.userId])
 
   function selectRoom(room: Room) {
     setActiveRoomID(room.roomId)

@@ -132,10 +132,16 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /v1/chat/rooms", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleListRooms(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/chats", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleListRooms(w, r, deps)
+	}))
 	mux.HandleFunc("POST /v1/zk/rooms", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleCreateRoom(w, r, deps)
 	}))
 	mux.HandleFunc("POST /v1/chat/rooms", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleCreateRoom(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/chats", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleCreateRoom(w, r, deps)
 	}))
 	mux.HandleFunc("GET /v1/zk/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
@@ -144,10 +150,16 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /v1/chat/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/chats/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
 	mux.HandleFunc("POST /v1/zk/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
 	mux.HandleFunc("POST /v1/chat/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/chats/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
 	mux.HandleFunc("PUT /v1/zk/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
@@ -156,10 +168,16 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("PUT /v1/chat/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
+	mux.HandleFunc("PUT /v1/chats/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
 	mux.HandleFunc("DELETE /v1/zk/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
 	mux.HandleFunc("DELETE /v1/chat/rooms/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
+	mux.HandleFunc("DELETE /v1/chats/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleZKRoomSubroutes(w, r, deps)
 	}))
 	mux.HandleFunc("POST /v1/zk/files", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
@@ -696,7 +714,7 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request, deps Dependencies)
 		writeStoreError(w, err)
 		return
 	}
-	publishRoomMembersEvent(r.Context(), deps, room.RoomID, "rooms.changed")
+	publishRoomMembersEvent(r.Context(), deps, room.RoomID, "chats.changed")
 	writeJSON(w, http.StatusCreated, room)
 }
 
@@ -820,7 +838,7 @@ func handleInviteFriendToRoom(w http.ResponseWriter, r *http.Request, deps Depen
 		writeStoreError(w, err)
 		return
 	}
-	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
+	publishRoomMembersEvent(r.Context(), deps, roomID, "chats.changed")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -834,12 +852,12 @@ func handleLeaveRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, 
 		return
 	}
 	publishRoomEvent(r.Context(), deps, roomID, realtimeStateEvent{
-		Kind:   "rooms.changed",
+		Kind:   "chats.changed",
 		RoomID: roomID,
 		UserID: principalFromContext(r.Context()).UserID,
 	})
-	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
-	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "rooms.changed", roomID, "")
+	publishRoomMembersEvent(r.Context(), deps, roomID, "chats.changed")
+	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "chats.changed", roomID, "")
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -923,7 +941,7 @@ func handleUpdateEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
-	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
+	publishRoomMembersEvent(r.Context(), deps, roomID, "chats.changed")
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -941,7 +959,7 @@ func handleDeleteEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
-	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
+	publishRoomMembersEvent(r.Context(), deps, roomID, "chats.changed")
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -965,7 +983,7 @@ func handleToggleMessageReaction(w http.ResponseWriter, r *http.Request, deps De
 		writeError(w, http.StatusBadGateway, "publish_failed")
 		return
 	}
-	publishRoomMembersEvent(r.Context(), deps, roomID, "rooms.changed")
+	publishRoomMembersEvent(r.Context(), deps, roomID, "chats.changed")
 	writeJSON(w, http.StatusOK, msg)
 }
 
@@ -1116,7 +1134,7 @@ func topicFromPath(path string) (string, bool) {
 
 func zkRoomSubroute(path string) (string, string, bool) {
 	prefix := ""
-	for _, candidate := range []string{"/v1/zk/rooms/", "/v1/chat/rooms/"} {
+	for _, candidate := range []string{"/v1/zk/rooms/", "/v1/chat/rooms/", "/v1/chats/"} {
 		if strings.HasPrefix(path, candidate) {
 			prefix = candidate
 			break
