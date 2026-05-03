@@ -3,11 +3,16 @@ import '@mantine/notifications/styles.css'
 import './globals.css'
 import { ColorSchemeScript } from '@mantine/core'
 import { Providers } from './providers'
-import type { Metadata } from 'next'
+import type { Metadata, Viewport } from 'next'
 
 export const metadata: Metadata = {
   title: 'Quietline',
   description: 'Client-side encrypted WebSocket messenger',
+}
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

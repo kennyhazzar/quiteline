@@ -1454,9 +1454,12 @@ export default function MessengerPage() {
             <Stack gap="md">
               <div>
                 <Title order={2}>{authMode === 'register' ? t('createAccount') : t('login')}</Title>
-                <Text size="sm" c="dimmed">{authMode === 'register' ? t('passwordHint') : t('quietlineIntro')}</Text>
+                {(authMode === 'register' || !isMobile) && (
+                  <Text size="sm" c="dimmed">{authMode === 'register' ? t('passwordHint') : t('quietlineIntro')}</Text>
+                )}
               </div>
               <SegmentedControl
+                className="auth-switch"
                 fullWidth
                 value={authMode}
                 onChange={(value) => {
