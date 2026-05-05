@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"highload-ws-pubsub/internal/auth"
@@ -24,17 +26,23 @@ import (
 )
 
 type Dependencies struct {
-	Config  config.Config
-	Broker  broker.Broker
-	Hub     *ws.Hub
-	Metrics *metrics.Registry
-	Logger  *slog.Logger
-	Auth    *auth.Service
-	ZKStore zk.Store
-	Files   files.Store
+	Config    config.Config
+	Broker    broker.Broker
+	Hub       *ws.Hub
+	Metrics   *metrics.Registry
+	Logger    *slog.Logger
+	Auth      *auth.Service
+	ZKStore   zk.Store
+	Files     files.Store
+	FileRooms *fileRegistry
 }
 
 func New(deps Dependencies) http.Handler {
+	if deps.FileRooms == nil {
+		deps.FileRooms = &fileRegistry{rooms: make(map[string]string)}
+	}
+	authLimiter := newIPRateLimiter(10, time.Minute)
+
 	mux := http.NewServeMux()
 	wsHandler := ws.NewHandler(deps.Config, deps.Hub, deps.Broker, deps.Metrics, deps.Logger, deps.Auth, deps.ZKStore)
 
@@ -44,15 +52,15 @@ func New(deps Dependencies) http.Handler {
 	mux.Handle("GET /metrics", promhttp.HandlerFor(deps.Metrics.Prometheus, promhttp.HandlerOpts{}))
 	mux.Handle("GET /ws", wsHandler)
 	mux.HandleFunc("OPTIONS /", handleOptions)
-	mux.HandleFunc("POST /v1/auth/token", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /v1/auth/token", rateLimitMiddleware(authLimiter, func(w http.ResponseWriter, r *http.Request) {
 		handleToken(w, r, deps)
-	})
-	mux.HandleFunc("POST /v1/auth/register", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("POST /v1/auth/register", rateLimitMiddleware(authLimiter, func(w http.ResponseWriter, r *http.Request) {
 		handleRegister(w, r, deps)
-	})
-	mux.HandleFunc("POST /v1/auth/login", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	mux.HandleFunc("POST /v1/auth/login", rateLimitMiddleware(authLimiter, func(w http.ResponseWriter, r *http.Request) {
 		handleLogin(w, r, deps)
-	})
+	}))
 	mux.HandleFunc("GET /v1/me", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		principal, err := deps.Auth.PrincipalFor(r.Context(), principalFromContext(r.Context()))
 		if err != nil {
@@ -536,7 +544,6 @@ func handleRequestFriend(w http.ResponseWriter, r *http.Request, deps Dependenci
 			return
 		}
 		targetID = user.UserID
-		_, _ = ensureCurrentIdentity(r.Context(), deps, auth.Principal{UserID: user.UserID, Username: user.Username, DisplayName: user.DisplayName})
 	}
 	if err := deps.ZKStore.RequestFriend(r.Context(), principalFromContext(r.Context()).UserID, targetID); err != nil {
 		writeStoreError(w, err)
@@ -666,7 +673,25 @@ func handleGetIdentity(w http.ResponseWriter, r *http.Request, deps Dependencies
 		writeError(w, http.StatusNotFound, "not_found")
 		return
 	}
-
+	principal := principalFromContext(r.Context())
+	if principal.UserID != userID {
+		friends, err := deps.ZKStore.AreFriends(r.Context(), principal.UserID, userID)
+		if err != nil {
+			writeStoreError(w, err)
+			return
+		}
+		if !friends {
+			shared, err := shareRoom(r.Context(), deps, principal.UserID, userID)
+			if err != nil {
+				writeStoreError(w, err)
+				return
+			}
+			if !shared {
+				writeError(w, http.StatusForbidden, "forbidden")
+				return
+			}
+		}
+	}
 	identity, err := deps.ZKStore.GetIdentity(r.Context(), userID)
 	if err != nil {
 		writeStoreError(w, err)
@@ -818,19 +843,12 @@ func handleInviteFriendToRoom(w http.ResponseWriter, r *http.Request, deps Depen
 		writeError(w, http.StatusForbidden, "not_friends")
 		return
 	}
-	rooms, err := deps.ZKStore.ListRooms(r.Context(), principal.UserID)
+	isMember, err := deps.ZKStore.IsRoomMember(r.Context(), roomID, principal.UserID)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	member := false
-	for _, room := range rooms {
-		if room.RoomID == roomID {
-			member = true
-			break
-		}
-	}
-	if !member {
+	if !isMember {
 		writeError(w, http.StatusForbidden, "forbidden")
 		return
 	}
@@ -993,6 +1011,14 @@ func handleUploadEncryptedFile(w http.ResponseWriter, r *http.Request, deps Depe
 		writeError(w, http.StatusBadRequest, "invalid_multipart")
 		return
 	}
+	roomID := strings.TrimSpace(r.FormValue("roomId"))
+	if roomID == "" || strings.ContainsAny(roomID, " \t\r\n") {
+		writeError(w, http.StatusBadRequest, "room_id_required")
+		return
+	}
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "file_required")
@@ -1008,6 +1034,7 @@ func handleUploadEncryptedFile(w http.ResponseWriter, r *http.Request, deps Depe
 		writeError(w, http.StatusBadGateway, "file_upload_failed")
 		return
 	}
+	deps.FileRooms.set(stored.FileID, roomID)
 	writeJSON(w, http.StatusCreated, fileUploadResponse{FileID: stored.FileID, Size: stored.Size})
 }
 
@@ -1015,6 +1042,19 @@ func handleDownloadEncryptedFile(w http.ResponseWriter, r *http.Request, deps De
 	fileID := fileIDFromPath(r.URL.Path)
 	if fileID == "" || strings.ContainsAny(fileID, " \t\r\n") {
 		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	roomID := strings.TrimSpace(r.URL.Query().Get("roomId"))
+	if roomID == "" {
+		writeError(w, http.StatusBadRequest, "room_id_required")
+		return
+	}
+	// If the registry knows this file, the caller must supply the correct room.
+	if storedRoom, ok := deps.FileRooms.get(fileID); ok && storedRoom != roomID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if !requireRoomMember(w, r, deps, roomID) {
 		return
 	}
 	reader, size, err := deps.Files.Get(r.Context(), fileID)
@@ -1097,7 +1137,7 @@ func canPublishTopic(ctx context.Context, deps Dependencies, principal auth.Prin
 		userID = strings.TrimSpace(userID)
 		return userID != "" && !strings.ContainsAny(userID, " \t\r\n/") && principal.UserID == userID
 	}
-	return true
+	return false
 }
 
 func requireRoomMember(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) bool {
@@ -1316,4 +1356,102 @@ func recoveryMiddleware(next http.Handler) http.Handler {
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// fileRegistry tracks which room each uploaded encrypted file belongs to.
+// This is in-memory and resets on restart; production deployments should persist this in DB.
+type fileRegistry struct {
+	mu    sync.RWMutex
+	rooms map[string]string // fileID -> roomID
+}
+
+func (fr *fileRegistry) set(fileID, roomID string) {
+	fr.mu.Lock()
+	fr.rooms[fileID] = roomID
+	fr.mu.Unlock()
+}
+
+func (fr *fileRegistry) get(fileID string) (string, bool) {
+	fr.mu.RLock()
+	roomID, ok := fr.rooms[fileID]
+	fr.mu.RUnlock()
+	return roomID, ok
+}
+
+// ipRateLimiter is a sliding-window per-IP rate limiter.
+type ipRateLimiter struct {
+	mu     sync.Mutex
+	hits   map[string][]time.Time
+	limit  int
+	window time.Duration
+}
+
+func newIPRateLimiter(limit int, window time.Duration) *ipRateLimiter {
+	return &ipRateLimiter{
+		hits:   make(map[string][]time.Time),
+		limit:  limit,
+		window: window,
+	}
+}
+
+func (rl *ipRateLimiter) allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+	now := time.Now()
+	cutoff := now.Add(-rl.window)
+	prev := rl.hits[ip]
+	fresh := prev[:0]
+	for _, t := range prev {
+		if t.After(cutoff) {
+			fresh = append(fresh, t)
+		}
+	}
+	if len(fresh) >= rl.limit {
+		rl.hits[ip] = fresh
+		return false
+	}
+	rl.hits[ip] = append(fresh, now)
+	return true
+}
+
+func rateLimitMiddleware(rl *ipRateLimiter, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !rl.allow(clientIP(r)) {
+			writeError(w, http.StatusTooManyRequests, "rate_limited")
+			return
+		}
+		next(w, r)
+	}
+}
+
+// clientIP extracts the real client IP, respecting X-Forwarded-For when present.
+// Note: X-Forwarded-For can be spoofed if the app is not behind a trusted proxy.
+func clientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		if i := strings.Index(xff, ","); i >= 0 {
+			return strings.TrimSpace(xff[:i])
+		}
+		return strings.TrimSpace(xff)
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// shareRoom reports whether userID1 and userID2 share at least one common room.
+func shareRoom(ctx context.Context, deps Dependencies, userID1, userID2 string) (bool, error) {
+	rooms, err := deps.ZKStore.ListRooms(ctx, userID1)
+	if err != nil {
+		return false, err
+	}
+	for _, room := range rooms {
+		for _, member := range room.Members {
+			if member == userID2 {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
 }

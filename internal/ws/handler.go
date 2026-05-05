@@ -167,7 +167,7 @@ func (h *Handler) authorizeTopic(ctx context.Context, principal auth.Principal, 
 		if userID, userTopic := userIDFromTopic(topic); userTopic {
 			return principal.UserID != "" && principal.UserID == userID
 		}
-		return true
+		return false // reject unknown topic types
 	}
 	if principal.UserID == "" || h.rooms == nil {
 		return false

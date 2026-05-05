@@ -324,7 +324,9 @@ func (s *Service) AuthenticateRequest(r *http.Request) (Principal, error) {
 	}
 
 	token := bearerToken(r.Header.Get("Authorization"))
-	if token == "" {
+	// Token in query param is allowed only for WebSocket upgrades: browsers cannot
+	// set custom headers in the native WebSocket API.
+	if token == "" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 		token = strings.TrimSpace(r.URL.Query().Get("token"))
 	}
 	return s.VerifyToken(r.Context(), token)
@@ -358,8 +360,13 @@ func (s *Service) VerifyToken(ctx context.Context, token string) (Principal, err
 	if claims.Issuer != s.cfg.AuthIssuer || claims.Subject == "" {
 		return Principal{}, ErrInvalidToken
 	}
-	if time.Now().UTC().Unix() >= claims.Expires {
+	nowUnix := time.Now().UTC().Unix()
+	if nowUnix >= claims.Expires {
 		return Principal{}, ErrTokenExpired
+	}
+	// Reject tokens with iat far in the future (> 30s clock skew tolerance).
+	if claims.Issued > nowUnix+30 {
+		return Principal{}, ErrInvalidToken
 	}
 	if claims.Username != "" {
 		if claims.Session == "" {
