@@ -12,6 +12,7 @@ import {
   FileButton,
   Group,
   Image,
+  Indicator,
   Menu,
   PasswordInput,
   ScrollArea,
@@ -23,6 +24,7 @@ import {
 import {
   IconCheck,
   IconChecks,
+  IconChevronDown,
   IconClock,
   IconCopy,
   IconDotsVertical,
@@ -40,7 +42,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
-import React, { type RefObject } from 'react'
+import React, { useEffect, useRef, useState, type RefObject } from 'react'
 import { absoluteAvatarUrl, type AuthSession, type Friend, type Identity, type Room } from '@/lib/api'
 import type { PlainMessage } from '@/lib/crypto'
 import { useI18n } from '@/lib/i18n'
@@ -183,6 +185,39 @@ export function ChatView(props: ChatViewProps) {
     activeInviteLink,
     activeChatLink,
   } = props
+
+  // ─── Scroll tracking + unread counter ────────────────────────────────────
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [showScrollBtn, setShowScrollBtn] = useState(false)
+  const isNearBottomRef = useRef(true)
+  const prevLengthRef = useRef(0)
+
+  // Сброс при смене комнаты
+  useEffect(() => {
+    setUnreadCount(0)
+    setShowScrollBtn(false)
+    isNearBottomRef.current = true
+    prevLengthRef.current = 0
+  }, [activeRoomID])
+
+  // Новые сообщения: автоскролл если внизу, иначе — счётчик
+  useEffect(() => {
+    const diff = visibleMessages.length - prevLengthRef.current
+    prevLengthRef.current = visibleMessages.length
+    if (diff <= 0) return
+    if (isNearBottomRef.current) {
+      const el = messagesViewportRef.current
+      if (el) el.scrollTop = el.scrollHeight
+    } else {
+      setUnreadCount((c) => c + diff)
+    }
+  }, [visibleMessages.length, messagesViewportRef])
+
+  function handleScrollToBottom() {
+    const el = messagesViewportRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    setUnreadCount(0)
+  }
 
   function renderMessageStatus(msg: DecryptedMessage) {
     if (!identity || msg.senderId !== identity.userId || msg.body?.system) return null
@@ -361,8 +396,21 @@ export function ChatView(props: ChatViewProps) {
           )}
 
           {/* Message list */}
-          <Box style={{ flex: 1, minHeight: 0 }}>
-            <ScrollArea h="100%" type="auto" offsetScrollbars viewportRef={messagesViewportRef}>
+          <Box style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+            <ScrollArea
+              h="100%"
+              type="auto"
+              offsetScrollbars
+              viewportRef={messagesViewportRef}
+              onScrollPositionChange={({ y }) => {
+                const el = messagesViewportRef.current
+                if (!el) return
+                const atBottom = el.scrollHeight - y - el.clientHeight < 80
+                isNearBottomRef.current = atBottom
+                setShowScrollBtn(!atBottom)
+                if (atBottom) setUnreadCount(0)
+              }}
+            >
               <Stack className={isMobile ? 'mobile-message-list' : undefined} gap={isMobile ? 8 : 'xs'} pr={isMobile ? 0 : 'sm'}>
                 {visibleMessages.map((msg) => (
                   <Card
@@ -540,6 +588,28 @@ export function ChatView(props: ChatViewProps) {
                 )}
               </Stack>
             </ScrollArea>
+
+            {/* Scroll-to-bottom button */}
+            {showScrollBtn && (
+              <Box style={{ position: 'absolute', bottom: 12, right: 20, zIndex: 10 }}>
+                <Indicator
+                  label={unreadCount > 0 ? String(unreadCount) : undefined}
+                  disabled={unreadCount === 0}
+                  size={18}
+                  color="red"
+                >
+                  <ActionIcon
+                    radius="xl"
+                    size="lg"
+                    variant="filled"
+                    onClick={handleScrollToBottom}
+                    aria-label="Scroll to bottom"
+                  >
+                    <IconChevronDown size={20} />
+                  </ActionIcon>
+                </Indicator>
+              </Box>
+            )}
           </Box>
 
           {/* Composer */}

@@ -421,14 +421,14 @@ export function MessengerApp() {
     })
   }, [activeRoomID, highlightedMessageID, isMobile, leftView])
 
-  // ─── Scroll to bottom / highlighted message ───────────────────────────────
+  // ─── Scroll to bottom on room open ───────────────────────────────────────
   useEffect(() => {
     const viewport = messages.messagesViewportRef.current
-    if (!viewport || !activeRoomID || highlightedMessageID) return
+    if (!viewport || !activeRoomID) return
     window.requestAnimationFrame(() => {
-      viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+      viewport.scrollTo({ top: viewport.scrollHeight })
     })
-  }, [activeRoomID, messages.displayMessages.length, highlightedMessageID])
+  }, [activeRoomID])
 
   useEffect(() => {
     if (!activeRoomID || !highlightedMessageID || messages.visibleMessages.length === 0) return
