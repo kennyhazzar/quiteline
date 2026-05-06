@@ -482,10 +482,12 @@ export async function toggleMessageReaction(input: {
 
 export async function uploadEncryptedFile(input: {
   token: string
+  roomId: string
   blob: Blob
 }): Promise<FileUploadResponse> {
   const form = new FormData()
   form.append('file', input.blob, 'encrypted.bin')
+  form.append('roomId', input.roomId)
   const res = await fetch(`${BASE}/v1/chat/files`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${input.token}` },
@@ -497,8 +499,10 @@ export async function uploadEncryptedFile(input: {
 export async function downloadEncryptedFile(input: {
   token: string
   fileId: string
+  roomId: string
 }): Promise<Blob> {
-  const res = await fetch(`${BASE}/v1/chat/files/${encodeURIComponent(input.fileId)}`, {
+  const url = `${BASE}/v1/chat/files/${encodeURIComponent(input.fileId)}?roomId=${encodeURIComponent(input.roomId)}`
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${input.token}` },
   })
   if (!res.ok) {
