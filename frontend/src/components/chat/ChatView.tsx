@@ -194,15 +194,31 @@ export function ChatView(props: ChatViewProps) {
   const initializedRoomRef = useRef('')
   const loadingHistoryRef = useRef(false)
   const historyPaginationEnabledRef = useRef(false)
+  const bottomScrollTimersRef = useRef<number[]>([])
 
-  function scrollMessagesToBottom(behavior: ScrollBehavior = 'auto') {
-    const el = messagesViewportRef.current
-    if (!el) return
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        el.scrollTo({ top: el.scrollHeight, behavior })
-      })
-    })
+  function clearBottomScrollTimers() {
+    for (const timer of bottomScrollTimersRef.current) window.clearTimeout(timer)
+    bottomScrollTimersRef.current = []
+  }
+
+  function isViewportNearBottom(el: HTMLDivElement) {
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  }
+
+  function scrollMessagesToBottom(behavior: ScrollBehavior = 'auto', onSettled?: () => void) {
+    clearBottomScrollTimers()
+    const delays = [0, 16, 50, 120, 250, 500]
+    for (const [index, delay] of delays.entries()) {
+      const timer = window.setTimeout(() => {
+        window.requestAnimationFrame(() => {
+          const el = messagesViewportRef.current
+          if (!el) return
+          el.scrollTo({ top: el.scrollHeight, behavior: index === 0 ? behavior : 'auto' })
+          if (index === delays.length - 1) onSettled?.()
+        })
+      }, delay)
+      bottomScrollTimersRef.current.push(timer)
+    }
   }
 
   // Reset transient scroll state when changing chats.
@@ -214,6 +230,7 @@ export function ChatView(props: ChatViewProps) {
     initializedRoomRef.current = ''
     loadingHistoryRef.current = false
     historyPaginationEnabledRef.current = false
+    clearBottomScrollTimers()
   }, [activeRoomID])
 
   // Only appended incoming messages affect the unread counter. Prepended history is ignored.
@@ -227,11 +244,15 @@ export function ChatView(props: ChatViewProps) {
       initializedRoomRef.current = activeRoomID
       previousMessageIDsRef.current = currentIDs
       if (!highlightedMessageID) {
-        scrollMessagesToBottom()
         const roomID = activeRoomID
-        window.setTimeout(() => {
-          if (initializedRoomRef.current === roomID) historyPaginationEnabledRef.current = true
-        }, 250)
+        scrollMessagesToBottom('auto', () => {
+          if (initializedRoomRef.current !== roomID) return
+          const el = messagesViewportRef.current
+          const atBottom = el ? isViewportNearBottom(el) : false
+          isNearBottomRef.current = atBottom
+          setShowScrollBtn(!atBottom)
+          historyPaginationEnabledRef.current = atBottom
+        })
       } else {
         historyPaginationEnabledRef.current = true
       }
@@ -455,7 +476,7 @@ export function ChatView(props: ChatViewProps) {
               onScrollPositionChange={({ y }) => {
                 const el = messagesViewportRef.current
                 if (!el) return
-                const atBottom = el.scrollHeight - y - el.clientHeight < 80
+                const atBottom = isViewportNearBottom(el)
                 isNearBottomRef.current = atBottom
                 setShowScrollBtn(!atBottom)
                 if (atBottom) setUnreadCount(0)
