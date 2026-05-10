@@ -88,7 +88,7 @@ type Store interface {
 	UpdateMessage(ctx context.Context, roomID string, messageID string, userID string, msg EncryptedMessage) (EncryptedMessage, error)
 	DeleteMessageForAll(ctx context.Context, roomID string, messageID string, userID string) (EncryptedMessage, error)
 	ToggleMessageReaction(ctx context.Context, roomID string, messageID string, userID string, emoji string) (EncryptedMessage, error)
-	ListMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error)
+	ListMessages(ctx context.Context, roomID string, limit int, before *time.Time) ([]EncryptedMessage, error)
 	ListFriends(ctx context.Context, userID string) ([]Friend, error)
 	RequestFriend(ctx context.Context, fromUserID string, toUserID string) error
 	RespondFriend(ctx context.Context, userID string, friendID string, accept bool) error
@@ -492,7 +492,7 @@ func (s *MemoryStore) MarkRoomRead(_ context.Context, roomID string, userID stri
 	return nil
 }
 
-func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int) ([]EncryptedMessage, error) {
+func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int, before *time.Time) ([]EncryptedMessage, error) {
 	roomID = normalizeID(roomID)
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -501,6 +501,13 @@ func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int) 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	messages := s.messages[roomID]
+	if before != nil {
+		end := len(messages)
+		for end > 0 && !messages[end-1].CreatedAt.Before(*before) {
+			end--
+		}
+		messages = messages[:end]
+	}
 	if len(messages) > limit {
 		messages = messages[len(messages)-limit:]
 	}

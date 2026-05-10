@@ -45,6 +45,7 @@ export function useMessages(opts: {
   handleRequestError: (err: Error, title: string) => void
   sendRealtime: (event: { kind: 'typing'; userId: string; displayName: string; typing: boolean; at: string }) => void
   activeRoom: { name?: string } | null
+  highlightedMessageID?: string
 }) {
   const {
     session,
@@ -55,6 +56,7 @@ export function useMessages(opts: {
     handleRequestError,
     sendRealtime,
     activeRoom,
+    highlightedMessageID,
   } = opts
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -72,12 +74,16 @@ export function useMessages(opts: {
   const [previews, setPreviews] = useState<Record<string, string>>({})
   const [messageSearch, setMessageSearch] = useState('')
   const [decryptedMessages, setDecryptedMessages] = useState<DecryptedMessage[]>([])
+  const [olderMessages, setOlderMessages] = useState<EncryptedMessage[]>([])
+  const [hasMoreMessages, setHasMoreMessages] = useState(false)
+  const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false)
 
   const messageInputRef = useRef<HTMLInputElement | null>(null)
   const messageTextRef = useRef('')
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const readMarksRef = useRef<Record<string, number>>({})
+  const highlightedLoaderRef = useRef('')
 
   const history = useQuery({
     queryKey: ['chat-messages', activeRoomID, session?.accessToken],
@@ -88,6 +94,111 @@ export function useMessages(opts: {
     refetchOnReconnect: true,
     staleTime: 30000,
   })
+
+  useEffect(() => {
+    setOlderMessages([])
+    setHasMoreMessages(false)
+    setIsLoadingMoreMessages(false)
+    highlightedLoaderRef.current = ''
+  }, [activeRoomID, session?.accessToken])
+
+  useEffect(() => {
+    if (olderMessages.length === 0) setHasMoreMessages(Boolean(history.data?.hasMore))
+  }, [history.data?.hasMore, olderMessages.length])
+
+  const pagedMessages = useMemo(
+    () => [...olderMessages, ...(history.data?.messages ?? [])],
+    [history.data?.messages, olderMessages],
+  )
+
+  const oldestPagedMessageAt = useMemo(() => {
+    let oldest = ''
+    for (const msg of pagedMessages) {
+      if (!oldest || Date.parse(msg.createdAt) < Date.parse(oldest)) oldest = msg.createdAt
+    }
+    return oldest
+  }, [pagedMessages])
+
+  function mergeMessagePages(prev: EncryptedMessage[], incoming: EncryptedMessage[]) {
+    const byID = new Map<string, EncryptedMessage>()
+    for (const msg of incoming) byID.set(msg.id, msg)
+    for (const msg of prev) byID.set(msg.id, msg)
+    return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
+  }
+
+  async function loadMoreMessages() {
+    if (!session || !activeRoomID || !oldestPagedMessageAt || isLoadingMoreMessages || !hasMoreMessages) return
+    setIsLoadingMoreMessages(true)
+    try {
+      const page = await fetchMessages(activeRoomID, session.accessToken, oldestPagedMessageAt)
+      setOlderMessages((prev) => mergeMessagePages(prev, page.messages))
+      setHasMoreMessages(page.hasMore)
+    } catch (err) {
+      if (err instanceof AuthError) handleAuthExpired()
+      else handleRequestError(err as Error, t('roomError'))
+    } finally {
+      setIsLoadingMoreMessages(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!session || !activeRoomID || !highlightedMessageID || !hasMoreMessages || isLoadingMoreMessages) return
+    if (pagedMessages.some((msg) => msg.id === highlightedMessageID)) return
+    const loaderKey = `${activeRoomID}:${highlightedMessageID}`
+    if (highlightedLoaderRef.current === loaderKey) return
+    highlightedLoaderRef.current = loaderKey
+    const roomID = activeRoomID
+    const accessToken = session.accessToken
+
+    let cancelled = false
+    async function loadUntilHighlighted() {
+      let cursor = oldestPagedMessageAt
+      let nextHasMore = hasMoreMessages
+      let guard = 0
+      setIsLoadingMoreMessages(true)
+      try {
+        while (!cancelled && cursor && nextHasMore && guard < 20) {
+          const page = await fetchMessages(roomID, accessToken, cursor)
+          if (page.messages.length === 0) {
+            nextHasMore = false
+            setHasMoreMessages(false)
+            break
+          }
+          setOlderMessages((prev) => mergeMessagePages(prev, page.messages))
+          if (page.messages.some((msg) => msg.id === highlightedMessageID)) {
+            setHasMoreMessages(page.hasMore)
+            break
+          }
+          cursor = page.messages.reduce(
+            (oldest, msg) => (!oldest || Date.parse(msg.createdAt) < Date.parse(oldest) ? msg.createdAt : oldest),
+            '',
+          )
+          nextHasMore = page.hasMore
+          setHasMoreMessages(page.hasMore)
+          guard += 1
+        }
+      } catch (err) {
+        if (err instanceof AuthError) handleAuthExpired()
+        else handleRequestError(err as Error, t('roomError'))
+      } finally {
+        if (!cancelled) setIsLoadingMoreMessages(false)
+      }
+    }
+    void loadUntilHighlighted()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    activeRoomID,
+    handleAuthExpired,
+    handleRequestError,
+    hasMoreMessages,
+    highlightedMessageID,
+    oldestPagedMessageAt,
+    pagedMessages,
+    session,
+    t,
+  ])
 
   const encryptedMessages = useMemo(() => {
     const byID = new Map<string, EncryptedMessage>()
@@ -102,10 +213,10 @@ export function useMessages(opts: {
         byID.set(msg.id, msg)
       }
     }
-    for (const msg of history.data?.messages ?? []) put(msg)
+    for (const msg of pagedMessages) put(msg)
     for (const msg of liveMessages) put(msg)
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  }, [history.data?.messages, liveMessages])
+  }, [liveMessages, pagedMessages])
 
   useEffect(() => {
     let cancelled = false
@@ -514,6 +625,9 @@ export function useMessages(opts: {
     messageTextRef,
     messagesViewportRef,
     readMarksRef,
+    hasMoreMessages,
+    isLoadingMoreMessages,
+    loadMoreMessages,
     sendMutation,
     editMessageMutation,
     deleteMessageMutation,

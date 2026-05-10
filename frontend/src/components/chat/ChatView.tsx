@@ -85,6 +85,9 @@ interface ChatViewProps {
   setMessageSearch: (v: string) => void
   messagesViewportRef: RefObject<HTMLDivElement | null>
   messageInputRef: RefObject<HTMLInputElement | null>
+  hasMoreMessages: boolean
+  isLoadingMoreMessages: boolean
+  loadMoreMessages: () => Promise<void>
   replyTarget: DecryptedMessage | null
   setReplyTarget: (msg: DecryptedMessage | null) => void
   selectedFile: File | null
@@ -125,7 +128,7 @@ interface ChatViewProps {
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const {
     isMobile,
     mobileView,
@@ -150,6 +153,9 @@ export function ChatView(props: ChatViewProps) {
     setMessageSearch,
     messagesViewportRef,
     messageInputRef,
+    hasMoreMessages,
+    isLoadingMoreMessages,
+    loadMoreMessages,
     replyTarget,
     setReplyTarget,
     selectedFile,
@@ -198,19 +204,33 @@ export function ChatView(props: ChatViewProps) {
   useEffect(() => {
     const diff = visibleMessages.length - prevLengthRef.current
     prevLengthRef.current = visibleMessages.length
-    if (diff <= 0) return
+    if (diff <= 0 || isLoadingMoreMessages || highlightedMessageID) return
     if (isNearBottomRef.current) {
       const el = messagesViewportRef.current
-      if (el) el.scrollTop = el.scrollHeight
+      if (el) window.requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight }))
     } else {
       setUnreadCount((c) => c + diff)
     }
-  }, [visibleMessages.length, messagesViewportRef])
+  }, [highlightedMessageID, isLoadingMoreMessages, messagesViewportRef, visibleMessages.length])
 
   function handleScrollToBottom() {
     const el = messagesViewportRef.current
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
     setUnreadCount(0)
+  }
+
+  async function handleLoadMoreMessages() {
+    const el = messagesViewportRef.current
+    const previousHeight = el?.scrollHeight ?? 0
+    const previousTop = el?.scrollTop ?? 0
+    await loadMoreMessages()
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        const nextEl = messagesViewportRef.current
+        if (!nextEl) return
+        nextEl.scrollTop = nextEl.scrollHeight - previousHeight + previousTop
+      })
+    })
   }
 
   useEffect(() => {
@@ -396,6 +416,17 @@ export function ChatView(props: ChatViewProps) {
               }}
             >
               <Stack className={isMobile ? 'mobile-message-list' : undefined} gap={isMobile ? 8 : 'xs'} pr={isMobile ? 0 : 'sm'}>
+                {hasMoreMessages && (
+                  <Button
+                    variant="subtle"
+                    size="xs"
+                    loading={isLoadingMoreMessages}
+                    onClick={handleLoadMoreMessages}
+                    fullWidth
+                  >
+                    {locale === 'ru' ? 'Загрузить ранние сообщения' : 'Load earlier messages'}
+                  </Button>
+                )}
                 {visibleMessages.map((msg) => (
                   <Card
                     key={msg.id}

@@ -402,11 +402,17 @@ export async function markRoomRead(input: {
   }
 }
 
-export async function fetchMessages(roomId: string, token: string): Promise<{ messages: EncryptedMessage[] }> {
-  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(roomId)}/messages`, {
+export async function fetchMessages(
+  roomId: string,
+  token: string,
+  before?: string,
+): Promise<{ messages: EncryptedMessage[]; hasMore: boolean }> {
+  const cursor = before ? `?before=${encodeURIComponent(before)}` : ''
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(roomId)}/messages${cursor}`, {
     headers: authHeaders(token),
   })
-  return readJSON(res)
+  const page = await readJSON<{ messages?: EncryptedMessage[]; hasMore?: boolean }>(res)
+  return { messages: page.messages ?? [], hasMore: Boolean(page.hasMore) }
 }
 
 export async function sendEncryptedMessage(input: {
@@ -528,4 +534,3 @@ async function readJSON<T>(res: Response): Promise<T> {
   }
   return res.json()
 }
-

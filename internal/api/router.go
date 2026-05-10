@@ -883,12 +883,26 @@ func handleListEncryptedMessages(w http.ResponseWriter, r *http.Request, deps De
 	if !requireRoomMember(w, r, deps, roomID) {
 		return
 	}
-	messages, err := deps.ZKStore.ListMessages(r.Context(), roomID, 100)
+	var before *time.Time
+	if raw := r.URL.Query().Get("before"); raw != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_before")
+			return
+		}
+		before = &parsed
+	}
+	const pageSize = 50
+	messages, err := deps.ZKStore.ListMessages(r.Context(), roomID, pageSize+1, before)
 	if err != nil {
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
+	hasMore := len(messages) > pageSize
+	if hasMore {
+		messages = messages[1:]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "hasMore": hasMore})
 }
 
 func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {

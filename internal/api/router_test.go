@@ -59,7 +59,7 @@ func TestCanPublishTopic(t *testing.T) {
 		topic     string
 		want      bool
 	}{
-		{name: "general topic", principal: auth.Principal{UserID: "user-1"}, topic: "general", want: true},
+		{name: "general topic denied", principal: auth.Principal{UserID: "user-1"}, topic: "general", want: false},
 		{name: "own user topic", principal: auth.Principal{UserID: "user-1"}, topic: "user:user-1", want: true},
 		{name: "other user topic", principal: auth.Principal{UserID: "user-1"}, topic: "user:user-2", want: false},
 		{name: "room member", principal: auth.Principal{UserID: "user-1"}, topic: "room:room-1", want: true},

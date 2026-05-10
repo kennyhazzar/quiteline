@@ -575,7 +575,7 @@ func (s *PostgresStore) ToggleMessageReaction(ctx context.Context, roomID string
 	if err != nil {
 		return EncryptedMessage{}, err
 	}
-	messages, err := s.ListMessages(ctx, roomID, 500)
+	messages, err := s.ListMessages(ctx, roomID, 500, nil)
 	if err != nil {
 		return EncryptedMessage{}, err
 	}
@@ -598,16 +598,21 @@ func assignOptionalMessageTimes(msg *EncryptedMessage, editedAt sql.NullTime, de
 	}
 }
 
-func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error) {
+func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit int, before *time.Time) ([]EncryptedMessage, error) {
 	roomID = normalizeID(roomID)
 	if limit <= 0 || limit > 500 {
 		limit = 100
+	}
+	var beforeValue any
+	if before != nil {
+		beforeValue = before.UTC()
 	}
 
 	rows, err := s.pool.Query(ctx, `
 		WITH recent AS (
 			SELECT id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at, edited_at, deleted_at
-			FROM messages WHERE room_id = $1
+			FROM messages
+			WHERE room_id = $1 AND ($3::timestamptz IS NULL OR created_at < $3)
 			ORDER BY created_at DESC LIMIT $2
 		)
 		SELECT recent.id, recent.room_id, recent.sender_id, recent.ciphertext, recent.nonce,
@@ -644,7 +649,7 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 			) grouped
 		) reactions ON true
 		ORDER BY recent.created_at ASC
-	`, roomID, limit)
+	`, roomID, limit, beforeValue)
 	if err != nil {
 		return nil, err
 	}

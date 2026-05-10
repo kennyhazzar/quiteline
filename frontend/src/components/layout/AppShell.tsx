@@ -142,6 +142,9 @@ interface AppShellLayoutProps {
   setMessageSearch: (v: string) => void
   messagesViewportRef: RefObject<HTMLDivElement | null>
   messageInputRef: RefObject<HTMLInputElement | null>
+  hasMoreMessages: boolean
+  isLoadingMoreMessages: boolean
+  loadMoreMessages: () => Promise<void>
   replyTarget: DecryptedMessage | null
   setReplyTarget: (msg: DecryptedMessage | null) => void
   selectedFile: File | null

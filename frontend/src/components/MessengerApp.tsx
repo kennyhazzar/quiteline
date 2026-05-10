@@ -303,6 +303,7 @@ export function MessengerApp() {
     handleRequestError,
     sendRealtime: sendRealtimeRaw as (event: { kind: 'typing'; userId: string; displayName: string; typing: boolean; at: string }) => void,
     activeRoom: activeRoomData,
+    highlightedMessageID,
   })
 
   // Sync localDeletedMessageIDs from messages hook back to our local state (so persisted deletes work)
@@ -425,19 +426,29 @@ export function MessengerApp() {
   }, [activeRoomID, highlightedMessageID, isMobile, leftView])
 
   // ─── Scroll to bottom on room open ───────────────────────────────────────
+  const openedRoomScrollRef = useRef('')
   useEffect(() => {
     const viewport = messages.messagesViewportRef.current
-    if (!viewport || !activeRoomID) return
+    if (!activeRoomID || openedRoomScrollRef.current !== activeRoomID) {
+      openedRoomScrollRef.current = ''
+    }
+    if (!viewport || !activeRoomID || highlightedMessageID || messages.visibleMessages.length === 0) return
+    if (openedRoomScrollRef.current === activeRoomID) return
+    openedRoomScrollRef.current = activeRoomID
     window.requestAnimationFrame(() => {
-      viewport.scrollTo({ top: viewport.scrollHeight })
+      window.requestAnimationFrame(() => {
+        viewport.scrollTo({ top: viewport.scrollHeight })
+      })
     })
-  }, [activeRoomID])
+  }, [activeRoomID, highlightedMessageID, messages.visibleMessages.length])
 
   useEffect(() => {
     if (!activeRoomID || !highlightedMessageID || messages.visibleMessages.length === 0) return
     window.requestAnimationFrame(() => {
-      const target = document.getElementById(`message-${highlightedMessageID}`)
-      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(`message-${highlightedMessageID}`)
+        target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      })
     })
   }, [activeRoomID, highlightedMessageID, messages.visibleMessages.length])
 
@@ -1308,6 +1319,9 @@ export function MessengerApp() {
       setMessageSearch={messages.setMessageSearch}
       messagesViewportRef={messages.messagesViewportRef}
       messageInputRef={messages.messageInputRef}
+      hasMoreMessages={messages.hasMoreMessages}
+      isLoadingMoreMessages={messages.isLoadingMoreMessages}
+      loadMoreMessages={messages.loadMoreMessages}
       replyTarget={messages.replyTarget}
       setReplyTarget={messages.setReplyTarget}
       selectedFile={messages.selectedFile}
