@@ -6,7 +6,6 @@ import {
   Box,
   Button,
   Card,
-  CopyButton,
   Divider,
   FileInput,
   Group,
@@ -20,7 +19,6 @@ import {
   Title,
 } from '@mantine/core'
 import {
-  IconCopy,
   IconDownload,
   IconKey,
   IconPlus,
@@ -37,7 +35,7 @@ import type {
 } from '@/lib/api'
 import { useI18n } from '@/lib/i18n'
 import type { AppView, DecryptedMessage } from '@/types/messenger'
-import { maskedRoomId, formatBytes, formatLastSeen } from '@/types/messenger'
+import { formatBytes, formatLastSeen } from '@/types/messenger'
 
 interface SidebarProps {
   isMobile: boolean
@@ -163,7 +161,6 @@ export function Sidebar(props: SidebarProps) {
         {activeRoom ? (
           <Stack gap="xs">
             <Text fw={700} truncate>{activeRoom.name}</Text>
-            <Text size="xs" c="dimmed" truncate>room:{maskedRoomId(activeRoom.roomId)}</Text>
             <Button variant="light" onClick={() => setSidebarView('rooms')}>{t('rooms')}</Button>
             <Divider />
             <Text fw={700} size="sm">Attachments</Text>
@@ -211,15 +208,9 @@ export function Sidebar(props: SidebarProps) {
               value={props.roomName}
               onChange={(e) => props.setRoomName(e.currentTarget.value)}
             />
-            <PasswordInput
-              label={t('roomSecretOptional')}
-              description={t('roomSecretOptionalDescription')}
-              value={props.newRoomSecret}
-              onChange={(e) => props.setNewRoomSecret(e.currentTarget.value)}
-            />
             <Button
               leftSection={<IconPlus size={16} />}
-              onClick={() => (props.createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).mutate({ roomName: props.roomName, newRoomSecret: props.newRoomSecret })}
+              onClick={() => (props.createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).mutate({ roomName: props.roomName, newRoomSecret: '' })}
               loading={(props.createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).isPending}
               disabled={(props.createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).isPending}
             >
@@ -240,9 +231,9 @@ export function Sidebar(props: SidebarProps) {
         >
           <Title order={4} mb="sm">{t('importInvite')}</Title>
           <Stack gap="sm">
-            <PasswordInput
+            <TextInput
               label={t('invite')}
-              placeholder="roomId:roomSecret"
+              placeholder={t('invitePlaceholder')}
               value={props.inviteText}
               onChange={(e) => props.setInviteText(e.currentTarget.value)}
             />
@@ -299,7 +290,6 @@ export function Sidebar(props: SidebarProps) {
         <ScrollArea type="auto" offsetScrollbars style={{ flex: 1, minHeight: 0 }}>
           <Stack gap="xs" pr="xs">
             {filteredRooms.map((room) => {
-              const hiddenId = maskedRoomId(room.roomId)
               return (
                 <Group key={room.roomId} gap={6} wrap="nowrap">
                   <Button
@@ -311,7 +301,7 @@ export function Sidebar(props: SidebarProps) {
                   >
                     <Group gap={6} wrap="nowrap" style={{ minWidth: 0, width: '100%' }}>
                       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {room.name} · {hiddenId}
+                        {room.name}
                       </span>
                       {Boolean(room.unreadCount) && (
                         <Badge size="xs" color="red" variant="filled" style={{ flexShrink: 0 }}>
@@ -320,13 +310,6 @@ export function Sidebar(props: SidebarProps) {
                       )}
                     </Group>
                   </Button>
-                  <CopyButton value={room.roomId}>
-                    {({ copy }) => (
-                      <ActionIcon variant="light" onClick={copy} aria-label={t('copyRoomId')}>
-                        <IconCopy size={16} />
-                      </ActionIcon>
-                    )}
-                  </CopyButton>
                 </Group>
               )
             })}
@@ -417,19 +400,7 @@ function ProfilePanel(props: SidebarProps) {
         mb="sm"
       />
 
-      <Text size="xs" c="dimmed">{t('userId')}</Text>
-      <Group gap={6} wrap="nowrap">
-        <code style={{ flex: 1, fontSize: 11, padding: '4px 8px', borderRadius: 4, background: 'var(--mantine-color-gray-0)', display: 'block', overflowX: 'auto' }}>
-          {identity.userId}
-        </code>
-        <CopyButton value={identity.userId}>
-          {({ copy }) => (
-            <ActionIcon variant="subtle" onClick={copy}>
-              <IconCopy size={16} />
-            </ActionIcon>
-          )}
-        </CopyButton>
-      </Group>
+      <Text size="xs" c="dimmed">{t('profilePrivateDescription')}</Text>
 
       <Divider my="sm" />
 
@@ -467,7 +438,7 @@ function ProfilePanel(props: SidebarProps) {
           <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
               <Text size="sm" fw={friend.status === 'accepted' ? 700 : 500} truncate>
-                {friend.displayName || friend.userId}
+                {friend.displayName || t('unknownUser')}
               </Text>
               <Text size="xs" c="dimmed" truncate>
                 {friend.status === 'accepted'
@@ -588,7 +559,7 @@ function ProfilePanel(props: SidebarProps) {
           <Group key={item.sessionId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
               <Text size="xs" fw={item.current ? 700 : 500} truncate>
-                {item.current ? t('currentSession') : item.sessionId.slice(0, 8)}
+                {item.current ? t('currentSession') : t('sessionDevice')}
               </Text>
               <Text size="xs" c="dimmed" truncate>
                 {t('created')}: {formatLastSeen(item.createdAt)}

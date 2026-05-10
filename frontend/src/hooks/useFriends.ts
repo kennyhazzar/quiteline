@@ -25,7 +25,8 @@ export function useFriends(opts: {
     queryFn: () => fetchFriends(session?.accessToken ?? ''),
     enabled: Boolean(session),
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
+    staleTime: 30000,
   })
 
   const requestFriendMutation = useMutation({

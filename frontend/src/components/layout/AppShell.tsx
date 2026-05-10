@@ -2,6 +2,7 @@
 
 import {
   ActionIcon,
+  Avatar,
   Badge,
   Box,
   Button,
@@ -303,26 +304,22 @@ export function AppShellLayout(props: AppShellLayoutProps) {
 function ProfileModal({ profileUser, setProfileUser, presence }: Pick<AppShellLayoutProps, 'profileUser' | 'setProfileUser' | 'presence'>) {
   const { t } = useI18n()
   if (!profileUser) return null
+  const currentPresence = presence[profileUser.userId]
   return (
     <Modal opened={Boolean(profileUser)} onClose={() => setProfileUser(null)} title={t('profileTitle')} centered>
       <Stack gap="sm">
-        <Group>
-          <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'var(--mantine-color-blue-6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 22 }}>
-            {profileUser.displayName.slice(0, 1).toUpperCase()}
-          </div>
+        <Group align="center" wrap="nowrap">
+          <Avatar name={profileUser.displayName} radius="xl" size={64} color="blue" />
           <div>
             <Text fw={700}>{profileUser.displayName}</Text>
             <Text size="xs" c="dimmed">
-              {presence[profileUser.userId]?.status === 'online'
+              {currentPresence?.status === 'online'
                 ? t('online')
-                : `${t('lastSeen')} ${new Date(presence[profileUser.userId]?.lastSeenAt || profileUser.lastSeenAt).toLocaleString()}`}
+                : `${t('lastSeen')} ${new Date(currentPresence?.lastSeenAt || profileUser.lastSeenAt).toLocaleString()}`}
             </Text>
           </div>
         </Group>
-        <Text size="xs" c="dimmed">{t('userId')}</Text>
-        <code style={{ display: 'block', padding: '8px', borderRadius: 4, background: 'var(--mantine-color-gray-0)', fontSize: 12, overflowX: 'auto' }}>{profileUser.userId}</code>
-        <Text size="xs" c="dimmed">{t('publicKey')}</Text>
-        <code style={{ display: 'block', padding: '8px', borderRadius: 4, background: 'var(--mantine-color-gray-0)', fontSize: 12, maxHeight: 160, overflow: 'auto' }}>{profileUser.identityPublicKey}</code>
+        <Text size="sm" c="dimmed">{t('profilePublicDescription')}</Text>
       </Stack>
     </Modal>
   )
@@ -346,7 +343,7 @@ function MessageInfoModal({ messageInfo, setMessageInfo, identitiesByID }: Pick<
                 const reader = identitiesByID.get(receipt.userId)
                 return (
                   <Group key={`${messageInfo.id}-${receipt.userId}`} justify="space-between" gap="xs" wrap="nowrap">
-                    <Text size="sm" truncate>{reader?.displayName ?? receipt.userId}</Text>
+                    <Text size="sm" truncate>{reader?.displayName ?? t('unknownUser')}</Text>
                     <Text size="xs" c="dimmed" ta="right">{new Date(receipt.readAt).toLocaleString()}</Text>
                   </Group>
                 )
@@ -355,7 +352,6 @@ function MessageInfoModal({ messageInfo, setMessageInfo, identitiesByID }: Pick<
           ) : (
             <Text size="sm" c="dimmed">{t('noViews')}</Text>
           )}
-          <code style={{ display: 'block', padding: '8px', borderRadius: 4, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>{messageInfo.id}</code>
         </Stack>
       )}
     </Modal>
@@ -457,11 +453,6 @@ function ChatActionsModal(props: AppShellLayoutProps) {
     activeRoomID,
   } = props
 
-  function maskedRoomId(roomId: string) {
-    if (roomId.length <= 8) return '*'.repeat(roomId.length)
-    return `${roomId.slice(0, 4)}${'*'.repeat(Math.min(14, roomId.length - 8))}${roomId.slice(-4)}`
-  }
-
   function formatLastSeen(value?: string) {
     if (!value) return ''
     return new Date(value).toLocaleString()
@@ -476,18 +467,6 @@ function ChatActionsModal(props: AppShellLayoutProps) {
     >
       {activeRoom && (
         <Stack gap="sm">
-          <Group gap={6} wrap="nowrap">
-            <Text size="xs" c="dimmed" truncate style={{ flex: 1 }}>
-              room:{maskedRoomId(activeRoom.roomId)}
-            </Text>
-            <Button
-              size="xs"
-              variant="subtle"
-              onClick={() => navigator.clipboard.writeText(activeRoom.roomId).catch(() => undefined)}
-            >
-              {t('copyRoomId')}
-            </Button>
-          </Group>
           {isMobile && (
             <input
               placeholder="Search messages"
@@ -562,7 +541,7 @@ function ChatActionsModal(props: AppShellLayoutProps) {
                     variant="light"
                     onClick={() => (inviteFriendMutation as UseMutationResult<unknown, Error, Friend>).mutate(friend)}
                   >
-                    {friend.displayName || friend.userId}
+                    {friend.displayName || t('unknownUser')}
                   </Button>
                 ))}
             </Stack>
@@ -613,8 +592,6 @@ function CreateRoomModal({
   setMobileCreateRoomOpened,
   roomName,
   setRoomName,
-  newRoomSecret,
-  setNewRoomSecret,
   createRoomMutation,
 }: Pick<AppShellLayoutProps, 'mobileCreateRoomOpened' | 'setMobileCreateRoomOpened' | 'roomName' | 'setRoomName' | 'newRoomSecret' | 'setNewRoomSecret' | 'createRoomMutation'>) {
   const { t } = useI18n()
@@ -634,18 +611,8 @@ function CreateRoomModal({
             style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
           />
         </label>
-        <label>
-          <Text size="sm" mb={4}>{t('roomSecretOptional')}</Text>
-          <input
-            type="password"
-            value={newRoomSecret}
-            onChange={(e) => setNewRoomSecret(e.currentTarget.value)}
-            style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
-          />
-          <Text size="xs" c="dimmed" mt={2}>{t('roomSecretOptionalDescription')}</Text>
-        </label>
         <Button
-          onClick={() => (createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).mutate({ roomName, newRoomSecret })}
+          onClick={() => (createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).mutate({ roomName, newRoomSecret: '' })}
           loading={(createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).isPending}
           disabled={(createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).isPending}
         >
@@ -676,7 +643,7 @@ function ImportInviteModal({
           <Text size="sm" mb={4}>{t('invite')}</Text>
           <input
             type="password"
-            placeholder="roomId:roomSecret"
+            placeholder={t('invitePlaceholder')}
             value={inviteText}
             onChange={(e) => setInviteText(e.currentTarget.value)}
             style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}

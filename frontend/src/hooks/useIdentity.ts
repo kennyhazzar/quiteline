@@ -36,8 +36,9 @@ export function useIdentity(opts: {
     },
     enabled: Boolean(activeRoom && session),
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchOnReconnect: true,
+    staleTime: 60000,
   })
 
   useEffect(() => {

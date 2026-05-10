@@ -84,8 +84,9 @@ export function useMessages(opts: {
     queryFn: () => fetchMessages(activeRoomID, session?.accessToken ?? ''),
     enabled: Boolean(activeRoomID && session),
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchOnReconnect: true,
+    staleTime: 30000,
   })
 
   const encryptedMessages = useMemo(() => {

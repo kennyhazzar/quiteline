@@ -1,12 +1,11 @@
 'use client'
 
 import { notifications } from '@mantine/notifications'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useI18n } from '@/lib/i18n'
 import {
   AuthError,
   createRoom,
-  fetchRooms,
   inviteFriendToRoom,
   leaveRoom,
   markRoomRead,
@@ -20,11 +19,7 @@ import {
   createRoomSecret,
   encodePlainMessage,
 } from '@/lib/crypto'
-import {
-  accountScopedKey,
-  replaceAppURL,
-  ROOM_SECRETS_KEY,
-} from '@/types/messenger'
+import { parseInviteToken, replaceAppURL } from '@/types/messenger'
 
 export { sendEncryptedMessage } from '@/lib/api'
 
@@ -66,15 +61,6 @@ export function useRooms(opts: {
   } = opts
   const { t } = useI18n()
   const queryClient = useQueryClient()
-
-  const rooms = useQuery({
-    queryKey: ['chat-rooms', identity?.userId, session?.accessToken],
-    queryFn: () => fetchRooms(session?.accessToken ?? ''),
-    enabled: Boolean(identity && session),
-    refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
-    refetchOnReconnect: true,
-  })
 
   function patchRoomActivity(roomId: string, options: { at?: string; incrementUnread?: boolean; clearUnread?: boolean }) {
     queryClient.setQueriesData<{ rooms: Room[] }>({ queryKey: ['chat-rooms'] }, (current) => {
@@ -125,16 +111,16 @@ export function useRooms(opts: {
   const importInviteMutation = useMutation({
     mutationFn: async (inviteText: string) => {
       if (!identity || !session) throw new Error('account_required')
-      const [roomId, secret] = inviteText.trim().split(':')
-      if (!roomId || !secret) throw new Error('invite_format_must_be_roomId_secret')
+      const invite = parseInviteToken(inviteText)
+      if (!invite) throw new Error('invite_format_must_be_roomId_secret')
       const room = await createRoom({
-        roomId,
+        roomId: invite.roomId,
         name: t('importedRoom'),
         members: [identity.userId],
-        roomSecret: secret,
+        roomSecret: invite.secret,
         token: session.accessToken,
       })
-      return { room, secret: room.roomSecret || secret }
+      return { room, secret: room.roomSecret || invite.secret }
     },
     onSuccess: ({ room, secret }) => {
       const nextSecrets = { ...roomSecrets, [room.roomId]: secret }
@@ -205,7 +191,6 @@ export function useRooms(opts: {
   }
 
   return {
-    rooms,
     patchRoomActivity,
     createRoomMutation,
     importInviteMutation,

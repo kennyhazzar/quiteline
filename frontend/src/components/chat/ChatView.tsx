@@ -14,6 +14,7 @@ import {
   Image,
   Indicator,
   Menu,
+  Modal,
   PasswordInput,
   ScrollArea,
   Stack,
@@ -51,7 +52,6 @@ import {
   formatBytes,
   formatLastSeen,
   isPersistedMessageID,
-  maskedRoomId,
   QUICK_REACTIONS,
 } from '@/types/messenger'
 
@@ -60,6 +60,7 @@ interface ChatViewProps {
   mobileView: AppView
   session: AuthSession
   identity: Identity
+  ownAvatarSrc: string
   activeRoom: Room | null
   activeRoomID: string
   activeInvite: string
@@ -131,6 +132,7 @@ export function ChatView(props: ChatViewProps) {
     isMobile,
     mobileView,
     identity,
+    ownAvatarSrc,
     activeRoom,
     activeRoomID,
     activeRoomSecret,
@@ -189,6 +191,8 @@ export function ChatView(props: ChatViewProps) {
   // ─── Scroll tracking + unread counter ────────────────────────────────────
   const [unreadCount, setUnreadCount] = useState(0)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
+  const [imageViewer, setImageViewer] = useState<{ src: string; name: string } | null>(null)
+  const [pendingImagePreviewID, setPendingImagePreviewID] = useState('')
   const isNearBottomRef = useRef(true)
   const prevLengthRef = useRef(0)
 
@@ -219,6 +223,27 @@ export function ChatView(props: ChatViewProps) {
     setUnreadCount(0)
   }
 
+  useEffect(() => {
+    if (!pendingImagePreviewID || !previews[pendingImagePreviewID]) return
+    const msg = visibleMessages.find((item) => item.id === pendingImagePreviewID)
+    setImageViewer({
+      src: previews[pendingImagePreviewID],
+      name: msg?.body?.attachment?.name || t('preview'),
+    })
+    setPendingImagePreviewID('')
+  }, [pendingImagePreviewID, previews, t, visibleMessages])
+
+  function openAttachmentPreview(msg: DecryptedMessage) {
+    const attachment = msg.body?.attachment
+    if (!attachment) return
+    if (attachment.type.startsWith('image/') && previews[msg.id]) {
+      setImageViewer({ src: previews[msg.id], name: attachment.name })
+      return
+    }
+    if (attachment.type.startsWith('image/')) setPendingImagePreviewID(msg.id)
+    previewAttachment(msg)
+  }
+
   function renderMessageStatus(msg: DecryptedMessage) {
     if (!identity || msg.senderId !== identity.userId || msg.body?.system) return null
     if (msg.status === 'sending') return <IconClock size={15} stroke={1.8} aria-label="sending" />
@@ -228,6 +253,18 @@ export function ChatView(props: ChatViewProps) {
   }
 
   return (
+    <>
+    <Modal
+      opened={Boolean(imageViewer)}
+      onClose={() => setImageViewer(null)}
+      title={imageViewer?.name ?? t('preview')}
+      centered
+      size="xl"
+    >
+      {imageViewer && (
+        <Image src={imageViewer.src} alt={imageViewer.name} mah="75dvh" fit="contain" radius="md" />
+      )}
+    </Modal>
     <Card
       withBorder={!isMobile}
       radius={isMobile ? 0 : 'sm'}
@@ -269,18 +306,7 @@ export function ChatView(props: ChatViewProps) {
               )}
               {isMobile ? (
                 <Text size="xs" c="dimmed" truncate>{mobilePeerStatus || ' '}</Text>
-              ) : (
-                <Group gap={6} wrap="nowrap">
-                  <Text size="xs" c="dimmed" truncate>room:{maskedRoomId(activeRoom.roomId)}</Text>
-                  <CopyButton value={activeRoom.roomId}>
-                    {({ copy }) => (
-                      <ActionIcon size="sm" variant="subtle" onClick={copy} aria-label={t('copyRoomId')}>
-                        <IconCopy size={14} />
-                      </ActionIcon>
-                    )}
-                  </CopyButton>
-                </Group>
-              )}
+              ) : null}
             </div>
             {isMobile ? (
               <ActionIcon variant="subtle" size="lg" onClick={() => setMobileChatActionsOpened(true)} aria-label={t('chat')}>
@@ -451,7 +477,7 @@ export function ChatView(props: ChatViewProps) {
                             }}
                           >
                             <Avatar
-                              src={absoluteAvatarUrl(msg.body?.senderAvatarUrl)}
+                              src={msg.senderId === identity.userId ? ownAvatarSrc : absoluteAvatarUrl(msg.body?.senderAvatarUrl)}
                               name={msg.body?.senderName ?? msg.senderId}
                               radius="xl"
                               size={30}
@@ -552,7 +578,7 @@ export function ChatView(props: ChatViewProps) {
                                     </Text>
                                   </div>
                                   <Group gap="xs">
-                                    <Button size="xs" variant="light" onClick={() => previewAttachment(msg)}>
+                                    <Button size="xs" variant="light" onClick={() => openAttachmentPreview(msg)}>
                                       {t('preview')}
                                     </Button>
                                     <ActionIcon variant="light" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
@@ -561,7 +587,16 @@ export function ChatView(props: ChatViewProps) {
                                   </Group>
                                 </Group>
                                 {previews[msg.id] && msg.body.attachment.type.startsWith('image/') && (
-                                  <Image src={previews[msg.id]} alt={msg.body.attachment.name} mt="sm" mah={260} fit="contain" />
+                                  <Image
+                                    src={previews[msg.id]}
+                                    alt={msg.body.attachment.name}
+                                    mt="sm"
+                                    mah={260}
+                                    fit="contain"
+                                    radius="sm"
+                                    style={{ cursor: 'zoom-in' }}
+                                    onClick={() => setImageViewer({ src: previews[msg.id], name: msg.body?.attachment?.name || t('preview') })}
+                                  />
                                 )}
                                 {previews[msg.id] && !msg.body.attachment.type.startsWith('image/') && (
                                   <Button
@@ -682,5 +717,6 @@ export function ChatView(props: ChatViewProps) {
         </Stack>
       )}
     </Card>
+    </>
   )
 }

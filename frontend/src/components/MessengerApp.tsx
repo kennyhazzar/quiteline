@@ -42,6 +42,7 @@ import {
   type RealtimeEvent,
   accountScopedKey,
   buildAppURL,
+  createInviteToken,
   formatLastSeen,
   LOCAL_DELETED_MESSAGES_KEY,
   readStoredJSON,
@@ -233,21 +234,23 @@ export function MessengerApp() {
   }
 
   // ─── Queries ──────────────────────────────────────────────────────────────
-  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 30000 })
+  const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 60000, staleTime: 30000 })
   const rooms = useQuery({
     queryKey: ['chat-rooms', identity?.userId, session?.accessToken],
     queryFn: () => fetchRooms(session?.accessToken ?? ''),
     enabled: Boolean(identity && session),
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
     refetchOnReconnect: true,
+    staleTime: 30000,
   })
   const accountSessions = useQuery({
     queryKey: ['account-sessions', session?.accessToken],
     queryFn: () => fetchAccountSessions(session?.accessToken ?? ''),
     enabled: Boolean(session),
     refetchOnMount: 'always',
-    refetchOnWindowFocus: true,
+    refetchOnWindowFocus: false,
+    staleTime: 30000,
   })
 
   const activeRoomData = useMemo(
@@ -256,7 +259,7 @@ export function MessengerApp() {
   )
 
   const activeRoomSecret = activeRoomData?.roomSecret || (activeRoomID ? roomSecrets[activeRoomID] : '')
-  const activeInvite = activeRoomID && activeRoomSecret ? `${activeRoomID}:${activeRoomSecret}` : ''
+  const activeInvite = activeRoomID && activeRoomSecret ? createInviteToken(activeRoomID, activeRoomSecret) : ''
 
   // ─── Identity ─────────────────────────────────────────────────────────────
   const {
@@ -480,7 +483,6 @@ export function MessengerApp() {
         at: event.at,
         incrementUnread: event.senderId !== currentUserID && event.roomId !== activeRoomID,
       })
-      void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
       return
     }
     if (event.kind === 'friends.changed') {
@@ -502,13 +504,11 @@ export function MessengerApp() {
     if (event.kind === 'message.read') {
       if (event.userId === currentUserID) {
         patchRoomActivity(event.roomId, { clearUnread: true })
-        void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
         return
       }
       if (event.roomId === activeRoomID) {
         void queryClient.refetchQueries({ queryKey: ['chat-messages', event.roomId] })
       }
-      void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
       return
     }
     void handleCallEvent(event)
@@ -527,7 +527,6 @@ export function MessengerApp() {
       at: msg.createdAt,
       incrementUnread: msg.senderId !== currentUserID && msg.roomId !== activeRoomID,
     })
-    void queryClient.refetchQueries({ queryKey: ['chat-rooms'] })
   }
 
   // ─── WebSocket connect ────────────────────────────────────────────────────
@@ -1352,4 +1351,3 @@ export function MessengerApp() {
     />
   )
 }
-

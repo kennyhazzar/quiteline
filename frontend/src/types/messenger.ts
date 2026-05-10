@@ -93,6 +93,44 @@ export function isPersistedMessageID(messageID: string) {
 }
 
 export type AppRouteOptions = { view?: AppView; roomId?: string; messageId?: string }
+export type InvitePayload = { roomId: string; secret: string; version: 1 }
+
+const INVITE_PREFIX = 'ql_'
+
+function base64UrlEncode(value: string) {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  bytes.forEach((byte) => { binary += String.fromCharCode(byte) })
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
+}
+
+function base64UrlDecode(value: string) {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=')
+  const binary = atob(padded)
+  const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0))
+  return new TextDecoder().decode(bytes)
+}
+
+export function createInviteToken(roomId: string, secret: string) {
+  return `${INVITE_PREFIX}${base64UrlEncode(JSON.stringify({ roomId, secret, version: 1 }))}`
+}
+
+export function parseInviteToken(value: string): InvitePayload | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  try {
+    if (trimmed.startsWith(INVITE_PREFIX)) {
+      const payload = JSON.parse(base64UrlDecode(trimmed.slice(INVITE_PREFIX.length))) as Partial<InvitePayload>
+      if (payload.roomId && payload.secret) return { roomId: payload.roomId, secret: payload.secret, version: 1 }
+      return null
+    }
+    const [roomId, secret] = trimmed.split(':')
+    if (roomId && secret) return { roomId, secret, version: 1 }
+  } catch {
+    return null
+  }
+  return null
+}
 
 export function buildAppPath(options: AppRouteOptions = {}) {
   if (typeof window === 'undefined') return '/'
