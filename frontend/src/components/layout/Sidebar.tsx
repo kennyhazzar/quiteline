@@ -192,64 +192,6 @@ export function Sidebar(props: SidebarProps) {
       {/* Profile panel */}
       {leftView === 'profile' && <ProfilePanel {...props} />}
 
-      {/* Create room panel (desktop only) */}
-      {!isMobile && (
-        <Card
-          className="desktop-surface"
-          withBorder
-          radius="sm"
-          p="md"
-          style={{ display: leftView === 'rooms' ? undefined : 'none' }}
-        >
-          <Title order={4} mb="sm">{t('createRoom')}</Title>
-          <Stack gap="sm">
-            <TextInput
-              label={t('roomName')}
-              value={props.roomName}
-              onChange={(e) => props.setRoomName(e.currentTarget.value)}
-            />
-            <Button
-              leftSection={<IconPlus size={16} />}
-              onClick={() => (props.createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).mutate({ roomName: props.roomName, newRoomSecret: '' })}
-              loading={(props.createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).isPending}
-              disabled={(props.createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).isPending}
-            >
-              {t('createEncryptedRoom')}
-            </Button>
-          </Stack>
-        </Card>
-      )}
-
-      {/* Import invite panel (desktop only) */}
-      {!isMobile && (
-        <Card
-          className="desktop-surface"
-          withBorder
-          radius="sm"
-          p="md"
-          style={{ display: leftView === 'rooms' ? undefined : 'none' }}
-        >
-          <Title order={4} mb="sm">{t('importInvite')}</Title>
-          <Stack gap="sm">
-            <TextInput
-              label={t('invite')}
-              placeholder={t('invitePlaceholder')}
-              value={props.inviteText}
-              onChange={(e) => props.setInviteText(e.currentTarget.value)}
-            />
-            <Button
-              variant="light"
-              leftSection={<IconKey size={16} />}
-              onClick={() => (props.importInviteMutation as UseMutationResult<unknown, Error, string>).mutate(props.inviteText)}
-              loading={(props.importInviteMutation as UseMutationResult<unknown, Error, string>).isPending}
-              disabled={!props.inviteText.trim()}
-            >
-              {t('joinRoom')}
-            </Button>
-          </Stack>
-        </Card>
-      )}
-
       {/* Room list */}
       <Card
         withBorder={!isMobile}
@@ -266,16 +208,12 @@ export function Sidebar(props: SidebarProps) {
         <Group justify="space-between" mb="sm">
           <Title order={4}>{t('rooms')}</Title>
           <Group gap={6} wrap="nowrap">
-            {isMobile && (
-              <>
-                <ActionIcon variant="light" onClick={() => setMobileCreateRoomOpened(true)} aria-label={t('createRoom')}>
-                  <IconPlus size={16} />
-                </ActionIcon>
-                <ActionIcon variant="light" onClick={() => setMobileImportInviteOpened(true)} aria-label={t('importInvite')}>
-                  <IconKey size={16} />
-                </ActionIcon>
-              </>
-            )}
+            <ActionIcon variant="light" onClick={() => setMobileCreateRoomOpened(true)} aria-label={t('createRoom')}>
+              <IconPlus size={16} />
+            </ActionIcon>
+            <ActionIcon variant="light" onClick={() => setMobileImportInviteOpened(true)} aria-label={t('importInvite')}>
+              <IconKey size={16} />
+            </ActionIcon>
             <ActionIcon variant="subtle" onClick={() => rooms.refetch()} loading={rooms.isFetching}>
               <IconRefresh size={16} />
             </ActionIcon>

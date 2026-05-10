@@ -8,7 +8,6 @@ import {
   Box,
   Button,
   Card,
-  CopyButton,
   FileButton,
   Group,
   Image,
@@ -37,7 +36,6 @@ import {
   IconMessageCircle,
   IconPaperclip,
   IconPhone,
-  IconPhoneOff,
   IconSend,
   IconTrash,
   IconX,
@@ -139,9 +137,6 @@ export function ChatView(props: ChatViewProps) {
     roomSecret,
     setRoomSecret,
     saveManualSecret,
-    closeChat,
-    requestLeaveChat,
-    leavingRoom,
     peers,
     presence,
     setProfileUser,
@@ -178,14 +173,9 @@ export function ChatView(props: ChatViewProps) {
     callPeerName,
     callPeerID,
     remoteAudioRef,
-    startCall,
-    endCall,
     answerCall,
     declineIncomingCall,
     setMobileChatActionsOpened,
-    activeInvite,
-    activeInviteLink,
-    activeChatLink,
   } = props
 
   // ─── Scroll tracking + unread counter ────────────────────────────────────
@@ -308,48 +298,9 @@ export function ChatView(props: ChatViewProps) {
                 <Text size="xs" c="dimmed" truncate>{mobilePeerStatus || ' '}</Text>
               ) : null}
             </div>
-            {isMobile ? (
-              <ActionIcon variant="subtle" size="lg" onClick={() => setMobileChatActionsOpened(true)} aria-label={t('chat')}>
-                <IconDotsVertical size={20} />
-              </ActionIcon>
-            ) : (
-              <Group gap="xs" wrap="nowrap">
-                <Button variant="subtle" onClick={closeChat}>{t('closeChat')}</Button>
-                <Button
-                  variant={callState === 'idle' ? 'light' : 'filled'}
-                  color={callState === 'idle' ? 'green' : 'red'}
-                  leftSection={callState === 'idle' ? <IconPhone size={16} /> : <IconPhoneOff size={16} />}
-                  onClick={callState === 'idle' ? () => startCall() : () => endCall(true)}
-                  disabled={!activeRoomID}
-                >
-                  {callState === 'idle' ? t('startCall') : t('endCall')}
-                </Button>
-                <CopyButton value={activeInvite}>
-                  {({ copy }) => (
-                    <Button variant="light" leftSection={<IconCopy size={16} />} onClick={copy} disabled={!activeInvite}>
-                      {t('copyInvite')}
-                    </Button>
-                  )}
-                </CopyButton>
-                <CopyButton value={activeInviteLink}>
-                  {({ copy }) => (
-                    <Button variant="light" leftSection={<IconLink size={16} />} onClick={copy} disabled={!activeInviteLink}>
-                      {t('copyInviteLink')}
-                    </Button>
-                  )}
-                </CopyButton>
-                <CopyButton value={activeChatLink}>
-                  {({ copy }) => (
-                    <Button variant="light" leftSection={<IconLink size={16} />} onClick={copy} disabled={!activeChatLink}>
-                      {t('copyChatLink')}
-                    </Button>
-                  )}
-                </CopyButton>
-                <Button variant="light" color="red" onClick={requestLeaveChat} loading={leavingRoom}>
-                  {t('leaveChat')}
-                </Button>
-              </Group>
-            )}
+            <ActionIcon variant="subtle" size="lg" onClick={() => setMobileChatActionsOpened(true)} aria-label={t('chat')}>
+              <IconDotsVertical size={20} />
+            </ActionIcon>
           </Group>
 
           <audio ref={remoteAudioRef as React.RefObject<HTMLAudioElement>} autoPlay />

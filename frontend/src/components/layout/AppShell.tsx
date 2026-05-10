@@ -29,6 +29,7 @@ import type {
   Identity,
   Room,
 } from '@/lib/api'
+import { absoluteAvatarUrl } from '@/lib/api'
 import type { PlainMessage } from '@/lib/crypto'
 import { useI18n } from '@/lib/i18n'
 import type {
@@ -301,15 +302,18 @@ export function AppShellLayout(props: AppShellLayoutProps) {
 
 // ─── Modal subcomponents ───────────────────────────────────────────────────
 
-function ProfileModal({ profileUser, setProfileUser, presence }: Pick<AppShellLayoutProps, 'profileUser' | 'setProfileUser' | 'presence'>) {
+function ProfileModal({ profileUser, setProfileUser, presence, identity, ownAvatarSrc }: Pick<AppShellLayoutProps, 'profileUser' | 'setProfileUser' | 'presence' | 'identity' | 'ownAvatarSrc'>) {
   const { t } = useI18n()
   if (!profileUser) return null
   const currentPresence = presence[profileUser.userId]
+  const avatarSrc = profileUser.userId === identity.userId
+    ? ownAvatarSrc
+    : absoluteAvatarUrl(`/v1/users/${encodeURIComponent(profileUser.userId)}/avatar`)
   return (
     <Modal opened={Boolean(profileUser)} onClose={() => setProfileUser(null)} title={t('profileTitle')} centered>
       <Stack gap="sm">
         <Group align="center" wrap="nowrap">
-          <Avatar name={profileUser.displayName} radius="xl" size={64} color="blue" />
+          <Avatar src={avatarSrc} name={profileUser.displayName} radius="xl" size={64} color="blue" />
           <div>
             <Text fw={700}>{profileUser.displayName}</Text>
             <Text size="xs" c="dimmed">
@@ -467,14 +471,12 @@ function ChatActionsModal(props: AppShellLayoutProps) {
     >
       {activeRoom && (
         <Stack gap="sm">
-          {isMobile && (
-            <input
-              placeholder="Search messages"
-              value={messageSearch}
-              onChange={(e) => setMessageSearch(e.currentTarget.value)}
-              style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
-            />
-          )}
+          <input
+            placeholder="Search messages"
+            value={messageSearch}
+            onChange={(e) => setMessageSearch(e.currentTarget.value)}
+            style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
+          />
           {!isMobile && peers.length > 0 && (
             <Group gap={6}>
               {peers.map((member) => {
