@@ -760,11 +760,15 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 	}
 	switch r.Method {
 	case http.MethodGet:
-		if tail != "messages" {
+		switch tail {
+		case "messages":
+			handleListEncryptedMessages(w, r, deps, roomID)
+		case "attachments":
+			handleListRoomAttachments(w, r, deps, roomID)
+		default:
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
-		handleListEncryptedMessages(w, r, deps, roomID)
 	case http.MethodPost:
 		switch {
 		case tail == "messages":
@@ -903,6 +907,18 @@ func handleListEncryptedMessages(w http.ResponseWriter, r *http.Request, deps De
 		messages = messages[1:]
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "hasMore": hasMore})
+}
+
+func handleListRoomAttachments(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
+	messages, err := deps.ZKStore.ListAttachmentMessages(r.Context(), roomID, 1000)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
 func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {

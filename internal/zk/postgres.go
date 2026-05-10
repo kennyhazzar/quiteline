@@ -678,6 +678,43 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 	return msgs, rows.Err()
 }
 
+func (s *PostgresStore) ListAttachmentMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, room_id, sender_id, ciphertext, nonce, algorithm, key_id, created_at, edited_at, deleted_at
+		FROM messages
+		WHERE room_id = $1 AND deleted_at IS NULL AND algorithm = 'PLAIN-JSON-V1'
+		ORDER BY created_at DESC
+		LIMIT $2
+	`, roomID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	msgs := make([]EncryptedMessage, 0)
+	for rows.Next() {
+		var m EncryptedMessage
+		var editedAt, deletedAt sql.NullTime
+		if err := rows.Scan(
+			&m.ID, &m.RoomID, &m.SenderID,
+			&m.Ciphertext, &m.Nonce, &m.Algorithm, &m.KeyID,
+			&m.CreatedAt, &editedAt, &deletedAt,
+		); err != nil {
+			return nil, err
+		}
+		assignOptionalMessageTimes(&m, editedAt, deletedAt)
+		if messageHasPlainAttachment(m) {
+			msgs = append(msgs, m)
+		}
+	}
+	return msgs, rows.Err()
+}
+
 func parseReadReceipts(value string) []ReadReceipt {
 	if value == "" || value == "[]" {
 		return nil

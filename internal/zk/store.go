@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"sort"
 	"strings"
@@ -89,10 +90,30 @@ type Store interface {
 	DeleteMessageForAll(ctx context.Context, roomID string, messageID string, userID string) (EncryptedMessage, error)
 	ToggleMessageReaction(ctx context.Context, roomID string, messageID string, userID string, emoji string) (EncryptedMessage, error)
 	ListMessages(ctx context.Context, roomID string, limit int, before *time.Time) ([]EncryptedMessage, error)
+	ListAttachmentMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error)
 	ListFriends(ctx context.Context, userID string) ([]Friend, error)
 	RequestFriend(ctx context.Context, fromUserID string, toUserID string) error
 	RespondFriend(ctx context.Context, userID string, friendID string, accept bool) error
 	AreFriends(ctx context.Context, userID string, friendID string) (bool, error)
+}
+
+func messageHasPlainAttachment(msg EncryptedMessage) bool {
+	if msg.DeletedAt != nil || msg.Algorithm != "PLAIN-JSON-V1" || msg.Ciphertext == "" {
+		return false
+	}
+	plain, err := base64.RawURLEncoding.DecodeString(msg.Ciphertext)
+	if err != nil {
+		return false
+	}
+	var payload struct {
+		Attachment *struct {
+			FileID string `json:"fileId"`
+		} `json:"attachment"`
+	}
+	if err := json.Unmarshal(plain, &payload); err != nil {
+		return false
+	}
+	return payload.Attachment != nil && strings.TrimSpace(payload.Attachment.FileID) != ""
 }
 
 type MemoryStore struct {
@@ -515,6 +536,27 @@ func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int, 
 	copy(result, messages)
 	for i := range result {
 		s.decorateReadState(&result[i])
+	}
+	return result, nil
+}
+
+func (s *MemoryStore) ListAttachmentMessages(_ context.Context, roomID string, limit int) ([]EncryptedMessage, error) {
+	roomID = normalizeID(roomID)
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
+
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	messages := s.messages[roomID]
+	result := make([]EncryptedMessage, 0)
+	for i := len(messages) - 1; i >= 0 && len(result) < limit; i-- {
+		msg := messages[i]
+		if !messageHasPlainAttachment(msg) {
+			continue
+		}
+		s.decorateReadState(&msg)
+		result = append(result, msg)
 	}
 	return result, nil
 }

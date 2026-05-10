@@ -355,10 +355,10 @@ export function MessengerApp() {
   // ─── Error forwarding from queries ────────────────────────────────────────
   useEffect(() => {
     const error =
-      rooms.error ?? messages.history.error ?? memberIdentities.error ?? accountSessions.error ?? friends.error
+      rooms.error ?? messages.history.error ?? messages.attachmentHistory.error ?? memberIdentities.error ?? accountSessions.error ?? friends.error
     if (error instanceof AuthError) handleAuthExpired()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rooms.error, messages.history.error, memberIdentities.error, accountSessions.error, friends.error])
+  }, [rooms.error, messages.history.error, messages.attachmentHistory.error, memberIdentities.error, accountSessions.error, friends.error])
 
   // ─── Typing expiry timer ──────────────────────────────────────────────────
   useEffect(() => {

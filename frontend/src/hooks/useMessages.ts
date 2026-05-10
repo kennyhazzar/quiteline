@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AuthError,
   downloadEncryptedFile,
+  fetchAttachmentMessages,
   fetchMessages,
   toggleMessageReaction,
   deleteEncryptedMessageForAll,
@@ -74,6 +75,7 @@ export function useMessages(opts: {
   const [previews, setPreviews] = useState<Record<string, string>>({})
   const [messageSearch, setMessageSearch] = useState('')
   const [decryptedMessages, setDecryptedMessages] = useState<DecryptedMessage[]>([])
+  const [attachmentMessages, setAttachmentMessages] = useState<DecryptedMessage[]>([])
   const [olderMessages, setOlderMessages] = useState<EncryptedMessage[]>([])
   const [hasMoreMessages, setHasMoreMessages] = useState(false)
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false)
@@ -95,10 +97,21 @@ export function useMessages(opts: {
     staleTime: 30000,
   })
 
+  const attachmentHistory = useQuery({
+    queryKey: ['chat-attachments', activeRoomID, session?.accessToken],
+    queryFn: () => fetchAttachmentMessages(activeRoomID, session?.accessToken ?? ''),
+    enabled: Boolean(activeRoomID && session),
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: true,
+    staleTime: 30000,
+  })
+
   useEffect(() => {
     setOlderMessages([])
     setHasMoreMessages(false)
     setIsLoadingMoreMessages(false)
+    setAttachmentMessages([])
     highlightedLoaderRef.current = ''
   }, [activeRoomID, session?.accessToken])
 
@@ -218,6 +231,17 @@ export function useMessages(opts: {
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   }, [liveMessages, pagedMessages])
 
+  const encryptedAttachmentMessages = useMemo(() => {
+    const byID = new Map<string, EncryptedMessage>()
+    const put = (msg: EncryptedMessage) => {
+      const current = byID.get(msg.id)
+      if (!current || messageVersion(msg) >= messageVersion(current)) byID.set(msg.id, msg)
+    }
+    for (const msg of attachmentHistory.data?.messages ?? []) put(msg)
+    for (const msg of liveMessages) put(msg)
+    return [...byID.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+  }, [attachmentHistory.data?.messages, liveMessages])
+
   useEffect(() => {
     let cancelled = false
     async function run() {
@@ -226,7 +250,7 @@ export function useMessages(opts: {
           const status: DecryptedMessage['status'] =
             msg.senderId === identity?.userId ? (msg.read ? 'read' : 'sent') : undefined
           try {
-            return {
+            const decoded: DecryptedMessage = {
               id: msg.id,
               roomId: msg.roomId,
               senderId: msg.senderId,
@@ -245,6 +269,7 @@ export function useMessages(opts: {
               reactions: msg.reactions ?? [],
               status,
             } satisfies DecryptedMessage
+            return decoded
           } catch {
             return {
               id: msg.id,
@@ -272,6 +297,46 @@ export function useMessages(opts: {
     }
   }, [activeSecret, encryptedMessages, identity?.userId])
 
+  useEffect(() => {
+    let cancelled = false
+    async function run() {
+      const next = await Promise.all(
+        encryptedAttachmentMessages.map(async (msg) => {
+          try {
+            const body = await decodeMessagePayload({
+              roomSecret: activeSecret,
+              ciphertext: msg.ciphertext,
+              nonce: msg.nonce,
+              algorithm: msg.algorithm,
+            })
+            if (!body.attachment || msg.deletedAt) return null
+            const decoded: DecryptedMessage = {
+              id: msg.id,
+              roomId: msg.roomId,
+              senderId: msg.senderId,
+              body,
+              createdAt: msg.createdAt,
+              editedAt: msg.editedAt,
+              deletedAt: msg.deletedAt,
+              readBy: msg.readBy ?? [],
+              readReceipts: msg.readReceipts ?? [],
+              read: Boolean(msg.read),
+              reactions: msg.reactions ?? [],
+            }
+            return decoded
+          } catch {
+            return null
+          }
+        }),
+      )
+      if (!cancelled) setAttachmentMessages(next.filter((msg): msg is DecryptedMessage => Boolean(msg)))
+    }
+    run()
+    return () => {
+      cancelled = true
+    }
+  }, [activeSecret, encryptedAttachmentMessages])
+
   const displayMessages = useMemo(() => {
     const byID = new Map<string, DecryptedMessage>()
     for (const msg of pendingMessages) {
@@ -296,11 +361,6 @@ export function useMessages(opts: {
       return haystack.includes(query)
     })
   }, [displayMessages, messageSearch])
-
-  const attachmentMessages = useMemo(
-    () => displayMessages.filter((msg) => !msg.deletedAt && msg.body?.attachment),
-    [displayMessages],
-  )
 
   function messageReplyPreview(msg: DecryptedMessage): PlainMessage['replyTo'] {
     const text = msg.body?.text || msg.body?.attachment?.name || 'Message'
@@ -346,6 +406,7 @@ export function useMessages(opts: {
     onSuccess: ({ clientId, message }) => {
       setPendingMessages((prev) => prev.filter((item) => item.id !== clientId))
       setLiveMessages((prev) => [...prev, message].slice(-200))
+      void queryClient.invalidateQueries({ queryKey: ['chat-attachments', message.roomId] })
       if (identity) {
         sendRealtime({
           kind: 'typing',
@@ -378,6 +439,7 @@ export function useMessages(opts: {
     },
     onSuccess: (message) => {
       setLiveMessages((prev) => [...prev, message].slice(-200))
+      void queryClient.invalidateQueries({ queryKey: ['chat-attachments', message.roomId] })
       setEditTarget(null)
       setEditText('')
     },
@@ -405,6 +467,7 @@ export function useMessages(opts: {
         })
       } else {
         setLiveMessages((prev) => [...prev, message as EncryptedMessage].slice(-200))
+        void queryClient.invalidateQueries({ queryKey: ['chat-attachments', message.roomId] })
       }
       setDeleteTarget(null)
       setDeleteForEveryone(false)
@@ -593,6 +656,7 @@ export function useMessages(opts: {
 
   return {
     history,
+    attachmentHistory,
     liveMessages,
     setLiveMessages,
     pendingMessages,

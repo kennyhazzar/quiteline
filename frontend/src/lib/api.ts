@@ -415,6 +415,14 @@ export async function fetchMessages(
   return { messages: page.messages ?? [], hasMore: Boolean(page.hasMore) }
 }
 
+export async function fetchAttachmentMessages(roomId: string, token: string): Promise<{ messages: EncryptedMessage[] }> {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(roomId)}/attachments`, {
+    headers: authHeaders(token),
+  })
+  const page = await readJSON<{ messages?: EncryptedMessage[] }>(res)
+  return { messages: page.messages ?? [] }
+}
+
 export async function sendEncryptedMessage(input: {
   roomId: string
   senderId: string
