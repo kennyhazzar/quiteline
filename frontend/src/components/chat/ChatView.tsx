@@ -234,6 +234,13 @@ export function ChatView(props: ChatViewProps) {
     previewAttachment(msg)
   }
 
+  function replyToMessage(msg: DecryptedMessage) {
+    setReplyTarget(msg)
+    window.requestAnimationFrame(() => {
+      messageInputRef.current?.focus()
+    })
+  }
+
   function renderMessageStatus(msg: DecryptedMessage) {
     if (!identity || msg.senderId !== identity.userId || msg.body?.system) return null
     if (msg.status === 'sending') return <IconClock size={15} stroke={1.8} aria-label="sending" />
@@ -457,7 +464,7 @@ export function ChatView(props: ChatViewProps) {
                                       </Menu.Item>
                                     ))}
                                     <Menu.Divider />
-                                    <Menu.Item leftSection={<IconMessageCircle size={15} />} onClick={() => setReplyTarget(msg)}>
+                                    <Menu.Item leftSection={<IconMessageCircle size={15} />} onClick={() => replyToMessage(msg)}>
                                       Reply
                                     </Menu.Item>
                                     <Menu.Item leftSection={<IconCopy size={15} />} onClick={() => copyMessageText(msg)}>
