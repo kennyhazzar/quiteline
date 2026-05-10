@@ -128,7 +128,7 @@ interface ChatViewProps {
 }
 
 export function ChatView(props: ChatViewProps) {
-  const { t, locale } = useI18n()
+  const { t } = useI18n()
   const {
     isMobile,
     mobileView,
@@ -184,53 +184,99 @@ export function ChatView(props: ChatViewProps) {
     setMobileChatActionsOpened,
   } = props
 
-  // ─── Scroll tracking + unread counter ────────────────────────────────────
+  // Scroll tracking + unread counter
   const [unreadCount, setUnreadCount] = useState(0)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [imageViewer, setImageViewer] = useState<{ src: string; name: string } | null>(null)
   const [pendingImagePreviewID, setPendingImagePreviewID] = useState('')
   const isNearBottomRef = useRef(true)
-  const prevLengthRef = useRef(0)
+  const previousMessageIDsRef = useRef<string[]>([])
+  const initializedRoomRef = useRef('')
+  const loadingHistoryRef = useRef(false)
+  const historyPaginationEnabledRef = useRef(false)
 
-  // Сброс при смене комнаты
+  function scrollMessagesToBottom(behavior: ScrollBehavior = 'auto') {
+    const el = messagesViewportRef.current
+    if (!el) return
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior })
+      })
+    })
+  }
+
+  // Reset transient scroll state when changing chats.
   useEffect(() => {
     setUnreadCount(0)
     setShowScrollBtn(false)
     isNearBottomRef.current = true
-    prevLengthRef.current = 0
+    previousMessageIDsRef.current = []
+    initializedRoomRef.current = ''
+    loadingHistoryRef.current = false
+    historyPaginationEnabledRef.current = false
   }, [activeRoomID])
 
-  // Новые сообщения: автоскролл если внизу, иначе — счётчик
+  // Only appended incoming messages affect the unread counter. Prepended history is ignored.
   useEffect(() => {
-    const diff = visibleMessages.length - prevLengthRef.current
-    prevLengthRef.current = visibleMessages.length
-    if (diff <= 0 || isLoadingMoreMessages || highlightedMessageID) return
-    if (isNearBottomRef.current) {
-      const el = messagesViewportRef.current
-      if (el) window.requestAnimationFrame(() => el.scrollTo({ top: el.scrollHeight }))
-    } else {
-      setUnreadCount((c) => c + diff)
+    const currentIDs = visibleMessages.map((msg) => msg.id)
+    if (currentIDs.length === 0) {
+      previousMessageIDsRef.current = []
+      return
     }
-  }, [highlightedMessageID, isLoadingMoreMessages, messagesViewportRef, visibleMessages.length])
+    if (initializedRoomRef.current !== activeRoomID) {
+      initializedRoomRef.current = activeRoomID
+      previousMessageIDsRef.current = currentIDs
+      if (!highlightedMessageID) {
+        scrollMessagesToBottom()
+        const roomID = activeRoomID
+        window.setTimeout(() => {
+          if (initializedRoomRef.current === roomID) historyPaginationEnabledRef.current = true
+        }, 250)
+      } else {
+        historyPaginationEnabledRef.current = true
+      }
+      return
+    }
+
+    const previousIDs = previousMessageIDsRef.current
+    previousMessageIDsRef.current = currentIDs
+    const previousLastID = previousIDs.at(-1)
+    if (!previousLastID || previousLastID === currentIDs.at(-1)) return
+    const previousLastIndex = currentIDs.indexOf(previousLastID)
+    if (previousLastIndex < 0) return
+    const appendedMessages = visibleMessages.slice(previousLastIndex + 1)
+    if (appendedMessages.length === 0) return
+
+    if (isNearBottomRef.current) {
+      scrollMessagesToBottom()
+    } else {
+      const incomingCount = appendedMessages.filter((msg) => msg.senderId !== identity.userId && !msg.body?.system).length
+      if (incomingCount > 0) setUnreadCount((c) => c + incomingCount)
+    }
+  }, [activeRoomID, highlightedMessageID, identity.userId, visibleMessages])
 
   function handleScrollToBottom() {
-    const el = messagesViewportRef.current
-    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    scrollMessagesToBottom('smooth')
     setUnreadCount(0)
   }
 
   async function handleLoadMoreMessages() {
+    if (loadingHistoryRef.current || isLoadingMoreMessages || !hasMoreMessages) return
     const el = messagesViewportRef.current
     const previousHeight = el?.scrollHeight ?? 0
     const previousTop = el?.scrollTop ?? 0
-    await loadMoreMessages()
-    window.requestAnimationFrame(() => {
+    loadingHistoryRef.current = true
+    try {
+      await loadMoreMessages()
+    } finally {
       window.requestAnimationFrame(() => {
-        const nextEl = messagesViewportRef.current
-        if (!nextEl) return
-        nextEl.scrollTop = nextEl.scrollHeight - previousHeight + previousTop
+        window.requestAnimationFrame(() => {
+          const nextEl = messagesViewportRef.current
+          if (nextEl) nextEl.scrollTop = nextEl.scrollHeight - previousHeight + previousTop
+          loadingHistoryRef.current = false
+        })
       })
-    })
+    }
   }
 
   useEffect(() => {
@@ -413,20 +459,12 @@ export function ChatView(props: ChatViewProps) {
                 isNearBottomRef.current = atBottom
                 setShowScrollBtn(!atBottom)
                 if (atBottom) setUnreadCount(0)
+                if (historyPaginationEnabledRef.current && y < 120 && hasMoreMessages && !isLoadingMoreMessages) {
+                  void handleLoadMoreMessages()
+                }
               }}
             >
               <Stack className={isMobile ? 'mobile-message-list' : undefined} gap={isMobile ? 8 : 'xs'} pr={isMobile ? 0 : 'sm'}>
-                {hasMoreMessages && (
-                  <Button
-                    variant="subtle"
-                    size="xs"
-                    loading={isLoadingMoreMessages}
-                    onClick={handleLoadMoreMessages}
-                    fullWidth
-                  >
-                    {locale === 'ru' ? 'Загрузить ранние сообщения' : 'Load earlier messages'}
-                  </Button>
-                )}
                 {visibleMessages.map((msg) => (
                   <Card
                     key={msg.id}
