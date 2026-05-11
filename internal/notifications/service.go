@@ -110,7 +110,7 @@ func (s *Service) send(ctx context.Context, sub Subscription, data []byte) {
 			P256dh: sub.P256DH,
 		},
 	}, &webpush.Options{
-		Subscriber:      s.cfg.VAPIDSubject,
+		Subscriber:      normalizeVAPIDSubject(s.cfg.VAPIDSubject),
 		VAPIDPublicKey:  s.cfg.VAPIDPublicKey,
 		VAPIDPrivateKey: s.cfg.VAPIDPrivateKey,
 		TTL:             3600,
@@ -190,4 +190,12 @@ func decodeVAPIDKey(value string) ([]byte, error) {
 		return decoded, nil
 	}
 	return base64.StdEncoding.DecodeString(value)
+}
+
+func normalizeVAPIDSubject(subject string) string {
+	subject = strings.TrimSpace(subject)
+	if strings.HasPrefix(strings.ToLower(subject), "mailto:") {
+		return strings.TrimSpace(subject[len("mailto:"):])
+	}
+	return subject
 }
