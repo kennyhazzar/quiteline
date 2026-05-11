@@ -477,12 +477,7 @@ function ProfilePanel(props: SidebarProps) {
       }
       const existing = await registration.pushManager.getSubscription()
       if (existing) await existing.unsubscribe()
-      const browserSub = await registration.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey,
-      }).catch((err: unknown) => {
-        throw new Error(pushSubscribeErrorMessage(err, locale))
-      })
+      const browserSub = await subscribeToPushWithRetry(registration, applicationServerKey)
       const json = browserSub.toJSON()
       const saved = await savePushSubscription({
         token: session.accessToken,
@@ -1033,18 +1028,42 @@ function ProfilePanel(props: SidebarProps) {
   )
 }
 
-function urlBase64ToUint8Array(value: string) {
+function urlBase64ToUint8Array(value: string): Uint8Array<ArrayBuffer> {
   const padding = '='.repeat((4 - value.length % 4) % 4)
   const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/')
   const raw = window.atob(base64)
-  const output = new Uint8Array(raw.length)
+  const output = new Uint8Array(new ArrayBuffer(raw.length))
   for (let i = 0; i < raw.length; i += 1) output[i] = raw.charCodeAt(i)
   return output
+}
+
+async function subscribeToPushWithRetry(registration: ServiceWorkerRegistration, applicationServerKey: Uint8Array<ArrayBuffer>) {
+  const options: PushSubscriptionOptionsInit = {
+    userVisibleOnly: true,
+    applicationServerKey,
+  }
+  try {
+    return await registration.pushManager.subscribe(options)
+  } catch (firstError) {
+    await new Promise((resolve) => setTimeout(resolve, 900))
+    try {
+      const existing = await registration.pushManager.getSubscription()
+      await existing?.unsubscribe()
+      return await registration.pushManager.subscribe(options)
+    } catch {
+      throw firstError
+    }
+  }
 }
 
 function pushSubscribeErrorMessage(err: unknown, locale: 'ru' | 'en') {
   const raw = err instanceof Error ? err.message : String(err)
   const name = err instanceof Error ? err.name : ''
+  if (/push service error|Registration failed|AbortError/i.test(`${name} ${raw}`)) {
+    return locale === 'ru'
+      ? 'Android не смог зарегистрироваться в push-сервисе браузера. VAPID на сервере уже рабочий, раз iPhone и десктоп получают уведомления. Проверьте Chrome/Google Play Services, разрешение уведомлений для браузера и сайта, затем перезапустите браузер или удалите Quietline с главного экрана и добавьте заново.'
+      : 'Android could not register with the browser push service. Server VAPID is already valid because iPhone and desktop receive notifications. Check Chrome/Google Play Services, browser and site notification permissions, then restart the browser or remove Quietline from Home Screen and add it again.'
+  }
   if (/VAPID|applicationServerKey|push service error|Registration failed/i.test(`${name} ${raw}`)) {
     return locale === 'ru'
       ? 'Push-сервис отклонил подписку. Чаще всего VAPID ключи на сервере некорректны или были заменены. Сгенерируйте одну пару VAPID ключей, обновите VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY на бекенде, перезапустите контейнер и включите уведомления заново.'
