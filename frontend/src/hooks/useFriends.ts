@@ -31,8 +31,8 @@ export function useFriends(opts: {
 
   const requestFriendMutation = useMutation({
     mutationFn: async () => {
-      if (!session || !friendUsername.trim()) throw new Error('username_required')
-      return requestFriend({ token: session.accessToken, username: friendUsername.trim() })
+      if (!session || !friendUsername.trim()) throw new Error('friend_code_required')
+      return requestFriend({ token: session.accessToken, friendCode: friendUsername.trim() })
     },
     onSuccess: () => {
       setFriendUsername('')

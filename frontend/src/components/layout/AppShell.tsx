@@ -50,6 +50,7 @@ interface AppShellLayoutProps {
   leftView: AppView
   setMobileView: (v: AppView) => void
   setSidebarView: (v: AppView) => void
+  liveStatus: 'connecting' | 'connected' | 'disconnected'
   // health
   health: UseQueryResult<{ status: string }>
   // auth
@@ -197,7 +198,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
     leftView,
     setMobileView,
     setSidebarView,
-    health,
+    liveStatus,
     session,
     identity,
     locale,
@@ -205,6 +206,14 @@ export function AppShellLayout(props: AppShellLayoutProps) {
     colorScheme,
     toggleTheme,
   } = props
+  const liveBadge = {
+    color: liveStatus === 'connected' ? 'green' : liveStatus === 'connecting' ? 'yellow' : 'red',
+    label: liveStatus === 'connected'
+      ? t('online')
+      : liveStatus === 'connecting'
+        ? (locale === 'ru' ? 'Соединение' : 'Connecting')
+        : t('offline'),
+  }
 
   return (
     <>
@@ -236,8 +245,8 @@ export function AppShellLayout(props: AppShellLayoutProps) {
               </Text>
             </div>
             <Group gap="xs" wrap="nowrap">
-              <Badge color={health.data?.status === 'ok' ? 'green' : 'red'} variant="light">
-                {health.data?.status === 'ok' ? t('online') : t('offline')}
+              <Badge color={liveBadge.color} variant="light">
+                {liveBadge.label}
               </Badge>
               {!isMobile && (
                 <>

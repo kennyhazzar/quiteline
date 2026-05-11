@@ -21,6 +21,7 @@ import {
   Title,
 } from '@mantine/core'
 import {
+  IconCopy,
   IconDownload,
   IconKey,
   IconPlus,
@@ -47,6 +48,7 @@ interface SidebarProps {
   sidebarView: AppView
   leftView: AppView
   setSidebarView: (v: AppView) => void
+  liveStatus: 'connecting' | 'connected' | 'disconnected'
   health: UseQueryResult<{ status: string }>
   session: AuthSession
   identity: Identity
@@ -268,7 +270,7 @@ function ProfilePanel(props: SidebarProps) {
   const {
     session,
     identity,
-    health,
+    liveStatus,
     ownAvatarSrc,
     avatarMutation,
     friends,
@@ -305,6 +307,24 @@ function ProfilePanel(props: SidebarProps) {
     created: locale === 'ru' ? 'Создана' : 'Created',
     expires: locale === 'ru' ? 'Истекает' : 'Expires',
     unknownLocation: locale === 'ru' ? 'Локация не определена' : 'Location unknown',
+  }
+  const friendCode = session.principal.friendCode || ''
+  const friendCodeCopy = {
+    title: locale === 'ru' ? 'Код для друзей' : 'Friend code',
+    hint: locale === 'ru'
+      ? 'Скопируйте код и отправьте его человеку вне Quietline.'
+      : 'Copy this code and send it outside Quietline.',
+    label: locale === 'ru' ? 'Код друга' : 'Friend code',
+    placeholder: locale === 'ru' ? 'Введите код' : 'Enter code',
+    copied: locale === 'ru' ? 'Код скопирован' : 'Code copied',
+  }
+  const liveBadge = {
+    color: liveStatus === 'connected' ? 'green' : liveStatus === 'connecting' ? 'yellow' : 'red',
+    label: liveStatus === 'connected'
+      ? t('online')
+      : liveStatus === 'connecting'
+        ? (locale === 'ru' ? 'Соединение' : 'Connecting')
+        : t('offline'),
   }
 
   return (
@@ -352,11 +372,11 @@ function ProfilePanel(props: SidebarProps) {
           )}
           <div style={{ minWidth: 0 }}>
             <Text fw={700} truncate>{session.principal.displayName || identity.displayName}</Text>
-            <Text size="xs" c="dimmed" truncate>{t('account')}: {session.principal.username}</Text>
+            <Text size="xs" c="dimmed" truncate>{t('profile')}</Text>
           </div>
         </Group>
-        <Badge color={health.data?.status === 'ok' ? 'green' : 'red'} style={{ flexShrink: 0 }}>
-          {health.data?.status === 'ok' ? t('online') : t('offline')}
+        <Badge color={liveBadge.color} style={{ flexShrink: 0 }}>
+          {liveBadge.label}
         </Badge>
       </Group>
 
@@ -375,6 +395,26 @@ function ProfilePanel(props: SidebarProps) {
       <Divider my="sm" />
 
       {/* Friends */}
+      <Card withBorder radius="md" p="sm" mb="sm">
+        <Group justify="space-between" gap="xs" wrap="nowrap">
+          <div style={{ minWidth: 0 }}>
+            <Text fw={700} size="sm">{friendCodeCopy.title}</Text>
+            <Text size="xs" c="dimmed" lineClamp={2}>{friendCodeCopy.hint}</Text>
+            <Text size="lg" fw={800} mt={4} style={{ letterSpacing: 1 }}>{friendCode || '--------'}</Text>
+          </div>
+          <ActionIcon
+            variant="light"
+            size="lg"
+            disabled={!friendCode}
+            onClick={() => {
+              void navigator.clipboard?.writeText(friendCode)
+            }}
+            aria-label={friendCodeCopy.copied}
+          >
+            <IconCopy size={18} />
+          </ActionIcon>
+        </Group>
+      </Card>
       <Group justify="space-between" align="center" mb="xs">
         <Text fw={700} size="sm">{t('friends')}</Text>
         <ActionIcon variant="subtle" onClick={() => friends.refetch()} loading={friends.isFetching}>
@@ -383,8 +423,8 @@ function ProfilePanel(props: SidebarProps) {
       </Group>
       <Group align="flex-end" gap="xs" wrap="nowrap" mb="xs">
         <TextInput
-          label={t('friendUsername')}
-          placeholder="alice"
+          label={friendCodeCopy.label}
+          placeholder={friendCodeCopy.placeholder}
           value={friendUsername}
           onChange={(e) => setFriendUsername(e.currentTarget.value)}
           onKeyDown={(e) => {
@@ -524,30 +564,36 @@ function ProfilePanel(props: SidebarProps) {
         <Text fw={700} size="sm">{t('sessions')}</Text>
         <Badge variant="light" color="gray">{sessions.length}</Badge>
       </Group>
-      <ScrollArea.Autosize mah={300} type="auto" offsetScrollbars>
+      <ScrollArea.Autosize mah={isMobile ? 420 : 300} type="auto" offsetScrollbars>
         <Stack gap="xs" pr="xs">
           {sessions.map((item) => {
             const deviceName = cleanSessionText(item.deviceName) || t('sessionDevice')
             const location = cleanSessionText(item.location) || sessionCopy.unknownLocation
+            const currentLabel = isMobile
+              ? (locale === 'ru' ? 'Текущая' : 'Current')
+              : t('currentSession')
             return (
               <Box
                 key={item.sessionId}
-                p="xs"
+                p={isMobile ? 'sm' : 'xs'}
                 style={{
                   border: '1px solid var(--mantine-color-default-border)',
-                  borderRadius: 8,
+                  borderRadius: isMobile ? 12 : 8,
                   background: 'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
                 }}
               >
-                <Stack gap={6}>
-                  <Group justify="space-between" align="flex-start" wrap="nowrap">
+                <Stack gap={isMobile ? 'xs' : 6}>
+                  <Group justify="space-between" align="flex-start" wrap={isMobile ? 'wrap' : 'nowrap'}>
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <Group gap={6} wrap="nowrap">
-                        <Text size="sm" fw={700} lineClamp={2}>{deviceName}</Text>
-                        {item.current && <Badge size="xs" color="green" variant="light">{t('currentSession')}</Badge>}
+                      <Group gap={6} wrap="wrap" mb={4}>
+                        <Text size="sm" fw={800} style={{ wordBreak: 'break-word' }}>{deviceName}</Text>
+                        {item.current && <Badge size="xs" color="green" variant="light">{currentLabel}</Badge>}
                       </Group>
-                      <Text size="xs" c="dimmed" lineClamp={1}>{sessionCopy.location}: {location}</Text>
-                      <Text size="xs" c="dimmed" lineClamp={1}>{sessionCopy.created}: {formatLastSeen(item.createdAt)}</Text>
+                      <Stack gap={2}>
+                        <Text size="xs" c="dimmed" style={{ wordBreak: 'break-word' }}>{sessionCopy.location}: {location}</Text>
+                        <Text size="xs" c="dimmed">{sessionCopy.created}: {formatLastSeen(item.createdAt)}</Text>
+                        <Text size="xs" c="dimmed">{sessionCopy.expires}: {formatLastSeen(item.expiresAt)}</Text>
+                      </Stack>
                     </div>
                     <Button
                       size="xs"
@@ -555,12 +601,12 @@ function ProfilePanel(props: SidebarProps) {
                       color="red"
                       onClick={() => (revokeSessionMutation as UseMutationResult<unknown, Error, AccountSession>).mutate(item)}
                       loading={(revokeSessionMutation as UseMutationResult<unknown, Error, AccountSession>).isPending}
-                      style={{ flexShrink: 0 }}
+                      fullWidth={isMobile}
+                      style={{ flexShrink: 0, width: isMobile ? '100%' : undefined }}
                     >
                       {item.current ? t('logout') : t('revoke')}
                     </Button>
                   </Group>
-                  <Text size="xs" c="dimmed" lineClamp={1}>{sessionCopy.expires}: {formatLastSeen(item.expiresAt)}</Text>
                 </Stack>
               </Box>
             )

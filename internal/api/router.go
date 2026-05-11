@@ -258,8 +258,9 @@ type createRoomRequest struct {
 }
 
 type friendRequest struct {
-	Username string `json:"username"`
-	UserID   string `json:"userId"`
+	Username   string `json:"username"`
+	UserID     string `json:"userId"`
+	FriendCode string `json:"friendCode"`
 }
 
 type inviteFriendRequest struct {
@@ -542,12 +543,21 @@ func handleRequestFriend(w http.ResponseWriter, r *http.Request, deps Dependenci
 	}
 	targetID := strings.TrimSpace(req.UserID)
 	if targetID == "" {
-		user, err := deps.Auth.UserByUsername(r.Context(), req.Username)
-		if err != nil {
-			writeError(w, http.StatusNotFound, "user_not_found")
-			return
+		if strings.TrimSpace(req.FriendCode) != "" {
+			user, err := deps.Auth.UserByFriendCode(r.Context(), req.FriendCode)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "friend_code_not_found")
+				return
+			}
+			targetID = user.UserID
+		} else {
+			user, err := deps.Auth.UserByUsername(r.Context(), req.Username)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "user_not_found")
+				return
+			}
+			targetID = user.UserID
 		}
-		targetID = user.UserID
 	}
 	if err := deps.ZKStore.RequestFriend(r.Context(), principalFromContext(r.Context()).UserID, targetID); err != nil {
 		writeStoreError(w, err)

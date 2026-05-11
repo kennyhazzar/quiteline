@@ -13,6 +13,7 @@ import {
   disableTOTP,
   fetchAccountSessions,
   fetchCurrentIdentity,
+  fetchCurrentPrincipal,
   fetchHealth,
   fetchRooms,
   isTwoFactorChallenge,
@@ -124,6 +125,7 @@ export function MessengerApp() {
   // ─── Presence / typing ────────────────────────────────────────────────────
   const [typingUsers, setTypingUsers] = useState<Record<string, { displayName: string; until: number }>>({})
   const [presence, setPresence] = useState<Record<string, { displayName: string; status: 'online' | 'offline'; lastSeenAt: string }>>({})
+  const [liveStatus, setLiveStatus] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected')
 
   // ─── Call state ───────────────────────────────────────────────────────────
   const [callState, setCallState] = useState<CallState>('idle')
@@ -559,9 +561,11 @@ export function MessengerApp() {
     if (roomID) topics.push(`room:${roomID}`)
     url.searchParams.set('topics', topics.join(','))
     url.searchParams.set('token', session.accessToken)
+    setLiveStatus('connecting')
     const ws = new WebSocket(url.toString())
     wsRef.current = ws
     ws.onopen = () => {
+      setLiveStatus('connected')
       if (!currentDisplayName) return
       sendRealtimeRaw({
         kind: 'presence',
@@ -581,9 +585,12 @@ export function MessengerApp() {
         // ignore malformed frames
       }
     }
-    ws.onerror = () =>
+    ws.onerror = () => {
+      if (wsRef.current === ws) setLiveStatus('disconnected')
       notifications.show({ title: t('wsError'), message: t('liveDisconnected'), color: 'red' })
+    }
     ws.onclose = () => {
+      if (wsRef.current === ws) setLiveStatus('disconnected')
       if (!session?.accessToken || wsRef.current !== ws) return
       wsReconnectTimerRef.current = setTimeout(() => connectWS(roomID), 1500)
     }
@@ -844,6 +851,15 @@ export function MessengerApp() {
       .catch((err: Error) => {
         if (err instanceof AuthError) handleAuthExpired()
         else notifications.show({ title: t('profileTitle'), message: err.message, color: 'red' })
+      })
+    fetchCurrentPrincipal(target.accessToken)
+      .then((principal) => {
+        const next = { ...target, principal }
+        localStorage.setItem(SESSION_KEY, JSON.stringify(next))
+        setSession((current) => current?.accessToken === target.accessToken ? next : current)
+      })
+      .catch(() => {
+        // Identity loading above owns the visible auth error path.
       })
   }
 
@@ -1227,6 +1243,7 @@ export function MessengerApp() {
       leftView={leftView}
       setMobileView={setMobileView}
       setSidebarView={setSidebarView}
+      liveStatus={liveStatus}
       // health
       health={health}
       // auth

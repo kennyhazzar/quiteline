@@ -56,6 +56,7 @@ import {
 interface ChatViewProps {
   isMobile: boolean
   mobileView: AppView
+  setMobileView: (v: AppView) => void
   session: AuthSession
   identity: Identity
   ownAvatarSrc: string
@@ -133,6 +134,7 @@ export function ChatView(props: ChatViewProps) {
   const {
     isMobile,
     mobileView,
+    setMobileView,
     identity,
     ownAvatarSrc,
     activeRoom,
@@ -190,6 +192,7 @@ export function ChatView(props: ChatViewProps) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [imageViewer, setImageViewer] = useState<{ src: string; name: string } | null>(null)
+  const [attachmentsOpened, setAttachmentsOpened] = useState(false)
   const [pendingImagePreviewID, setPendingImagePreviewID] = useState('')
   const isNearBottomRef = useRef(true)
   const previousMessageIDsRef = useRef<string[]>([])
@@ -351,6 +354,50 @@ export function ChatView(props: ChatViewProps) {
         <Image src={imageViewer.src} alt={imageViewer.name} mah="75dvh" fit="contain" radius="md" />
       )}
     </Modal>
+    <Modal
+      opened={attachmentsOpened}
+      onClose={() => setAttachmentsOpened(false)}
+      title={t('attach')}
+      centered
+      size="lg"
+      scrollAreaComponent={ScrollArea.Autosize}
+    >
+      <Stack gap="xs">
+        {attachmentMessages.map((msg) => {
+          const attachment = msg.body?.attachment
+          if (!attachment) return null
+          return (
+            <Card key={msg.id} withBorder radius="md" p="sm">
+              <Group justify="space-between" align="center" wrap="nowrap">
+                <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+                  <ActionIcon variant="light" radius="xl" size="lg">
+                    <IconPaperclip size={18} />
+                  </ActionIcon>
+                  <div style={{ minWidth: 0 }}>
+                    <Text fw={700} size="sm" truncate>{attachment.name}</Text>
+                    <Text size="xs" c="dimmed" truncate>
+                      {(attachment.type || t('file'))} - {formatBytes(attachment.size)} - {msg.body?.senderName || t('unknownUser')}
+                    </Text>
+                    <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleString()}</Text>
+                  </div>
+                </Group>
+                <Group gap={6} wrap="nowrap">
+                  {attachment.type.startsWith('image/') && (
+                    <Button size="xs" variant="light" onClick={() => openAttachmentPreview(msg)}>
+                      {t('preview')}
+                    </Button>
+                  )}
+                  <ActionIcon variant="light" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
+                    <IconDownload size={17} />
+                  </ActionIcon>
+                </Group>
+              </Group>
+            </Card>
+          )
+        })}
+        {attachmentMessages.length === 0 && <Text c="dimmed" ta="center">{t('noMessages')}</Text>}
+      </Stack>
+    </Modal>
     <Card
       withBorder={!isMobile}
       radius={isMobile ? 0 : 'sm'}
@@ -372,7 +419,7 @@ export function ChatView(props: ChatViewProps) {
           <Title order={3}>{t('chooseRoom')}</Title>
           <Text c="dimmed">{t('messagesEncrypted')}</Text>
           {isMobile && (
-            <Button variant="light" onClick={() => props.setRoomSecret('')}>{t('rooms')}</Button>
+            <Button variant="light" onClick={() => setMobileView('rooms')}>{t('rooms')}</Button>
           )}
         </Stack>
       ) : (
@@ -397,6 +444,13 @@ export function ChatView(props: ChatViewProps) {
             <ActionIcon variant="subtle" size="lg" onClick={() => setMobileChatActionsOpened(true)} aria-label={t('chat')}>
               <IconDotsVertical size={20} />
             </ActionIcon>
+            {isMobile && attachmentMessages.length > 0 && (
+              <Indicator label={attachmentMessages.length} size={16} color="blue" offset={4}>
+                <ActionIcon variant="light" size="lg" onClick={() => setAttachmentsOpened(true)} aria-label={t('attach')}>
+                  <IconPaperclip size={19} />
+                </ActionIcon>
+              </Indicator>
+            )}
           </Group>
 
           <audio ref={remoteAudioRef as React.RefObject<HTMLAudioElement>} autoPlay />
@@ -698,26 +752,6 @@ export function ChatView(props: ChatViewProps) {
           </Box>
 
           {/* Composer */}
-          {isMobile && attachmentMessages.length > 0 && (
-            <Box px="sm" py={6} style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
-              <ScrollArea type="auto" offsetScrollbars scrollbarSize={4}>
-                <Group gap="xs" wrap="nowrap">
-                  {attachmentMessages.slice(0, 12).map((msg) => (
-                    <Button
-                      key={msg.id}
-                      size="xs"
-                      variant="light"
-                      rightSection={<IconDownload size={14} />}
-                      onClick={() => downloadAttachment(msg)}
-                      style={{ flexShrink: 0, maxWidth: 180 }}
-                    >
-                      <Text size="xs" truncate>{msg.body?.attachment?.name ?? t('file')}</Text>
-                    </Button>
-                  ))}
-                </Group>
-              </ScrollArea>
-            </Box>
-          )}
           <Stack className={isMobile ? 'mobile-composer' : 'composer-bar'} gap={6} mt="auto">
             {replyTarget && (
               <Card withBorder radius="sm" p="xs">

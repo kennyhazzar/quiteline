@@ -114,7 +114,37 @@ func (s *PostgresUserStore) GetUserByUsername(ctx context.Context, username stri
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
+	result.FriendCode = friendCodeForUserID(result.UserID)
 	return result, err
+}
+
+func (s *PostgresUserStore) GetUserByFriendCode(ctx context.Context, friendCode string) (User, error) {
+	friendCode = normalizeFriendCode(friendCode)
+	if friendCode == "" {
+		return User{}, ErrUserNotFound
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
+		FROM users
+	`)
+	if err != nil {
+		return User{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var result User
+		if err := rows.Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt); err != nil {
+			return User{}, err
+		}
+		if friendCodeForUserID(result.UserID) == friendCode {
+			result.FriendCode = friendCode
+			return result, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return User{}, err
+	}
+	return User{}, ErrUserNotFound
 }
 
 func (s *PostgresUserStore) GetUserByID(ctx context.Context, userID string) (User, error) {
@@ -127,6 +157,7 @@ func (s *PostgresUserStore) GetUserByID(ctx context.Context, userID string) (Use
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrUserNotFound
 	}
+	result.FriendCode = friendCodeForUserID(result.UserID)
 	return result, err
 }
 

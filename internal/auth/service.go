@@ -49,6 +49,7 @@ type Principal struct {
 	SessionID   string   `json:"sessionId,omitempty"`
 	Username    string   `json:"username,omitempty"`
 	DisplayName string   `json:"displayName,omitempty"`
+	FriendCode  string   `json:"friendCode,omitempty"`
 	Theme       string   `json:"theme,omitempty"`
 	AvatarURL   string   `json:"avatarUrl,omitempty"`
 	TOTPEnabled bool     `json:"totpEnabled"`
@@ -71,6 +72,7 @@ type User struct {
 	UserID         string    `json:"userId"`
 	Username       string    `json:"username"`
 	DisplayName    string    `json:"displayName"`
+	FriendCode     string    `json:"friendCode,omitempty"`
 	Theme          string    `json:"theme"`
 	AvatarFileID   string    `json:"avatarFileId,omitempty"`
 	AvatarMimeType string    `json:"avatarMimeType,omitempty"`
@@ -85,6 +87,7 @@ type UserStore interface {
 	CreateUser(ctx context.Context, user User) (User, error)
 	GetUserByID(ctx context.Context, userID string) (User, error)
 	GetUserByUsername(ctx context.Context, username string) (User, error)
+	GetUserByFriendCode(ctx context.Context, friendCode string) (User, error)
 	UpdateUserAvatar(ctx context.Context, userID string, avatarFileID string, mimeType string, size int64) (User, error)
 	UpdateUserTheme(ctx context.Context, userID string, theme string) (User, error)
 	UpdateUserTOTP(ctx context.Context, userID string, secret string, enabled bool) (User, error)
@@ -228,6 +231,13 @@ func (s *Service) UserByUsername(ctx context.Context, username string) (User, er
 		return User{}, ErrUserNotFound
 	}
 	return s.users.GetUserByUsername(ctx, username)
+}
+
+func (s *Service) UserByFriendCode(ctx context.Context, friendCode string) (User, error) {
+	if normalizeFriendCode(friendCode) == "" {
+		return User{}, ErrUserNotFound
+	}
+	return s.users.GetUserByFriendCode(ctx, friendCode)
 }
 
 func (s *Service) PrincipalFor(ctx context.Context, principal Principal) (Principal, error) {
@@ -477,6 +487,7 @@ func (s *Service) issueUserToken(ctx context.Context, user User) (string, Princi
 		SessionID:   session.SessionID,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
+		FriendCode:  friendCodeForUserID(user.UserID),
 		Theme:       claims.Theme,
 		AvatarURL:   avatarURL(user),
 		TOTPEnabled: user.TOTPEnabled,
@@ -491,12 +502,29 @@ func userPrincipal(user User, expires int64) Principal {
 		UserID:      user.UserID,
 		Username:    user.Username,
 		DisplayName: user.DisplayName,
+		FriendCode:  friendCodeForUserID(user.UserID),
 		Theme:       normalizeThemeOrDefault(user.Theme),
 		AvatarURL:   avatarURL(user),
 		TOTPEnabled: user.TOTPEnabled,
 		Scopes:      defaultScopes(),
 		Expires:     expires,
 	}
+}
+
+func normalizeFriendCode(value string) string {
+	var b strings.Builder
+	for _, r := range strings.TrimSpace(value) {
+		if r >= '0' && r <= '9' {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func friendCodeForUserID(userID string) string {
+	sum := sha256.Sum256([]byte("quietline-friend-code:" + strings.TrimSpace(userID)))
+	n := binary.BigEndian.Uint64(sum[:8]) % 1000000000000
+	return fmt.Sprintf("%012d", n)
 }
 
 func newSessionID() string {

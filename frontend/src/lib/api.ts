@@ -16,6 +16,7 @@ export interface Principal {
   sessionId?: string
   username: string
   displayName: string
+  friendCode?: string
   theme: 'light' | 'dark'
   avatarUrl?: string
   totpEnabled: boolean
@@ -166,6 +167,13 @@ export async function updateTheme(input: {
   return readJSON(res)
 }
 
+export async function fetchCurrentPrincipal(token: string): Promise<Principal> {
+  const res = await fetch(`${BASE}/v1/me`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
 export async function uploadAvatar(input: {
   token: string
   blob: Blob
@@ -270,12 +278,12 @@ export async function fetchFriends(token: string): Promise<{ friends: Friend[] }
 
 export async function requestFriend(input: {
   token: string
-  username: string
+  friendCode: string
 }): Promise<{ friends: Friend[] }> {
   const res = await fetch(`${BASE}/v1/chat/friends`, {
     method: 'POST',
     headers: authHeaders(input.token),
-    body: JSON.stringify({ username: input.username }),
+    body: JSON.stringify({ friendCode: input.friendCode }),
   })
   return readJSON(res)
 }

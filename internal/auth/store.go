@@ -48,6 +48,7 @@ func (s *MemoryUserStore) GetUserByID(_ context.Context, userID string) (User, e
 	defer s.mu.RUnlock()
 	for _, user := range s.byName {
 		if user.UserID == userID {
+			user.FriendCode = friendCodeForUserID(user.UserID)
 			return user, nil
 		}
 	}
@@ -112,7 +113,21 @@ func (s *MemoryUserStore) GetUserByUsername(_ context.Context, username string) 
 	if !ok {
 		return User{}, ErrUserNotFound
 	}
+	user.FriendCode = friendCodeForUserID(user.UserID)
 	return user, nil
+}
+
+func (s *MemoryUserStore) GetUserByFriendCode(_ context.Context, friendCode string) (User, error) {
+	friendCode = normalizeFriendCode(friendCode)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, user := range s.byName {
+		if friendCodeForUserID(user.UserID) == friendCode {
+			user.FriendCode = friendCode
+			return user, nil
+		}
+	}
+	return User{}, ErrUserNotFound
 }
 
 func newUserID() string {
