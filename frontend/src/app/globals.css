@@ -8,6 +8,38 @@ body {
   margin: 0;
 }
 
+.mantine-Button-root,
+.mantine-ActionIcon-root,
+.mantine-Input-input,
+.mantine-Input-wrapper,
+.mantine-PasswordInput-input,
+.mantine-PasswordInput-innerInput,
+.mantine-Textarea-input,
+.mantine-Select-input,
+.mantine-SegmentedControl-root,
+.mantine-Alert-root,
+.mantine-Badge-root {
+  border-radius: 14px;
+}
+
+.mantine-Card-root,
+.mantine-Modal-content,
+.mantine-Paper-root,
+.mantine-Menu-dropdown,
+.mantine-Popover-dropdown {
+  border-radius: 20px;
+}
+
+.mantine-Modal-header {
+  border-radius: 20px 20px 0 0;
+}
+
+.mantine-Button-root[data-variant='filled'],
+.mantine-Button-root[data-variant='light'],
+.mantine-ActionIcon-root[data-variant='light'] {
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.06);
+}
+
 .auth-page {
   min-height: 100dvh;
   padding: 24px;

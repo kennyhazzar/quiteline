@@ -15,6 +15,7 @@ import {
   Title,
 } from '@mantine/core'
 import { IconShieldCheck } from '@tabler/icons-react'
+import { useEffect, useRef, useState } from 'react'
 import { useI18n } from '@/lib/i18n'
 
 interface AuthPageProps {
@@ -32,7 +33,7 @@ interface AuthPageProps {
   onSetPassword: (v: string) => void
   onSetDisplayName: (v: string) => void
   onSetTotpCode: (v: string) => void
-  onSubmit: () => void
+  onSubmit: (values?: { username: string; password: string; displayName: string; totpCode: string }) => void
 }
 
 export function AuthPage(props: AuthPageProps) {
@@ -54,11 +55,48 @@ export function AuthPage(props: AuthPageProps) {
     onSubmit,
   } = props
   const { t } = useI18n()
+  const usernameRef = useRef<HTMLInputElement | null>(null)
+  const passwordRef = useRef<HTMLInputElement | null>(null)
+  const displayNameRef = useRef<HTMLInputElement | null>(null)
+  const totpRef = useRef<HTMLInputElement | null>(null)
+  const [autofillSnapshot, setAutofillSnapshot] = useState({ username: '', password: '', displayName: '', totpCode: '' })
 
-  const isDisabled = !username.trim() || password.length < 8 || (totpRequired && totpCode.trim().length < 6)
+  function readFormValues() {
+    return {
+      username: usernameRef.current?.value ?? username,
+      password: passwordRef.current?.value ?? password,
+      displayName: displayNameRef.current?.value ?? displayName,
+      totpCode: totpRef.current?.value ?? totpCode,
+    }
+  }
+
+  function syncAutofillSnapshot() {
+    setAutofillSnapshot(readFormValues())
+  }
+
+  useEffect(() => {
+    syncAutofillSnapshot()
+    const timers = [100, 300, 700, 1200].map((delay) => window.setTimeout(syncAutofillSnapshot, delay))
+    return () => timers.forEach((timer) => window.clearTimeout(timer))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authMode, totpRequired])
+
+  const effectiveUsername = username || autofillSnapshot.username
+  const effectivePassword = password || autofillSnapshot.password
+  const effectiveTotpCode = totpCode || autofillSnapshot.totpCode
+  const isDisabled = !effectiveUsername.trim() || effectivePassword.length < 8 || (totpRequired && effectiveTotpCode.trim().length < 6)
+
+  function submitWithCurrentValues() {
+    const values = readFormValues()
+    onSetUsername(values.username)
+    onSetPassword(values.password)
+    onSetDisplayName(values.displayName)
+    onSetTotpCode(values.totpCode)
+    onSubmit(values)
+  }
 
   const handleKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') onSubmit()
+    if (e.key === 'Enter' && !isDisabled) submitWithCurrentValues()
   }
 
   const form = (
@@ -78,7 +116,9 @@ export function AuthPage(props: AuthPageProps) {
         placeholder="alice"
         value={username}
         autoComplete="username"
+        ref={usernameRef}
         onChange={(e) => onSetUsername(e.currentTarget.value)}
+        onInput={syncAutofillSnapshot}
         onKeyDown={handleKey}
       />
       {authMode === 'register' && (
@@ -87,7 +127,9 @@ export function AuthPage(props: AuthPageProps) {
           placeholder="Alice"
           value={displayName}
           autoComplete="name"
+          ref={displayNameRef}
           onChange={(e) => onSetDisplayName(e.currentTarget.value)}
+          onInput={syncAutofillSnapshot}
           onKeyDown={handleKey}
         />
       )}
@@ -95,7 +137,9 @@ export function AuthPage(props: AuthPageProps) {
         label={t('password')}
         value={password}
         autoComplete={authMode === 'register' ? 'new-password' : 'current-password'}
+        ref={passwordRef}
         onChange={(e) => onSetPassword(e.currentTarget.value)}
+        onInput={syncAutofillSnapshot}
         onKeyDown={handleKey}
       />
       {totpRequired && authMode === 'login' && (
@@ -104,15 +148,17 @@ export function AuthPage(props: AuthPageProps) {
           placeholder="123456"
           value={totpCode}
           inputMode="numeric"
+          ref={totpRef}
           error={authError || undefined}
           onChange={(e) => onSetTotpCode(e.currentTarget.value)}
+          onInput={syncAutofillSnapshot}
           onKeyDown={handleKey}
         />
       )}
       {authError && !totpRequired && (
         <Alert color="red" variant="light">{authError}</Alert>
       )}
-      <Button fullWidth size="md" onClick={onSubmit} loading={isPending} disabled={isDisabled}>
+      <Button fullWidth size="md" onClick={submitWithCurrentValues} loading={isPending} disabled={isDisabled}>
         {authMode === 'register' ? t('createAccount') : t('login')}
       </Button>
       <Button

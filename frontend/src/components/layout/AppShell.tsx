@@ -398,7 +398,7 @@ function EditMessageModal({ editTarget, setEditTarget, editText, setEditText, ed
           value={editText}
           onChange={(e) => setEditText(e.currentTarget.value)}
           rows={3}
-          style={{ width: '100%', resize: 'vertical', padding: 8, borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
+          style={{ width: '100%', resize: 'vertical', padding: 12, borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
         />
         <Group justify="flex-end">
           <Button variant="subtle" onClick={() => setEditTarget(null)}>{t('cancel')}</Button>
@@ -502,7 +502,7 @@ function ChatActionsModal(props: AppShellLayoutProps) {
             placeholder="Search messages"
             value={messageSearch}
             onChange={(e) => setMessageSearch(e.currentTarget.value)}
-            style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
           />
           {!isMobile && peers.length > 0 && (
             <Group gap={6}>
@@ -637,7 +637,7 @@ function CreateRoomModal({
           <input
             value={roomName}
             onChange={(e) => setRoomName(e.currentTarget.value)}
-            style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
           />
         </label>
         <Button
@@ -671,11 +671,18 @@ function ImportInviteModal({
         <label>
           <Text size="sm" mb={4}>{t('invite')}</Text>
           <input
-            type="password"
+            type="text"
+            name="quietline-invite-token"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-lpignore="true"
+            data-1p-ignore="true"
             placeholder={t('invitePlaceholder')}
             value={inviteText}
             onChange={(e) => setInviteText(e.currentTarget.value)}
-            style={{ width: '100%', padding: '8px', borderRadius: 4, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14, fontFamily: 'var(--font-geist-mono), monospace' }}
           />
         </label>
         <Button

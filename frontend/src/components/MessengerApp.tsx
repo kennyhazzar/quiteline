@@ -932,11 +932,15 @@ export function MessengerApp() {
   // ─── Auth mutation ────────────────────────────────────────────────────────
   const authMutation = useMutation({
     onMutate: () => setAuthError(''),
-    mutationFn: () => {
+    mutationFn: (values?: { username: string; password: string; displayName: string; totpCode: string }) => {
+      const authUsername = values?.username ?? username
+      const authPassword = values?.password ?? password
+      const authDisplayName = values?.displayName ?? displayName
+      const authTotpCode = values?.totpCode ?? totpCode
       if (authMode === 'register') {
-        return registerUser({ username, password, displayName: displayName.trim() || username })
+        return registerUser({ username: authUsername, password: authPassword, displayName: authDisplayName.trim() || authUsername })
       }
-      return loginUser({ username, password, totpCode: totpCode.trim() || undefined })
+      return loginUser({ username: authUsername, password: authPassword, totpCode: authTotpCode.trim() || undefined })
     },
     onSuccess: (next: AuthSession | { twoFactorRequired: true }) => {
       if (isTwoFactorChallenge(next)) {
@@ -967,9 +971,24 @@ export function MessengerApp() {
     },
   })
 
-  function submitAuth() {
-    if (!username.trim() || password.length < 8 || authMutation.isPending) return
-    authMutation.mutate()
+  function submitAuth(values?: { username: string; password: string; displayName: string; totpCode: string }) {
+    const nextUsername = values?.username ?? username
+    const nextPassword = values?.password ?? password
+    const nextDisplayName = values?.displayName ?? displayName
+    const nextTotpCode = values?.totpCode ?? totpCode
+    if (!nextUsername.trim() || nextPassword.length < 8 || authMutation.isPending) return
+    if (values) {
+      setUsername(nextUsername)
+      setPassword(nextPassword)
+      setDisplayName(nextDisplayName)
+      setTotpCode(nextTotpCode)
+    }
+    authMutation.mutate({
+      username: nextUsername,
+      password: nextPassword,
+      displayName: nextDisplayName,
+      totpCode: nextTotpCode,
+    })
   }
 
   function logoutLocal(options: { remote?: boolean } = {}) {

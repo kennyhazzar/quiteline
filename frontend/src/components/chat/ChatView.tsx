@@ -433,7 +433,7 @@ export function ChatView(props: ChatViewProps) {
     </Modal>
     <Card
       withBorder={!isMobile}
-      radius={isMobile ? 0 : 'sm'}
+      radius={isMobile ? 0 : 'lg'}
       p={isMobile ? 0 : 'md'}
       className={isMobile ? 'mobile-chat-card' : 'desktop-chat-card'}
       style={{
@@ -679,13 +679,13 @@ export function ChatView(props: ChatViewProps) {
                         {msg.deletedAt ? (
                           <Text fs="italic" c="dimmed">Message deleted</Text>
                         ) : msg.failed ? (
-                          <code style={{ display: 'block', padding: '4px 8px', borderRadius: 4, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>
+                          <code style={{ display: 'block', padding: '4px 8px', borderRadius: 12, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>
                             {t('unableToDecrypt')}
                           </code>
                         ) : (
                           <Stack gap="xs">
                             {msg.body?.replyTo && (
-                              <Card withBorder radius="sm" p="xs" style={{ borderLeft: '3px solid var(--mantine-color-blue-5)' }}>
+                              <Card withBorder radius="md" p="xs" style={{ borderLeft: '3px solid var(--mantine-color-blue-5)' }}>
                                 <Text size="xs" fw={700}>{msg.body.replyTo.senderName}</Text>
                                 <Text size="xs" c="dimmed" lineClamp={2}>{msg.body.replyTo.text}</Text>
                               </Card>
@@ -706,7 +706,7 @@ export function ChatView(props: ChatViewProps) {
                               </Group>
                             )}
                             {msg.body?.attachment && (
-                              <Card withBorder radius="sm" p="xs">
+                              <Card withBorder radius="md" p="xs">
                                 <Group justify="space-between" align="center">
                                   <div>
                                     <Text size="sm" fw={600}>{msg.body.attachment.name}</Text>
@@ -730,7 +730,7 @@ export function ChatView(props: ChatViewProps) {
                                     mt="sm"
                                     mah={260}
                                     fit="contain"
-                                    radius="sm"
+                                    radius="md"
                                     style={{ cursor: 'zoom-in' }}
                                     onClick={() => setImageViewer({ src: previews[msg.id], name: msg.body?.attachment?.name || t('preview') })}
                                   />
@@ -787,7 +787,7 @@ export function ChatView(props: ChatViewProps) {
           {/* Composer */}
           <Stack className={isMobile ? 'mobile-composer' : 'composer-bar'} gap={6} mt="auto">
             {replyTarget && (
-              <Card withBorder radius="sm" p="xs">
+              <Card withBorder radius="md" p="xs">
                 <Group justify="space-between" wrap="nowrap">
                   <div style={{ minWidth: 0 }}>
                     <Text size="xs" fw={700}>Reply to {replyTarget.body?.senderName ?? replyTarget.senderId}</Text>

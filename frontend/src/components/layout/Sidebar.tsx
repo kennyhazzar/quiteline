@@ -178,7 +178,7 @@ export function Sidebar(props: SidebarProps) {
       <Card
         className={!isMobile ? 'desktop-surface' : undefined}
         withBorder={!isMobile}
-        radius={isMobile ? 0 : 'sm'}
+        radius={isMobile ? 0 : 'lg'}
         p={isMobile ? 'xs' : 'md'}
         style={{ display: leftView === 'chat' ? undefined : 'none' }}
       >
@@ -221,7 +221,7 @@ export function Sidebar(props: SidebarProps) {
       <Card
         withBorder={!isMobile}
         className={!isMobile ? 'desktop-surface' : undefined}
-        radius={isMobile ? 'md' : 'sm'}
+        radius={isMobile ? 'lg' : 'md'}
         p={isMobile ? 'sm' : 'md'}
         style={{
           display: leftView === 'rooms' ? 'flex' : 'none',
@@ -581,7 +581,7 @@ function ProfilePanel(props: SidebarProps) {
     <Card
       withBorder={!isMobile}
       className={!isMobile ? 'desktop-surface' : undefined}
-      radius={isMobile ? 'md' : 'sm'}
+      radius={isMobile ? 'lg' : 'md'}
       p={isMobile ? 'sm' : 'md'}
       style={{
         display: 'block',
@@ -807,7 +807,7 @@ function ProfilePanel(props: SidebarProps) {
                 ) : (
                   <Text size="xs" c="dimmed">QR code is being generated...</Text>
                 )}
-                <code style={{ display: 'block', padding: '8px', borderRadius: 4, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>{totpSetup.secret}</code>
+                <code style={{ display: 'block', padding: '8px', borderRadius: 12, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>{totpSetup.secret}</code>
                 <TextInput
                   label="Code"
                   value={totpConfirmCode}
