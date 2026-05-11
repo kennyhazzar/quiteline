@@ -21,15 +21,20 @@ import {
   Title,
 } from '@mantine/core'
 import {
+  IconChevronLeft,
   IconCopy,
+  IconDeviceDesktop,
   IconDownload,
   IconKey,
   IconPlus,
   IconRefresh,
+  IconShieldLock,
+  IconUser,
   IconUserPlus,
+  IconUsers,
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type {
   AccountSession,
   AuthSession,
@@ -267,6 +272,7 @@ export function Sidebar(props: SidebarProps) {
 function ProfilePanel(props: SidebarProps) {
   const { t, locale } = useI18n()
   const [avatarViewerOpened, setAvatarViewerOpened] = useState(false)
+  const [profileSection, setProfileSection] = useState<'overview' | 'account' | 'friends' | 'security' | 'sessions'>('overview')
   const {
     session,
     identity,
@@ -326,6 +332,65 @@ function ProfilePanel(props: SidebarProps) {
         ? (locale === 'ru' ? 'Соединение' : 'Connecting')
         : t('offline'),
   }
+  const sectionCopy = {
+    back: locale === 'ru' ? 'Назад' : 'Back',
+    account: locale === 'ru' ? 'Аккаунт' : 'Account',
+    accountHint: locale === 'ru' ? 'Аватар и внешний вид профиля' : 'Avatar and profile appearance',
+    friends: t('friends'),
+    friendsHint: locale === 'ru' ? 'Код, заявки и приглашения' : 'Code, requests and invites',
+    security: locale === 'ru' ? 'Безопасность' : 'Security',
+    securityHint: locale === 'ru' ? 'Двухфакторная защита' : 'Two-factor protection',
+    sessions: t('sessions'),
+    sessionsHint: locale === 'ru' ? `${sessions.length} активных сессий` : `${sessions.length} active sessions`,
+  }
+  const sectionTitle = profileSection === 'account'
+    ? sectionCopy.account
+    : profileSection === 'friends'
+      ? sectionCopy.friends
+      : profileSection === 'security'
+        ? sectionCopy.security
+        : profileSection === 'sessions'
+          ? sectionCopy.sessions
+          : t('profile')
+
+  function SectionCard({
+    icon,
+    title,
+    description,
+    onClick,
+  }: {
+    icon: ReactNode
+    title: string
+    description: string
+    onClick: () => void
+  }) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        style={{
+          width: '100%',
+          border: '1px solid var(--mantine-color-default-border)',
+          borderRadius: 12,
+          padding: 12,
+          background: 'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
+          color: 'inherit',
+          textAlign: 'left',
+          cursor: 'pointer',
+        }}
+      >
+        <Group gap="sm" wrap="nowrap">
+          <ActionIcon variant="light" size="lg" radius="xl">
+            {icon}
+          </ActionIcon>
+          <div style={{ minWidth: 0 }}>
+            <Text fw={800} size="sm">{title}</Text>
+            <Text size="xs" c="dimmed" lineClamp={2}>{description}</Text>
+          </div>
+        </Group>
+      </button>
+    )
+  }
 
   return (
     <>
@@ -380,6 +445,48 @@ function ProfilePanel(props: SidebarProps) {
         </Badge>
       </Group>
 
+      {profileSection !== 'overview' && (
+        <Group gap="xs" mb="sm" wrap="nowrap">
+          <ActionIcon variant="subtle" onClick={() => setProfileSection('overview')} aria-label={sectionCopy.back}>
+            <IconChevronLeft size={18} />
+          </ActionIcon>
+          <Text fw={800}>{sectionTitle}</Text>
+        </Group>
+      )}
+
+      {profileSection === 'overview' && (
+        <Stack gap="xs" mt="sm">
+          <SectionCard
+            icon={<IconUser size={18} />}
+            title={sectionCopy.account}
+            description={sectionCopy.accountHint}
+            onClick={() => setProfileSection('account')}
+          />
+          <SectionCard
+            icon={<IconUsers size={18} />}
+            title={sectionCopy.friends}
+            description={sectionCopy.friendsHint}
+            onClick={() => setProfileSection('friends')}
+          />
+          <SectionCard
+            icon={<IconShieldLock size={18} />}
+            title={sectionCopy.security}
+            description={sectionCopy.securityHint}
+            onClick={() => setProfileSection('security')}
+          />
+          <SectionCard
+            icon={<IconDeviceDesktop size={18} />}
+            title={sectionCopy.sessions}
+            description={sectionCopy.sessionsHint}
+            onClick={() => setProfileSection('sessions')}
+          />
+          <Button color="red" variant="light" onClick={logout} mt="xs">
+            {t('logout')}
+          </Button>
+        </Stack>
+      )}
+
+      {profileSection === 'account' && (
       <FileInput
         label={t('avatar')}
         placeholder={t('avatarUpload')}
@@ -391,9 +498,10 @@ function ProfilePanel(props: SidebarProps) {
         clearable
         mb="sm"
       />
+      )}
 
-      <Divider my="sm" />
-
+      {profileSection === 'friends' && (
+      <>
       {/* Friends */}
       <Card withBorder radius="md" p="sm" mb="sm">
         <Group justify="space-between" gap="xs" wrap="nowrap">
@@ -492,9 +600,11 @@ function ProfilePanel(props: SidebarProps) {
           {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{t('noFriends')}</Text>}
         </Stack>
       </ScrollArea.Autosize>
+      </>
+      )}
 
-      <Divider my="sm" />
-
+      {profileSection === 'security' && (
+      <>
       {/* 2FA */}
       <Text fw={700} size="sm" mb="xs">Two-factor authentication</Text>
       <Stack gap="xs">
@@ -556,9 +666,11 @@ function ProfilePanel(props: SidebarProps) {
           </Stack>
         )}
       </Stack>
+      </>
+      )}
 
-      <Divider my="sm" />
-
+      {profileSection === 'sessions' && (
+      <>
       {/* Sessions */}
       <Group justify="space-between" align="center" mb="xs">
         <Text fw={700} size="sm">{t('sessions')}</Text>
@@ -633,6 +745,8 @@ function ProfilePanel(props: SidebarProps) {
           {t('logout')}
         </Button>
       </Stack>
+      </>
+      )}
     </Card>
     </>
   )
