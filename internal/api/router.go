@@ -63,6 +63,12 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("POST /v1/auth/login", rateLimitMiddleware(authLimiter, func(w http.ResponseWriter, r *http.Request) {
 		handleLogin(w, r, deps)
 	}))
+	mux.HandleFunc("POST /v1/auth/refresh", rateLimitMiddleware(authLimiter, func(w http.ResponseWriter, r *http.Request) {
+		handleRefresh(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
+		handleLogout(w, r, deps)
+	})
 	mux.HandleFunc("GET /v1/me", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		principal, err := deps.Auth.PrincipalFor(r.Context(), principalFromContext(r.Context()))
 		if err != nil {
@@ -326,6 +332,8 @@ type realtimeStateEvent struct {
 }
 
 const maxAvatarBytes int64 = 1024 * 1024
+const refreshCookieName = auth.RefreshCookieName
+const accessCookieName = auth.AccessCookieName
 
 func handleToken(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
@@ -358,7 +366,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	token, principal, err := deps.Auth.Register(r.Context(), req.Username, req.Password, req.DisplayName)
+	result, err := deps.Auth.Register(r.Context(), req.Username, req.Password, req.DisplayName)
 	if err != nil {
 		if err == auth.ErrUserExists {
 			writeError(w, http.StatusConflict, "user_exists")
@@ -367,6 +375,9 @@ func handleRegister(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusBadRequest, "invalid_registration")
 		return
 	}
+	token, principal := result.AccessToken, result.Principal
+	setAccessCookie(w, r, deps.Config, token, principal.Expires)
+	setRefreshCookie(w, r, deps.Config, result.RefreshToken)
 	updateSessionMetadata(r, deps, principal)
 	publishUserEvent(r.Context(), deps, principal.UserID, "sessions.changed", "", "")
 	notifyUser(deps, principal.UserID, notifications.EventSession, notifications.Payload{
@@ -385,7 +396,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusBadRequest, "invalid_json")
 		return
 	}
-	token, principal, err := deps.Auth.Login(r.Context(), req.Username, req.Password, req.TOTPCode)
+	result, err := deps.Auth.Login(r.Context(), req.Username, req.Password, req.TOTPCode)
 	if err != nil {
 		if err == auth.ErrTwoFactorRequired {
 			writeJSON(w, http.StatusAccepted, map[string]any{"twoFactorRequired": true})
@@ -394,6 +405,9 @@ func handleLogin(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials")
 		return
 	}
+	token, principal := result.AccessToken, result.Principal
+	setAccessCookie(w, r, deps.Config, token, principal.Expires)
+	setRefreshCookie(w, r, deps.Config, result.RefreshToken)
 	updateSessionMetadata(r, deps, principal)
 	publishUserEvent(r.Context(), deps, principal.UserID, "sessions.changed", "", "")
 	notifyUser(deps, principal.UserID, notifications.EventSession, notifications.Payload{
@@ -403,6 +417,39 @@ func handleLogin(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		URL:   "/profile",
 	})
 	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: token, TokenType: "Bearer", ExpiresAt: principal.Expires, Principal: principal})
+}
+
+func handleRefresh(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	cookie, err := r.Cookie(refreshCookieName)
+	if err != nil || strings.TrimSpace(cookie.Value) == "" {
+		clearAccessCookie(w, r, deps.Config)
+		clearRefreshCookie(w, r, deps.Config)
+		writeError(w, http.StatusUnauthorized, "refresh_required")
+		return
+	}
+	result, err := deps.Auth.Refresh(r.Context(), cookie.Value)
+	if err != nil {
+		clearAccessCookie(w, r, deps.Config)
+		clearRefreshCookie(w, r, deps.Config)
+		writeError(w, http.StatusUnauthorized, "refresh_failed")
+		return
+	}
+	setAccessCookie(w, r, deps.Config, result.AccessToken, result.Principal.Expires)
+	setRefreshCookie(w, r, deps.Config, result.RefreshToken)
+	updateSessionMetadata(r, deps, result.Principal)
+	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: result.AccessToken, TokenType: "Bearer", ExpiresAt: result.Principal.Expires, Principal: result.Principal})
+}
+
+func handleLogout(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	if cookie, err := r.Cookie(refreshCookieName); err == nil {
+		if principal, err := deps.Auth.PrincipalFromRefresh(r.Context(), cookie.Value); err == nil && principal.SessionID != "" {
+			_ = deps.Auth.RevokeSession(r.Context(), principal, principal.SessionID)
+			publishUserEvent(r.Context(), deps, principal.UserID, "session.revoked", "", principal.SessionID)
+		}
+	}
+	clearAccessCookie(w, r, deps.Config)
+	clearRefreshCookie(w, r, deps.Config)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func handleBeginTOTPSetup(w http.ResponseWriter, r *http.Request, deps Dependencies) {
@@ -1551,6 +1598,73 @@ func requireScope(deps Dependencies, scope string, next http.HandlerFunc) http.H
 func principalFromContext(ctx context.Context) auth.Principal {
 	principal, _ := ctx.Value(principalContextKey).(auth.Principal)
 	return principal
+}
+
+func setAccessCookie(w http.ResponseWriter, r *http.Request, cfg config.Config, value string, expiresUnix int64) {
+	if strings.TrimSpace(value) == "" || expiresUnix <= 0 {
+		return
+	}
+	expires := time.Unix(expiresUnix, 0).UTC()
+	maxAge := int(time.Until(expires).Seconds())
+	if maxAge <= 0 {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     accessCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   maxAge,
+		Expires:  expires,
+		HttpOnly: true,
+		Secure:   isSecureRequest(r, cfg),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearAccessCookie(w http.ResponseWriter, r *http.Request, cfg config.Config) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     accessCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   isSecureRequest(r, cfg),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func setRefreshCookie(w http.ResponseWriter, r *http.Request, cfg config.Config, value string) {
+	if strings.TrimSpace(value) == "" {
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   int(cfg.AuthRefreshTTL.Seconds()),
+		Expires:  time.Now().UTC().Add(cfg.AuthRefreshTTL),
+		HttpOnly: true,
+		Secure:   isSecureRequest(r, cfg),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func clearRefreshCookie(w http.ResponseWriter, r *http.Request, cfg config.Config) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   isSecureRequest(r, cfg),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func isSecureRequest(r *http.Request, cfg config.Config) bool {
+	return cfg.Production || r.TLS != nil || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
 }
 
 func corsMiddleware(cfg config.Config, next http.Handler) http.Handler {

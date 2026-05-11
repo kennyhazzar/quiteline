@@ -40,7 +40,6 @@ export function useWebSocket(opts: {
     const topics = [`user:${userID}`]
     if (roomID) topics.push(`room:${roomID}`)
     url.searchParams.set('topics', topics.join(','))
-    url.searchParams.set('token', session.accessToken)
     const ws = new WebSocket(url.toString())
     wsRef.current = ws
 

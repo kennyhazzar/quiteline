@@ -148,7 +148,7 @@ func NewMemorySessionStore() *MemorySessionStore {
 }
 
 func (s *MemorySessionStore) CreateSession(_ context.Context, session Session) (Session, error) {
-	if session.SessionID == "" || session.UserID == "" || session.ExpiresAt.IsZero() {
+	if session.SessionID == "" || session.UserID == "" || session.RefreshTokenHash == "" || session.ExpiresAt.IsZero() {
 		return Session{}, ErrInvalidCredentials
 	}
 	if session.CreatedAt.IsZero() {
@@ -223,4 +223,17 @@ func (s *MemorySessionStore) RevokeOtherSessions(_ context.Context, userID strin
 		}
 	}
 	return nil
+}
+
+func (s *MemorySessionStore) RotateRefreshToken(_ context.Context, sessionID string, oldHash string, newHash string, expiresAt time.Time) (Session, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[strings.TrimSpace(sessionID)]
+	if !ok || !session.RevokedAt.IsZero() || session.RefreshTokenHash != strings.TrimSpace(oldHash) {
+		return Session{}, ErrInvalidToken
+	}
+	session.RefreshTokenHash = strings.TrimSpace(newHash)
+	session.ExpiresAt = expiresAt
+	s.sessions[session.SessionID] = session
+	return session, nil
 }

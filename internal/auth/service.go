@@ -28,12 +28,15 @@ var (
 	ErrInvalidCredentials = errors.New("invalid credentials")
 	ErrInvalidToken       = errors.New("invalid token")
 	ErrTokenExpired       = errors.New("token expired")
+	ErrRefreshReuse       = errors.New("refresh token reuse")
 	ErrUserExists         = errors.New("user exists")
 	ErrUserNotFound       = errors.New("user not found")
 	ErrTwoFactorRequired  = errors.New("two factor required")
 )
 
 const maxPasswordBytes = 256
+const RefreshCookieName = "quietline_refresh"
+const AccessCookieName = "quietline_access"
 
 var dummyPasswordHash = []byte("$2a$10$7EqJtq98hPqEX7fNZaFWoOhiIUhO5lAVot6gM2VqK4lP0HpxUq1Eim")
 
@@ -99,17 +102,24 @@ type TOTPSetup struct {
 }
 
 type Session struct {
-	SessionID  string    `json:"sessionId"`
-	UserID     string    `json:"userId"`
-	Username   string    `json:"username"`
-	DeviceName string    `json:"deviceName,omitempty"`
-	UserAgent  string    `json:"userAgent,omitempty"`
-	IPAddress  string    `json:"ipAddress,omitempty"`
-	Location   string    `json:"location,omitempty"`
-	CreatedAt  time.Time `json:"createdAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
-	RevokedAt  time.Time `json:"revokedAt,omitempty"`
-	Current    bool      `json:"current,omitempty"`
+	SessionID        string    `json:"sessionId"`
+	UserID           string    `json:"userId"`
+	Username         string    `json:"username"`
+	RefreshTokenHash string    `json:"-"`
+	DeviceName       string    `json:"deviceName,omitempty"`
+	UserAgent        string    `json:"userAgent,omitempty"`
+	IPAddress        string    `json:"ipAddress,omitempty"`
+	Location         string    `json:"location,omitempty"`
+	CreatedAt        time.Time `json:"createdAt"`
+	ExpiresAt        time.Time `json:"expiresAt"`
+	RevokedAt        time.Time `json:"revokedAt,omitempty"`
+	Current          bool      `json:"current,omitempty"`
+}
+
+type AuthResult struct {
+	AccessToken  string
+	RefreshToken string
+	Principal    Principal
 }
 
 type SessionStore interface {
@@ -119,6 +129,7 @@ type SessionStore interface {
 	ListSessions(ctx context.Context, userID string) ([]Session, error)
 	RevokeSession(ctx context.Context, userID string, sessionID string) error
 	RevokeOtherSessions(ctx context.Context, userID string, keepSessionID string) error
+	RotateRefreshToken(ctx context.Context, sessionID string, oldHash string, newHash string, expiresAt time.Time) (Session, error)
 }
 
 func (s *Service) UpdateSessionMetadata(ctx context.Context, principal Principal, deviceName string, userAgent string, ipAddress string, location string) error {
@@ -131,6 +142,12 @@ func (s *Service) UpdateSessionMetadata(ctx context.Context, principal Principal
 func NewService(cfg config.Config, users UserStore) *Service {
 	if users == nil {
 		users = NewMemoryUserStore()
+	}
+	if cfg.AuthRefreshTTL <= 0 {
+		cfg.AuthRefreshTTL = 90 * 24 * time.Hour
+	}
+	if cfg.AuthTokenTTL <= 0 {
+		cfg.AuthTokenTTL = 2 * time.Hour
 	}
 	return &Service{cfg: cfg, users: users, sessions: NewMemorySessionStore()}
 }
@@ -167,19 +184,19 @@ func (s *Service) IssueToken(clientID, secret string) (string, Principal, error)
 	return token, Principal{ClientID: clientID, Scopes: claims.Scopes, Expires: claims.Expires}, nil
 }
 
-func (s *Service) Register(ctx context.Context, username, password, displayName string) (string, Principal, error) {
+func (s *Service) Register(ctx context.Context, username, password, displayName string) (AuthResult, error) {
 	username = normalizeUsername(username)
 	displayName = strings.TrimSpace(displayName)
 	if displayName == "" {
 		displayName = username
 	}
 	if username == "" || len(password) < 8 || len(password) > maxPasswordBytes {
-		return "", Principal{}, ErrInvalidCredentials
+		return AuthResult{}, ErrInvalidCredentials
 	}
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
-		return "", Principal{}, err
+		return AuthResult{}, err
 	}
 	user, err := s.users.CreateUser(ctx, User{
 		Username:     username,
@@ -187,7 +204,7 @@ func (s *Service) Register(ctx context.Context, username, password, displayName 
 		PasswordHash: string(hash),
 	})
 	if err != nil {
-		return "", Principal{}, err
+		return AuthResult{}, err
 	}
 	return s.issueUserToken(ctx, user)
 }
@@ -253,27 +270,85 @@ func (s *Service) PrincipalFor(ctx context.Context, principal Principal) (Princi
 	return next, nil
 }
 
-func (s *Service) Login(ctx context.Context, username, password string, totpCode string) (string, Principal, error) {
+func (s *Service) Login(ctx context.Context, username, password string, totpCode string) (AuthResult, error) {
 	user, err := s.users.GetUserByUsername(ctx, normalizeUsername(username))
 	if err != nil {
 		_ = bcrypt.CompareHashAndPassword(dummyPasswordHash, []byte(password))
-		return "", Principal{}, ErrInvalidCredentials
+		return AuthResult{}, ErrInvalidCredentials
 	}
 	if len(password) > maxPasswordBytes {
-		return "", Principal{}, ErrInvalidCredentials
+		return AuthResult{}, ErrInvalidCredentials
 	}
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
-		return "", Principal{}, ErrInvalidCredentials
+		return AuthResult{}, ErrInvalidCredentials
 	}
 	if user.TOTPEnabled {
 		if strings.TrimSpace(totpCode) == "" {
-			return "", Principal{}, ErrTwoFactorRequired
+			return AuthResult{}, ErrTwoFactorRequired
 		}
 		if !validateTOTP(user.TOTPSecret, totpCode, time.Now().UTC()) {
-			return "", Principal{}, ErrInvalidCredentials
+			return AuthResult{}, ErrInvalidCredentials
 		}
 	}
 	return s.issueUserToken(ctx, user)
+}
+
+func (s *Service) Refresh(ctx context.Context, refreshToken string) (AuthResult, error) {
+	sessionID, secret, ok := parseRefreshToken(refreshToken)
+	if !ok {
+		return AuthResult{}, ErrInvalidToken
+	}
+	session, err := s.sessions.GetSession(ctx, sessionID)
+	if err != nil || !session.RevokedAt.IsZero() {
+		return AuthResult{}, ErrInvalidToken
+	}
+	if !session.ExpiresAt.After(time.Now().UTC()) {
+		return AuthResult{}, ErrTokenExpired
+	}
+	oldHash := refreshTokenHash(secret)
+	if subtle.ConstantTimeCompare([]byte(oldHash), []byte(session.RefreshTokenHash)) != 1 {
+		_ = s.sessions.RevokeSession(ctx, session.UserID, session.SessionID)
+		return AuthResult{}, ErrRefreshReuse
+	}
+	user, err := s.users.GetUserByID(ctx, session.UserID)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	nextSecret, err := newRefreshSecret()
+	if err != nil {
+		return AuthResult{}, err
+	}
+	expiresAt := time.Now().UTC().Add(s.cfg.AuthRefreshTTL)
+	session, err = s.sessions.RotateRefreshToken(ctx, session.SessionID, oldHash, refreshTokenHash(nextSecret), expiresAt)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	accessToken, principal, err := s.issueAccessTokenForSession(user, session, time.Now().UTC())
+	if err != nil {
+		return AuthResult{}, err
+	}
+	return AuthResult{AccessToken: accessToken, RefreshToken: formatRefreshToken(session.SessionID, nextSecret), Principal: principal}, nil
+}
+
+func (s *Service) PrincipalFromRefresh(ctx context.Context, refreshToken string) (Principal, error) {
+	sessionID, secret, ok := parseRefreshToken(refreshToken)
+	if !ok {
+		return Principal{}, ErrInvalidToken
+	}
+	session, err := s.sessions.GetSession(ctx, sessionID)
+	if err != nil || !session.RevokedAt.IsZero() || !session.ExpiresAt.After(time.Now().UTC()) {
+		return Principal{}, ErrInvalidToken
+	}
+	if subtle.ConstantTimeCompare([]byte(refreshTokenHash(secret)), []byte(session.RefreshTokenHash)) != 1 {
+		return Principal{}, ErrInvalidToken
+	}
+	user, err := s.users.GetUserByID(ctx, session.UserID)
+	if err != nil {
+		return Principal{}, err
+	}
+	principal := userPrincipal(user, session.ExpiresAt.Unix())
+	principal.SessionID = session.SessionID
+	return principal, nil
 }
 
 func (s *Service) BeginTOTPSetup(ctx context.Context, principal Principal) (TOTPSetup, error) {
@@ -346,6 +421,11 @@ func (s *Service) AuthenticateRequest(r *http.Request) (Principal, error) {
 	}
 
 	token := bearerToken(r.Header.Get("Authorization"))
+	if token == "" {
+		if cookie, err := r.Cookie(AccessCookieName); err == nil {
+			token = strings.TrimSpace(cookie.Value)
+		}
+	}
 	// Token in query param is allowed only for WebSocket upgrades: browsers cannot
 	// set custom headers in the native WebSocket API.
 	if token == "" && strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
@@ -454,18 +534,35 @@ func (s *Service) sign(claims Claims) (string, error) {
 	return signed + "." + s.signature(signed), nil
 }
 
-func (s *Service) issueUserToken(ctx context.Context, user User) (string, Principal, error) {
+func (s *Service) issueUserToken(ctx context.Context, user User) (AuthResult, error) {
 	now := time.Now().UTC()
-	expires := now.Add(s.cfg.AuthTokenTTL)
+	refreshSecret, err := newRefreshSecret()
+	if err != nil {
+		return AuthResult{}, err
+	}
+	sessionExpires := now.Add(s.cfg.AuthRefreshTTL)
 	session, err := s.sessions.CreateSession(ctx, Session{
-		SessionID: newSessionID(),
-		UserID:    user.UserID,
-		Username:  user.Username,
-		CreatedAt: now,
-		ExpiresAt: expires,
+		SessionID:        newSessionID(),
+		UserID:           user.UserID,
+		Username:         user.Username,
+		RefreshTokenHash: refreshTokenHash(refreshSecret),
+		CreatedAt:        now,
+		ExpiresAt:        sessionExpires,
 	})
 	if err != nil {
-		return "", Principal{}, err
+		return AuthResult{}, err
+	}
+	token, principal, err := s.issueAccessTokenForSession(user, session, now)
+	if err != nil {
+		return AuthResult{}, err
+	}
+	return AuthResult{AccessToken: token, RefreshToken: formatRefreshToken(session.SessionID, refreshSecret), Principal: principal}, nil
+}
+
+func (s *Service) issueAccessTokenForSession(user User, session Session, now time.Time) (string, Principal, error) {
+	expires := now.Add(s.cfg.AuthTokenTTL)
+	if !session.ExpiresAt.IsZero() && session.ExpiresAt.Before(expires) {
+		expires = session.ExpiresAt
 	}
 	claims := Claims{
 		Subject:  user.UserID,
@@ -533,6 +630,30 @@ func newSessionID() string {
 		return hex.EncodeToString([]byte(time.Now().UTC().Format(time.RFC3339Nano)))
 	}
 	return hex.EncodeToString(bytes[:])
+}
+
+func newRefreshSecret() (string, error) {
+	var bytes [32]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes[:]), nil
+}
+
+func refreshTokenHash(secret string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(secret)))
+	return hex.EncodeToString(sum[:])
+}
+
+func formatRefreshToken(sessionID string, secret string) string {
+	return strings.TrimSpace(sessionID) + "." + strings.TrimSpace(secret)
+}
+
+func parseRefreshToken(value string) (string, string, bool) {
+	sessionID, secret, ok := strings.Cut(strings.TrimSpace(value), ".")
+	sessionID = strings.TrimSpace(sessionID)
+	secret = strings.TrimSpace(secret)
+	return sessionID, secret, ok && sessionID != "" && secret != ""
 }
 
 func newTOTPSecret() (string, error) {

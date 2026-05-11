@@ -58,6 +58,8 @@ services:
       NODE_ID: backend
       AUTH_ENABLED: ${AUTH_ENABLED}
       AUTH_SECRET: ${AUTH_SECRET}
+      AUTH_TOKEN_TTL: ${AUTH_TOKEN_TTL:-15m}
+      AUTH_REFRESH_TTL: ${AUTH_REFRESH_TTL:-2160h}
       API_KEYS: ${API_KEYS}
       POSTGRES_DSN: ${POSTGRES_DSN}
       BROKER: redis

@@ -155,6 +155,7 @@ export async function registerUser(input: {
   const res = await fetch(`${BASE}/v1/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(input),
   })
   return readJSON(res)
@@ -168,9 +169,30 @@ export async function loginUser(input: {
   const res = await fetch(`${BASE}/v1/auth/login`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(input),
   })
   return readJSON(res)
+}
+
+export async function refreshSession(): Promise<AuthSession> {
+  const res = await fetch(`${BASE}/v1/auth/refresh`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+  return readJSON(res)
+}
+
+export async function logoutSession(): Promise<void> {
+  const res = await fetch(`${BASE}/v1/auth/logout`, {
+    method: 'POST',
+    credentials: 'include',
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'logout_failed')
+  }
 }
 
 export function isTwoFactorChallenge(value: AuthSession | TwoFactorChallenge): value is TwoFactorChallenge {

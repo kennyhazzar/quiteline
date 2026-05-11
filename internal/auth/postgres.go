@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 	session_id TEXT PRIMARY KEY,
 	user_id TEXT NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
 	username TEXT NOT NULL,
+	refresh_token_hash TEXT NOT NULL DEFAULT '',
 	device_name TEXT NOT NULL DEFAULT '',
 	user_agent TEXT NOT NULL DEFAULT '',
 	ip_address TEXT NOT NULL DEFAULT '',
@@ -71,6 +72,7 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
 	revoked_at TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS auth_sessions_user_id_idx ON auth_sessions(user_id);
+ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS refresh_token_hash TEXT NOT NULL DEFAULT '';
 ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS device_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS user_agent TEXT NOT NULL DEFAULT '';
 ALTER TABLE auth_sessions ADD COLUMN IF NOT EXISTS ip_address TEXT NOT NULL DEFAULT '';
@@ -221,7 +223,7 @@ func (s *PostgresUserStore) UpdateUserTOTP(ctx context.Context, userID string, s
 }
 
 func (s *PostgresUserStore) CreateSession(ctx context.Context, session Session) (Session, error) {
-	if session.SessionID == "" || session.UserID == "" || session.ExpiresAt.IsZero() {
+	if session.SessionID == "" || session.UserID == "" || session.RefreshTokenHash == "" || session.ExpiresAt.IsZero() {
 		return Session{}, ErrInvalidCredentials
 	}
 	if session.CreatedAt.IsZero() {
@@ -229,11 +231,11 @@ func (s *PostgresUserStore) CreateSession(ctx context.Context, session Session) 
 	}
 	var result Session
 	err := s.pool.QueryRow(ctx, `
-		INSERT INTO auth_sessions (session_id, user_id, username, device_name, user_agent, ip_address, location, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		RETURNING session_id, user_id, username, device_name, user_agent, ip_address, location, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
-	`, session.SessionID, session.UserID, session.Username, session.DeviceName, session.UserAgent, session.IPAddress, session.Location, session.CreatedAt, session.ExpiresAt).
-		Scan(&result.SessionID, &result.UserID, &result.Username, &result.DeviceName, &result.UserAgent, &result.IPAddress, &result.Location, &result.CreatedAt, &result.ExpiresAt, &result.RevokedAt)
+		INSERT INTO auth_sessions (session_id, user_id, username, refresh_token_hash, device_name, user_agent, ip_address, location, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		RETURNING session_id, user_id, username, refresh_token_hash, device_name, user_agent, ip_address, location, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
+	`, session.SessionID, session.UserID, session.Username, session.RefreshTokenHash, session.DeviceName, session.UserAgent, session.IPAddress, session.Location, session.CreatedAt, session.ExpiresAt).
+		Scan(&result.SessionID, &result.UserID, &result.Username, &result.RefreshTokenHash, &result.DeviceName, &result.UserAgent, &result.IPAddress, &result.Location, &result.CreatedAt, &result.ExpiresAt, &result.RevokedAt)
 	return result, err
 }
 
@@ -249,10 +251,25 @@ func (s *PostgresUserStore) UpdateSessionMetadata(ctx context.Context, userID st
 func (s *PostgresUserStore) GetSession(ctx context.Context, sessionID string) (Session, error) {
 	var result Session
 	err := s.pool.QueryRow(ctx, `
-		SELECT session_id, user_id, username, device_name, user_agent, ip_address, location, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
+		SELECT session_id, user_id, username, refresh_token_hash, device_name, user_agent, ip_address, location, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
 		FROM auth_sessions WHERE session_id = $1
 	`, strings.TrimSpace(sessionID)).
-		Scan(&result.SessionID, &result.UserID, &result.Username, &result.DeviceName, &result.UserAgent, &result.IPAddress, &result.Location, &result.CreatedAt, &result.ExpiresAt, &result.RevokedAt)
+		Scan(&result.SessionID, &result.UserID, &result.Username, &result.RefreshTokenHash, &result.DeviceName, &result.UserAgent, &result.IPAddress, &result.Location, &result.CreatedAt, &result.ExpiresAt, &result.RevokedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Session{}, ErrInvalidToken
+	}
+	return result, err
+}
+
+func (s *PostgresUserStore) RotateRefreshToken(ctx context.Context, sessionID string, oldHash string, newHash string, expiresAt time.Time) (Session, error) {
+	var result Session
+	err := s.pool.QueryRow(ctx, `
+		UPDATE auth_sessions
+		SET refresh_token_hash = $3, expires_at = $4
+		WHERE session_id = $1 AND refresh_token_hash = $2 AND revoked_at IS NULL AND expires_at > now()
+		RETURNING session_id, user_id, username, refresh_token_hash, device_name, user_agent, ip_address, location, created_at, expires_at, COALESCE(revoked_at, '0001-01-01T00:00:00Z'::timestamptz)
+	`, strings.TrimSpace(sessionID), strings.TrimSpace(oldHash), strings.TrimSpace(newHash), expiresAt).
+		Scan(&result.SessionID, &result.UserID, &result.Username, &result.RefreshTokenHash, &result.DeviceName, &result.UserAgent, &result.IPAddress, &result.Location, &result.CreatedAt, &result.ExpiresAt, &result.RevokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrInvalidToken
 	}

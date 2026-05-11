@@ -19,7 +19,6 @@ import {
   LOCAL_DELETED_MESSAGES_KEY,
   readStoredJSON,
   ROOM_SECRETS_KEY,
-  SESSION_KEY,
 } from '@/types/messenger'
 
 export interface UseSessionReturn {
@@ -123,7 +122,6 @@ export function useSession(opts: {
   }
 
   const saveSession = useCallback((next: AuthSession, options: { reloadLocalState?: boolean } = { reloadLocalState: true }) => {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(next))
     authExpiredNotifiedRef.current = false
     setSession(next)
     // reloadLocalState is handled by callers who pass callbacks
@@ -133,7 +131,6 @@ export function useSession(opts: {
     setSession((prev) => {
       if (!prev) return prev
       const next = { ...prev, principal }
-      localStorage.setItem(SESSION_KEY, JSON.stringify(next))
       return next
     })
   }, [])
@@ -141,7 +138,6 @@ export function useSession(opts: {
   const handleAuthExpired = useCallback(() => {
     if (authExpiredNotifiedRef.current) return
     authExpiredNotifiedRef.current = true
-    localStorage.removeItem(SESSION_KEY)
     setSession(null)
     wsClose()
     queryClientClear()
@@ -243,7 +239,6 @@ export function useSession(opts: {
       }
       // Session save is handled by callers via onSessionReady
       authExpiredNotifiedRef.current = false
-      localStorage.setItem(SESSION_KEY, JSON.stringify(next))
       setSession(next)
       setColorScheme(next.principal.theme)
       setDisplayName(next.principal.username || username)
@@ -268,7 +263,6 @@ export function useSession(opts: {
 
   function logoutLocal() {
     sendRealtimePresenceOffline?.()
-    localStorage.removeItem(SESSION_KEY)
     setSession(null)
     wsClose()
     queryClientClear()

@@ -26,6 +26,7 @@ type Config struct {
 	AuthEnabled        bool
 	AuthIssuer         string
 	AuthTokenTTL       time.Duration
+	AuthRefreshTTL     time.Duration
 	AuthSecret         string
 	APIKeys            map[string]string
 	CORSAllowedOrigins []string
@@ -61,6 +62,7 @@ func Load() Config {
 		AuthEnabled:        boolEnv("AUTH_ENABLED", false),
 		AuthIssuer:         stringEnv("AUTH_ISSUER", "highload-ws-pubsub"),
 		AuthTokenTTL:       durationEnv("AUTH_TOKEN_TTL", 2*time.Hour),
+		AuthRefreshTTL:     durationEnv("AUTH_REFRESH_TTL", 90*24*time.Hour),
 		AuthSecret:         stringEnv("AUTH_SECRET", "local-dev-secret-change-me"),
 		APIKeys:            apiKeysEnv("API_KEYS", "frontend:dev-secret"),
 		CORSAllowedOrigins: csvEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:3001"),

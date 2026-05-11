@@ -46,7 +46,6 @@ export type CallState = 'idle' | 'calling' | 'ringing' | 'connected'
 export type AppView = 'chat' | 'rooms' | 'profile'
 
 export const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'
-export const SESSION_KEY = 'zk.session.v1'
 export const LOCAL_DELETED_MESSAGES_KEY = 'quietline.deletedMessages.v1'
 export const MAX_FILE_BYTES = 100 * 1024 * 1024
 export const QUICK_REACTIONS = ['👍', '❤️', '😂', '🔥', '✅']

@@ -43,16 +43,18 @@ func TestRevokeUserSessionRejectsToken(t *testing.T) {
 	t.Parallel()
 
 	service := NewService(config.Config{
-		AuthEnabled:  true,
-		AuthIssuer:   "test",
-		AuthTokenTTL: time.Hour,
-		AuthSecret:   "secret",
+		AuthEnabled:    true,
+		AuthIssuer:     "test",
+		AuthTokenTTL:   time.Hour,
+		AuthRefreshTTL: 24 * time.Hour,
+		AuthSecret:     "secret",
 	}, nil)
 
-	token, principal, err := service.Register(context.Background(), "alice", "password123", "Alice")
+	result, err := service.Register(context.Background(), "alice", "password123", "Alice")
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
+	token, principal := result.AccessToken, result.Principal
 	if principal.SessionID == "" {
 		t.Fatal("Register() returned empty session id")
 	}
@@ -61,6 +63,36 @@ func TestRevokeUserSessionRejectsToken(t *testing.T) {
 	}
 	if _, err := service.VerifyToken(context.Background(), token); err == nil {
 		t.Fatal("VerifyToken() error = nil, want revoked token rejected")
+	}
+}
+
+func TestRefreshRotatesToken(t *testing.T) {
+	t.Parallel()
+
+	service := NewService(config.Config{
+		AuthEnabled:    true,
+		AuthIssuer:     "test",
+		AuthTokenTTL:   time.Minute,
+		AuthRefreshTTL: 24 * time.Hour,
+		AuthSecret:     "secret",
+	}, nil)
+
+	result, err := service.Register(context.Background(), "alice", "password123", "Alice")
+	if err != nil {
+		t.Fatalf("Register() error = %v", err)
+	}
+	refreshed, err := service.Refresh(context.Background(), result.RefreshToken)
+	if err != nil {
+		t.Fatalf("Refresh() error = %v", err)
+	}
+	if refreshed.AccessToken == "" || refreshed.RefreshToken == "" {
+		t.Fatal("Refresh() returned empty tokens")
+	}
+	if refreshed.RefreshToken == result.RefreshToken {
+		t.Fatal("Refresh() did not rotate refresh token")
+	}
+	if _, err := service.Refresh(context.Background(), result.RefreshToken); err == nil {
+		t.Fatal("Refresh() reused old token without error")
 	}
 }
 

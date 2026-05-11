@@ -19,6 +19,8 @@ import {
   isTwoFactorChallenge,
   leaveRoom,
   loginUser,
+  logoutSession,
+  refreshSession,
   registerUser,
   revokeAccountSession,
   revokeOtherAccountSessions,
@@ -49,7 +51,6 @@ import {
   readStoredJSON,
   replaceAppURL,
   ROOM_SECRETS_KEY,
-  SESSION_KEY,
 } from '@/types/messenger'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useMessages } from '@/hooks/useMessages'
@@ -90,6 +91,7 @@ export function MessengerApp() {
 
   // ─── Auth & session state ──────────────────────────────────────────────────
   const [session, setSession] = useState<AuthSession | null>(null)
+  const [sessionBootstrapped, setSessionBootstrapped] = useState(false)
   const [identity, setIdentity] = useState<Identity | null>(null)
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login')
   const [username, setUsername] = useState('')
@@ -188,7 +190,6 @@ export function MessengerApp() {
   function handleAuthExpired() {
     if (authExpiredNotifiedRef.current) return
     authExpiredNotifiedRef.current = true
-    localStorage.removeItem(SESSION_KEY)
     setSession(null)
     clearAccountLocalState()
     const previousWS = wsRef.current
@@ -562,7 +563,6 @@ export function MessengerApp() {
     const topics = [`user:${userID}`]
     if (roomID) topics.push(`room:${roomID}`)
     url.searchParams.set('topics', topics.join(','))
-    url.searchParams.set('token', session.accessToken)
     setLiveStatus('connecting')
     const ws = new WebSocket(url.toString())
     wsRef.current = ws
@@ -792,7 +792,6 @@ export function MessengerApp() {
 
   // ─── Session helpers ──────────────────────────────────────────────────────
   function saveSession(next: AuthSession, options: { reloadLocalState?: boolean } = { reloadLocalState: true }) {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(next))
     authExpiredNotifiedRef.current = false
     setSession(next)
     if (options.reloadLocalState !== false) {
@@ -803,7 +802,6 @@ export function MessengerApp() {
   function updateSessionPrincipal(principal: AuthSession['principal']) {
     if (!session) return
     const next = { ...session, principal }
-    localStorage.setItem(SESSION_KEY, JSON.stringify(next))
     setSession(next)
   }
 
@@ -857,7 +855,6 @@ export function MessengerApp() {
     fetchCurrentPrincipal(target.accessToken)
       .then((principal) => {
         const next = { ...target, principal }
-        localStorage.setItem(SESSION_KEY, JSON.stringify(next))
         setSession((current) => current?.accessToken === target.accessToken ? next : current)
       })
       .catch(() => {
@@ -894,13 +891,14 @@ export function MessengerApp() {
     const linkedView =
       rawView ? appViewFromParam(rawView) : routeState.view ?? (linkedChatID ? 'chat' : 'rooms')
 
-    const savedSession = readStoredJSON<AuthSession>(SESSION_KEY)
-    if (savedSession) {
-      setSession(savedSession)
-      setColorScheme(savedSession.principal.theme)
-      setDisplayName(savedSession.principal.displayName || savedSession.principal.username)
-      loadAccountLocalState(savedSession)
-    }
+    refreshSession()
+      .then((restored) => {
+        saveSession(restored)
+        setColorScheme(restored.principal.theme)
+        setDisplayName(restored.principal.displayName || restored.principal.username)
+      })
+      .catch(() => undefined)
+      .finally(() => setSessionBootstrapped(true))
 
     if (invite) {
       setInviteText(invite)
@@ -918,6 +916,18 @@ export function MessengerApp() {
     urlStateReadyRef.current = true
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    if (!session) return
+    const refreshInMs = Math.max(30_000, session.expiresAt * 1000 - Date.now() - 60_000)
+    const timer = window.setTimeout(() => {
+      refreshSession()
+        .then((next) => saveSession(next, { reloadLocalState: false }))
+        .catch(() => handleAuthExpired())
+    }, refreshInMs)
+    return () => window.clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.expiresAt, session?.principal.sessionId])
 
   // ─── Auth mutation ────────────────────────────────────────────────────────
   const authMutation = useMutation({
@@ -962,7 +972,7 @@ export function MessengerApp() {
     authMutation.mutate()
   }
 
-  function logoutLocal() {
+  function logoutLocal(options: { remote?: boolean } = {}) {
     if (identity) {
       if (activeRoomID) {
         sendRealtimeRaw({
@@ -974,7 +984,9 @@ export function MessengerApp() {
         })
       }
     }
-    localStorage.removeItem(SESSION_KEY)
+    if (options.remote !== false) {
+      void logoutSession().catch(() => undefined)
+    }
     setSession(null)
     clearAccountLocalState()
     wsRef.current?.close()
@@ -1204,6 +1216,10 @@ export function MessengerApp() {
   }
 
   // ─── Render ───────────────────────────────────────────────────────────────
+  if (!sessionBootstrapped) {
+    return <LoadingPage isMobile={isMobile} onLogout={() => logoutLocal({ remote: false })} />
+  }
+
   if (!session) {
     return (
       <AuthPage
