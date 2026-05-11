@@ -326,10 +326,10 @@ function ProfileModal({ profileUser, setProfileUser, presence, identity, ownAvat
     <>
     <Modal opened={avatarViewerOpened} onClose={() => setAvatarViewerOpened(false)} title={profileUser.displayName} centered size="lg">
       <Stack align="center">
-        <Avatar src={avatarSrc} name={profileUser.displayName} radius="xl" size={160} color="blue" />
+        <Avatar src={avatarSrc} name={profileUser.displayName} radius="xl" size={220} color="blue" />
       </Stack>
     </Modal>
-    <Modal opened={Boolean(profileUser)} onClose={() => setProfileUser(null)} title={t('profileTitle')} centered>
+    <Modal opened={Boolean(profileUser) && !avatarViewerOpened} onClose={() => setProfileUser(null)} title={t('profileTitle')} centered>
       <Stack gap="sm">
         <Group align="center" wrap="nowrap">
           <Avatar
