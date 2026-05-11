@@ -263,7 +263,7 @@ export function Sidebar(props: SidebarProps) {
 }
 
 function ProfilePanel(props: SidebarProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const [avatarViewerOpened, setAvatarViewerOpened] = useState(false)
   const {
     session,
@@ -297,6 +297,15 @@ function ProfilePanel(props: SidebarProps) {
     logout,
     isMobile,
   } = props
+  const sessions = accountSessions.data?.sessions ?? []
+  const cleanSessionText = (value?: string) =>
+    (value || '').replaceAll(' В· ', ' - ').replaceAll(' · ', ' - ').replaceAll('Â·', '-').trim()
+  const sessionCopy = {
+    location: locale === 'ru' ? 'Локация' : 'Location',
+    created: locale === 'ru' ? 'Создана' : 'Created',
+    expires: locale === 'ru' ? 'Истекает' : 'Expires',
+    unknownLocation: locale === 'ru' ? 'Локация не определена' : 'Location unknown',
+  }
 
   return (
     <>
@@ -511,34 +520,57 @@ function ProfilePanel(props: SidebarProps) {
       <Divider my="sm" />
 
       {/* Sessions */}
-      <Text fw={700} size="sm" mb="xs">{t('sessions')}</Text>
-      <Stack gap="xs">
-        {(accountSessions.data?.sessions ?? []).map((item) => (
-          <Group key={item.sessionId} justify="space-between" gap="xs" wrap="nowrap">
-            <div style={{ minWidth: 0 }}>
-              <Text size="xs" fw={item.current ? 700 : 500} truncate>
-                {item.current ? `${t('currentSession')} · ${item.deviceName || t('sessionDevice')}` : item.deviceName || t('sessionDevice')}
-              </Text>
-              <Text size="xs" c="dimmed" truncate>
-                {[item.location, `${t('created')}: ${formatLastSeen(item.createdAt)}`].filter(Boolean).join(' · ')}
-              </Text>
-            </div>
-            <Button
-              size="xs"
-              variant="light"
-              color="red"
-              onClick={() => (revokeSessionMutation as UseMutationResult<unknown, Error, AccountSession>).mutate(item)}
-              loading={(revokeSessionMutation as UseMutationResult<unknown, Error, AccountSession>).isPending}
-            >
-              {item.current ? t('logout') : t('revoke')}
-            </Button>
-          </Group>
-        ))}
-        {(accountSessions.data?.sessions ?? []).length === 0 && (
-          <Text size="xs" c="dimmed">{t('noSessions')}</Text>
-        )}
-      </Stack>
-      <Group mt="sm" grow>
+      <Group justify="space-between" align="center" mb="xs">
+        <Text fw={700} size="sm">{t('sessions')}</Text>
+        <Badge variant="light" color="gray">{sessions.length}</Badge>
+      </Group>
+      <ScrollArea.Autosize mah={300} type="auto" offsetScrollbars>
+        <Stack gap="xs" pr="xs">
+          {sessions.map((item) => {
+            const deviceName = cleanSessionText(item.deviceName) || t('sessionDevice')
+            const location = cleanSessionText(item.location) || sessionCopy.unknownLocation
+            return (
+              <Box
+                key={item.sessionId}
+                p="xs"
+                style={{
+                  border: '1px solid var(--mantine-color-default-border)',
+                  borderRadius: 8,
+                  background: 'light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-6))',
+                }}
+              >
+                <Stack gap={6}>
+                  <Group justify="space-between" align="flex-start" wrap="nowrap">
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Group gap={6} wrap="nowrap">
+                        <Text size="sm" fw={700} lineClamp={2}>{deviceName}</Text>
+                        {item.current && <Badge size="xs" color="green" variant="light">{t('currentSession')}</Badge>}
+                      </Group>
+                      <Text size="xs" c="dimmed" lineClamp={1}>{sessionCopy.location}: {location}</Text>
+                      <Text size="xs" c="dimmed" lineClamp={1}>{sessionCopy.created}: {formatLastSeen(item.createdAt)}</Text>
+                    </div>
+                    <Button
+                      size="xs"
+                      variant={item.current ? 'subtle' : 'light'}
+                      color="red"
+                      onClick={() => (revokeSessionMutation as UseMutationResult<unknown, Error, AccountSession>).mutate(item)}
+                      loading={(revokeSessionMutation as UseMutationResult<unknown, Error, AccountSession>).isPending}
+                      style={{ flexShrink: 0 }}
+                    >
+                      {item.current ? t('logout') : t('revoke')}
+                    </Button>
+                  </Group>
+                  <Text size="xs" c="dimmed" lineClamp={1}>{sessionCopy.expires}: {formatLastSeen(item.expiresAt)}</Text>
+                </Stack>
+              </Box>
+            )
+          })}
+          {sessions.length === 0 && (
+            <Text size="xs" c="dimmed">{t('noSessions')}</Text>
+          )}
+        </Stack>
+      </ScrollArea.Autosize>
+      <Stack mt="sm" gap="xs">
         <Button
           variant="light"
           color="red"
@@ -554,7 +586,7 @@ function ProfilePanel(props: SidebarProps) {
         >
           {t('logout')}
         </Button>
-      </Group>
+      </Stack>
     </Card>
     </>
   )
