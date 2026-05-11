@@ -35,6 +35,9 @@ type Config struct {
 	S3Bucket           string
 	S3UseSSL           bool
 	MaxFileBytes       int64
+	VAPIDPublicKey     string
+	VAPIDPrivateKey    string
+	VAPIDSubject       string
 	Production         bool
 }
 
@@ -67,6 +70,9 @@ func Load() Config {
 		S3Bucket:           stringEnv("S3_BUCKET", "zk-messenger"),
 		S3UseSSL:           boolEnv("S3_USE_SSL", false),
 		MaxFileBytes:       int64(intEnv("MAX_FILE_BYTES", 100*1024*1024+4096)),
+		VAPIDPublicKey:     stringEnv("VAPID_PUBLIC_KEY", ""),
+		VAPIDPrivateKey:    stringEnv("VAPID_PRIVATE_KEY", ""),
+		VAPIDSubject:       stringEnv("VAPID_SUBJECT", "mailto:admin@example.com"),
 		Production:         boolEnv("PRODUCTION", false),
 	}
 }

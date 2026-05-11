@@ -19,6 +19,7 @@ import (
 	"highload-ws-pubsub/internal/files"
 	"highload-ws-pubsub/internal/message"
 	"highload-ws-pubsub/internal/metrics"
+	"highload-ws-pubsub/internal/notifications"
 	"highload-ws-pubsub/internal/ws"
 	"highload-ws-pubsub/internal/zk"
 
@@ -32,6 +33,7 @@ type Dependencies struct {
 	Metrics   *metrics.Registry
 	Logger    *slog.Logger
 	Auth      *auth.Service
+	Push      *notifications.Service
 	ZKStore   zk.Store
 	Files     files.Store
 	FileRooms *fileRegistry
@@ -98,6 +100,24 @@ func New(deps Dependencies) http.Handler {
 	}))
 	mux.HandleFunc("GET /v1/me/sessions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleListSessions(w, r, deps)
+	}))
+	mux.HandleFunc("GET /v1/me/push-public-key", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handlePushPublicKey(w, r, deps)
+	}))
+	mux.HandleFunc("GET /v1/me/push-subscriptions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleListPushSubscriptions(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/me/push-subscriptions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleSavePushSubscription(w, r, deps)
+	}))
+	mux.HandleFunc("PUT /v1/me/push-subscriptions/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleUpdatePushSubscription(w, r, deps)
+	}))
+	mux.HandleFunc("DELETE /v1/me/push-subscriptions/", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleDeletePushSubscription(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/me/push-test", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleTestPush(w, r, deps)
 	}))
 	mux.HandleFunc("DELETE /v1/me/sessions/others", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleRevokeOtherSessions(w, r, deps)
@@ -267,6 +287,17 @@ type inviteFriendRequest struct {
 	UserID string `json:"userId"`
 }
 
+type pushSubscriptionRequest struct {
+	Endpoint    string                    `json:"endpoint"`
+	Keys        pushSubscriptionKeys      `json:"keys"`
+	Preferences notifications.Preferences `json:"preferences"`
+}
+
+type pushSubscriptionKeys struct {
+	P256DH string `json:"p256dh"`
+	Auth   string `json:"auth"`
+}
+
 type encryptedMessageRequest struct {
 	SenderID   string `json:"senderId"`
 	Ciphertext string `json:"ciphertext"`
@@ -338,6 +369,12 @@ func handleRegister(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 	}
 	updateSessionMetadata(r, deps, principal)
 	publishUserEvent(r.Context(), deps, principal.UserID, "sessions.changed", "", "")
+	notifyUser(deps, principal.UserID, notifications.EventSession, notifications.Payload{
+		Type:  "session.created",
+		Title: "Quietline",
+		Body:  "New account session started.",
+		URL:   "/profile",
+	})
 	writeJSON(w, http.StatusCreated, tokenResponse{AccessToken: token, TokenType: "Bearer", ExpiresAt: principal.Expires, Principal: principal})
 }
 
@@ -359,6 +396,12 @@ func handleLogin(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 	}
 	updateSessionMetadata(r, deps, principal)
 	publishUserEvent(r.Context(), deps, principal.UserID, "sessions.changed", "", "")
+	notifyUser(deps, principal.UserID, notifications.EventSession, notifications.Payload{
+		Type:  "session.created",
+		Title: "Quietline",
+		Body:  "New account session started.",
+		URL:   "/profile",
+	})
 	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: token, TokenType: "Bearer", ExpiresAt: principal.Expires, Principal: principal})
 }
 
@@ -491,6 +534,112 @@ func handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request, deps Depe
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func handlePushPublicKey(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	enabled := deps.Push != nil && deps.Push.Enabled()
+	publicKey := ""
+	if enabled {
+		publicKey = deps.Push.PublicKey()
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled, "publicKey": publicKey})
+}
+
+func handleListPushSubscriptions(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	if deps.Push == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"subscriptions": []notifications.Subscription{}})
+		return
+	}
+	subs, err := deps.Push.Store().ListByUser(r.Context(), principalFromContext(r.Context()).UserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "push_list_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"subscriptions": subs})
+}
+
+func handleSavePushSubscription(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	if deps.Push == nil || !deps.Push.Enabled() {
+		writeError(w, http.StatusBadRequest, "push_not_configured")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req pushSubscriptionRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	sub, err := deps.Push.Store().Save(r.Context(), notifications.Subscription{
+		UserID:      principalFromContext(r.Context()).UserID,
+		Endpoint:    req.Endpoint,
+		P256DH:      req.Keys.P256DH,
+		Auth:        req.Keys.Auth,
+		UserAgent:   r.UserAgent(),
+		Preferences: req.Preferences,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "push_subscription_failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, sub)
+}
+
+func handleUpdatePushSubscription(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	if deps.Push == nil {
+		writeError(w, http.StatusBadRequest, "push_not_configured")
+		return
+	}
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/me/push-subscriptions/"), "/")
+	if id == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req struct {
+		Preferences notifications.Preferences `json:"preferences"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	sub, err := deps.Push.Store().UpdatePreferences(r.Context(), principalFromContext(r.Context()).UserID, id, req.Preferences)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	writeJSON(w, http.StatusOK, sub)
+}
+
+func handleDeletePushSubscription(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	if deps.Push == nil {
+		writeError(w, http.StatusBadRequest, "push_not_configured")
+		return
+	}
+	id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/me/push-subscriptions/"), "/")
+	if id == "" {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	if err := deps.Push.Store().Delete(r.Context(), principalFromContext(r.Context()).UserID, id); err != nil {
+		writeError(w, http.StatusNotFound, "not_found")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func handleTestPush(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	if deps.Push == nil || !deps.Push.Enabled() {
+		writeError(w, http.StatusBadRequest, "push_not_configured")
+		return
+	}
+	userID := principalFromContext(r.Context()).UserID
+	go deps.Push.NotifyUser(context.Background(), userID, notifications.EventSession, notifications.Payload{
+		Type:  "test",
+		Title: "Quietline",
+		Body:  "Push notifications are enabled.",
+		URL:   "/profile",
+	})
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func handleUserAvatar(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 	userID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/users/"), "/")
 	userID, tail, ok := strings.Cut(userID, "/")
@@ -565,6 +714,12 @@ func handleRequestFriend(w http.ResponseWriter, r *http.Request, deps Dependenci
 	}
 	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "friends.changed", "", "")
 	publishUserEvent(r.Context(), deps, targetID, "friends.changed", "", "")
+	notifyUser(deps, targetID, notifications.EventFriend, notifications.Payload{
+		Type:  "friend.request",
+		Title: "Quietline",
+		Body:  "New friend request.",
+		URL:   "/profile",
+	})
 	handleListFriends(w, r, deps)
 }
 
@@ -581,6 +736,14 @@ func handleRespondFriend(w http.ResponseWriter, r *http.Request, deps Dependenci
 	}
 	publishUserEvent(r.Context(), deps, principalFromContext(r.Context()).UserID, "friends.changed", "", "")
 	publishUserEvent(r.Context(), deps, friendID, "friends.changed", "", "")
+	if accept {
+		notifyUser(deps, friendID, notifications.EventFriend, notifications.Payload{
+			Type:  "friend.accepted",
+			Title: "Quietline",
+			Body:  "Friend request accepted.",
+			URL:   "/profile",
+		})
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -754,6 +917,12 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request, deps Dependencies)
 		return
 	}
 	publishRoomMembersEvent(r.Context(), deps, room.RoomID, "chats.changed")
+	notifyUser(deps, principalFromContext(r.Context()).UserID, notifications.EventChat, notifications.Payload{
+		Type:  "chat.created",
+		Title: "Quietline",
+		Body:  "Chat created.",
+		URL:   "/chats/" + room.RoomID,
+	})
 	writeJSON(w, http.StatusCreated, room)
 }
 
@@ -875,6 +1044,12 @@ func handleInviteFriendToRoom(w http.ResponseWriter, r *http.Request, deps Depen
 		return
 	}
 	publishRoomMembersEvent(r.Context(), deps, roomID, "chats.changed")
+	notifyUser(deps, friendID, notifications.EventChat, notifications.Payload{
+		Type:  "chat.invite",
+		Title: "Quietline",
+		Body:  "You were invited to a chat.",
+		URL:   "/chats/" + roomID,
+	})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -970,6 +1145,12 @@ func handleAppendEncryptedMessage(w http.ResponseWriter, r *http.Request, deps D
 		MessageID: msg.ID,
 		SenderID:  msg.SenderID,
 		At:        msg.CreatedAt.Format(time.RFC3339Nano),
+	})
+	notifyRoomMembers(deps, roomID, msg.SenderID, notifications.EventMessage, notifications.Payload{
+		Type:  "message.created",
+		Title: "Quietline",
+		Body:  "New message.",
+		URL:   "/chats/" + roomID,
 	})
 	deps.Metrics.MessagesPublished.Inc()
 	writeJSON(w, http.StatusAccepted, msg)
@@ -1161,6 +1342,30 @@ func publishStateEvent(ctx context.Context, deps Dependencies, topic string, eve
 	if err := deps.Broker.Publish(ctx, message.New(topic, payload, deps.Config.NodeID)); err != nil {
 		deps.Metrics.BrokerPublishErrors.Inc()
 		deps.Logger.Warn("publish realtime event failed", "topic", topic, "kind", event.Kind, "error", err)
+	}
+}
+
+func notifyUser(deps Dependencies, userID string, event notifications.EventType, payload notifications.Payload) {
+	if deps.Push == nil {
+		return
+	}
+	go deps.Push.NotifyUser(context.Background(), userID, event, payload)
+}
+
+func notifyRoomMembers(deps Dependencies, roomID string, exceptUserID string, event notifications.EventType, payload notifications.Payload) {
+	if deps.Push == nil {
+		return
+	}
+	members, err := deps.ZKStore.ListRoomMembers(context.Background(), roomID)
+	if err != nil {
+		deps.Logger.Warn("list room members for push failed", "room", roomID, "error", err)
+		return
+	}
+	for _, member := range members {
+		if member == exceptUserID {
+			continue
+		}
+		notifyUser(deps, member, event, payload)
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"highload-ws-pubsub/internal/config"
 	"highload-ws-pubsub/internal/files"
 	"highload-ws-pubsub/internal/metrics"
+	"highload-ws-pubsub/internal/notifications"
 	"highload-ws-pubsub/internal/ws"
 	"highload-ws-pubsub/internal/zk"
 )
@@ -37,6 +38,7 @@ func main() {
 	var zkStore zk.Store
 	var userStore auth.UserStore
 	var sessionStore auth.SessionStore
+	var pushStore notifications.Store
 	if cfg.PostgresDSN != "" {
 		pgStore, err := zk.NewPostgresStore(ctx, cfg.PostgresDSN)
 		if err != nil {
@@ -53,16 +55,25 @@ func main() {
 		defer pgUsers.Close()
 		userStore = pgUsers
 		sessionStore = pgUsers
+		pgPush, err := notifications.NewPostgresStore(ctx, cfg.PostgresDSN)
+		if err != nil {
+			logger.Error("failed to connect to postgres push store", "error", err)
+			os.Exit(1)
+		}
+		defer pgPush.Close()
+		pushStore = pgPush
 		logger.Info("using postgres store")
 	} else {
 		zkStore = zk.NewMemoryStore()
 		memUsers := auth.NewMemoryUserStore()
 		userStore = memUsers
 		sessionStore = auth.NewMemorySessionStore()
+		pushStore = notifications.NewMemoryStore()
 		logger.Info("using memory store")
 	}
 	authService := auth.NewService(cfg, userStore)
 	authService.SetSessionStore(sessionStore)
+	pushService := notifications.NewService(cfg, pushStore, logger)
 	fileStore, err := files.NewS3Store(ctx, cfg)
 	if err != nil {
 		logger.Error("failed to create s3 file store", "error", err)
@@ -83,6 +94,7 @@ func main() {
 		Metrics: registry,
 		Logger:  logger,
 		Auth:    authService,
+		Push:    pushService,
 		ZKStore: zkStore,
 		Files:   fileStore,
 	})

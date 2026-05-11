@@ -90,6 +90,27 @@ export interface MessageReaction {
   count: number
 }
 
+export interface PushPreferences {
+  messages: boolean
+  chats: boolean
+  sessions: boolean
+  friends: boolean
+}
+
+export interface PushSubscriptionRecord {
+  id: string
+  endpoint: string
+  userAgent?: string
+  preferences: PushPreferences
+  createdAt: string
+  lastUsedAt?: string
+}
+
+export interface PushPublicKey {
+  enabled: boolean
+  publicKey: string
+}
+
 export interface MessageEnvelope {
   id: string
   topic: string
@@ -253,6 +274,79 @@ export async function revokeOtherAccountSessions(token: string): Promise<void> {
     if (res.status === 401) throw new AuthError()
     const err = await res.json().catch(() => ({ error: 'unknown_error' }))
     throw new Error((err as { error?: string }).error ?? 'revoke_failed')
+  }
+}
+
+export async function fetchPushPublicKey(token: string): Promise<PushPublicKey> {
+  const res = await fetch(`${BASE}/v1/me/push-public-key`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function fetchPushSubscriptions(token: string): Promise<{ subscriptions: PushSubscriptionRecord[] }> {
+  const res = await fetch(`${BASE}/v1/me/push-subscriptions`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function savePushSubscription(input: {
+  token: string
+  endpoint: string
+  keys: { p256dh: string; auth: string }
+  preferences: PushPreferences
+}): Promise<PushSubscriptionRecord> {
+  const res = await fetch(`${BASE}/v1/me/push-subscriptions`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({
+      endpoint: input.endpoint,
+      keys: input.keys,
+      preferences: input.preferences,
+    }),
+  })
+  return readJSON(res)
+}
+
+export async function updatePushSubscription(input: {
+  token: string
+  id: string
+  preferences: PushPreferences
+}): Promise<PushSubscriptionRecord> {
+  const res = await fetch(`${BASE}/v1/me/push-subscriptions/${encodeURIComponent(input.id)}`, {
+    method: 'PUT',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ preferences: input.preferences }),
+  })
+  return readJSON(res)
+}
+
+export async function deletePushSubscription(input: {
+  token: string
+  id: string
+}): Promise<void> {
+  const res = await fetch(`${BASE}/v1/me/push-subscriptions/${encodeURIComponent(input.id)}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${input.token}` },
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'push_delete_failed')
+  }
+}
+
+export async function sendTestPush(token: string): Promise<void> {
+  const res = await fetch(`${BASE}/v1/me/push-test`, {
+    method: 'POST',
+    headers: authHeaders(token),
+    body: JSON.stringify({}),
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new AuthError()
+    const err = await res.json().catch(() => ({ error: 'unknown_error' }))
+    throw new Error((err as { error?: string }).error ?? 'push_test_failed')
   }
 }
 

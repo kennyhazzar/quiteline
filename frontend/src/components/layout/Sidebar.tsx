@@ -16,16 +16,19 @@ import {
   ScrollArea,
   SegmentedControl,
   Stack,
+  Switch,
   Text,
   TextInput,
   Title,
 } from '@mantine/core'
 import {
+  IconBell,
   IconChevronLeft,
   IconCopy,
   IconDeviceDesktop,
   IconDownload,
   IconKey,
+  IconMessageCircle,
   IconPlus,
   IconRefresh,
   IconShieldLock,
@@ -34,13 +37,25 @@ import {
   IconUsers,
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
-import { useState, type ReactNode } from 'react'
+import { notifications } from '@mantine/notifications'
+import { useEffect, useState, type ReactNode } from 'react'
 import type {
   AccountSession,
   AuthSession,
   Friend,
   Identity,
   Room,
+} from '@/lib/api'
+import {
+  deletePushSubscription,
+  fetchPushPublicKey,
+  fetchPushSubscriptions,
+  savePushSubscription,
+  sendTestPush,
+  updatePushSubscription,
+  type PushPreferences,
+  type PushPublicKey,
+  type PushSubscriptionRecord,
 } from '@/lib/api'
 import { useI18n } from '@/lib/i18n'
 import type { AppView, DecryptedMessage } from '@/types/messenger'
@@ -112,7 +127,7 @@ interface SidebarProps {
 }
 
 export function Sidebar(props: SidebarProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const {
     isMobile,
     isTablet,
@@ -236,32 +251,66 @@ export function Sidebar(props: SidebarProps) {
           onChange={(event) => setRoomSearch(event.currentTarget.value)}
         />
         <ScrollArea type="auto" offsetScrollbars style={{ flex: 1, minHeight: 0 }}>
-          <Stack gap="xs" pr="xs">
+          <Stack gap="sm" pr="xs">
             {filteredRooms.map((room) => {
+              const isActive = activeRoomID === room.roomId
+              const lastActivity = room.lastMessageAt || room.createdAt
               return (
-                <Group key={room.roomId} gap={6} wrap="nowrap">
-                  <Button
-                    variant={activeRoomID === room.roomId ? 'filled' : 'light'}
-                    justify="space-between"
+                <button
+                  key={room.roomId}
+                  type="button"
+                  aria-label={room.name}
+                  className="chat-list-card"
+                  data-active={isActive ? 'true' : 'false'}
+                  style={{
+                    width: '100%',
+                    border: isActive ? '1px solid var(--mantine-color-blue-5)' : '1px solid var(--mantine-color-default-border)',
+                    borderRadius: 14,
+                    padding: 10,
+                    background: isActive
+                      ? 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.18))'
+                      : 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+                    color: 'inherit',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    boxShadow: isActive ? '0 0 0 1px rgba(34, 139, 230, 0.16)' : undefined,
+                  }}
                     onClick={() => selectRoom(room)}
-                    style={{ flex: 1, minWidth: 0 }}
-                    styles={{ label: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }}
-                  >
-                    <Group gap={6} wrap="nowrap" style={{ minWidth: 0, width: '100%' }}>
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {room.name}
-                      </span>
+                >
+                  <Group gap="sm" wrap="nowrap">
+                    <Avatar radius="xl" size={42} color={isActive ? 'blue' : 'gray'}>
+                      <IconMessageCircle size={20} />
+                    </Avatar>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Group justify="space-between" gap="xs" wrap="nowrap">
+                        <Text fw={800} size="sm" truncate>{room.name}</Text>
+                        <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+                          {new Date(lastActivity).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}
+                        </Text>
+                      </Group>
+                      <Group justify="space-between" gap="xs" wrap="nowrap" mt={2}>
+                        <Text size="xs" c="dimmed" truncate>
+                          {locale === 'ru' ? 'Открыть чат' : 'Open chat'}
+                        </Text>
                       {Boolean(room.unreadCount) && (
-                        <Badge size="xs" color="red" variant="filled" style={{ flexShrink: 0 }}>
+                        <Badge size="sm" color="red" variant="filled" style={{ flexShrink: 0 }}>
                           {room.unreadCount}
                         </Badge>
                       )}
-                    </Group>
-                  </Button>
-                </Group>
+                      </Group>
+                    </div>
+                  </Group>
+                </button>
               )
             })}
-            {filteredRooms.length === 0 && <Text size="sm" c="dimmed">{t('noRooms')}</Text>}
+            {filteredRooms.length === 0 && (
+              <Stack align="center" py="xl" gap="xs">
+                <Avatar radius="xl" color="gray" variant="light">
+                  <IconMessageCircle size={20} />
+                </Avatar>
+                <Text size="sm" c="dimmed" ta="center">{t('noRooms')}</Text>
+              </Stack>
+            )}
           </Stack>
         </ScrollArea>
       </Card>
@@ -272,7 +321,11 @@ export function Sidebar(props: SidebarProps) {
 function ProfilePanel(props: SidebarProps) {
   const { t, locale } = useI18n()
   const [avatarViewerOpened, setAvatarViewerOpened] = useState(false)
-  const [profileSection, setProfileSection] = useState<'overview' | 'account' | 'friends' | 'security' | 'sessions'>('overview')
+  const [profileSection, setProfileSection] = useState<'overview' | 'account' | 'friends' | 'security' | 'notifications' | 'sessions'>('overview')
+  const [pushInfo, setPushInfo] = useState<PushPublicKey | null>(null)
+  const [pushSubscriptions, setPushSubscriptions] = useState<PushSubscriptionRecord[]>([])
+  const [pushLoading, setPushLoading] = useState(false)
+  const [pushPrefs, setPushPrefs] = useState<PushPreferences>({ messages: true, chats: true, sessions: true, friends: true })
   const {
     session,
     identity,
@@ -340,6 +393,8 @@ function ProfilePanel(props: SidebarProps) {
     friendsHint: locale === 'ru' ? 'Код, заявки и приглашения' : 'Code, requests and invites',
     security: locale === 'ru' ? 'Безопасность' : 'Security',
     securityHint: locale === 'ru' ? 'Двухфакторная защита' : 'Two-factor protection',
+    notifications: locale === 'ru' ? 'Уведомления' : 'Notifications',
+    notificationsHint: locale === 'ru' ? 'Web Push для событий вне вкладки' : 'Web Push for events outside the tab',
     sessions: t('sessions'),
     sessionsHint: locale === 'ru' ? `${sessions.length} активных сессий` : `${sessions.length} active sessions`,
   }
@@ -349,9 +404,105 @@ function ProfilePanel(props: SidebarProps) {
       ? sectionCopy.friends
       : profileSection === 'security'
         ? sectionCopy.security
-        : profileSection === 'sessions'
-          ? sectionCopy.sessions
-          : t('profile')
+        : profileSection === 'notifications'
+          ? sectionCopy.notifications
+          : profileSection === 'sessions'
+            ? sectionCopy.sessions
+            : t('profile')
+
+  const currentPushSubscription = pushSubscriptions[0] ?? null
+  const pushPermission = typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+
+  useEffect(() => {
+    if (profileSection !== 'notifications') return
+    let cancelled = false
+    setPushLoading(true)
+    Promise.all([
+      fetchPushPublicKey(session.accessToken),
+      fetchPushSubscriptions(session.accessToken),
+    ])
+      .then(([info, subs]) => {
+        if (cancelled) return
+        setPushInfo(info)
+        setPushSubscriptions(subs.subscriptions ?? [])
+        if (subs.subscriptions?.[0]?.preferences) setPushPrefs(subs.subscriptions[0].preferences)
+      })
+      .catch((err: Error) => notifications.show({ title: sectionCopy.notifications, message: err.message, color: 'red' }))
+      .finally(() => {
+        if (!cancelled) setPushLoading(false)
+      })
+    return () => { cancelled = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profileSection, session.accessToken])
+
+  async function enablePushNotifications() {
+    if (!pushInfo?.enabled || !pushInfo.publicKey) {
+      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Push не настроен на сервере.' : 'Push is not configured on the server.', color: 'yellow' })
+      return
+    }
+    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Этот браузер не поддерживает Web Push.' : 'This browser does not support Web Push.', color: 'yellow' })
+      return
+    }
+    setPushLoading(true)
+    try {
+      const permission = await Notification.requestPermission()
+      if (permission !== 'granted') throw new Error(locale === 'ru' ? 'Разрешение на уведомления не выдано.' : 'Notification permission was not granted.')
+      const registration = await navigator.serviceWorker.register('/sw.js')
+      const existing = await registration.pushManager.getSubscription()
+      const browserSub = existing ?? await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(pushInfo.publicKey),
+      })
+      const json = browserSub.toJSON()
+      const saved = await savePushSubscription({
+        token: session.accessToken,
+        endpoint: json.endpoint ?? '',
+        keys: {
+          p256dh: json.keys?.p256dh ?? '',
+          auth: json.keys?.auth ?? '',
+        },
+        preferences: pushPrefs,
+      })
+      setPushSubscriptions([saved])
+      setPushPrefs(saved.preferences)
+      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Уведомления включены.' : 'Notifications enabled.', color: 'green' })
+    } catch (err) {
+      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? err.message : 'push_failed', color: 'red' })
+    } finally {
+      setPushLoading(false)
+    }
+  }
+
+  async function disablePushNotifications() {
+    if (!currentPushSubscription) return
+    setPushLoading(true)
+    try {
+      if ('serviceWorker' in navigator) {
+        const registration = await navigator.serviceWorker.getRegistration('/sw.js')
+        const browserSub = await registration?.pushManager.getSubscription()
+        await browserSub?.unsubscribe()
+      }
+      await deletePushSubscription({ token: session.accessToken, id: currentPushSubscription.id })
+      setPushSubscriptions([])
+      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Уведомления выключены.' : 'Notifications disabled.', color: 'green' })
+    } catch (err) {
+      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? err.message : 'push_disable_failed', color: 'red' })
+    } finally {
+      setPushLoading(false)
+    }
+  }
+
+  async function updatePushPrefs(next: PushPreferences) {
+    setPushPrefs(next)
+    if (!currentPushSubscription) return
+    try {
+      const saved = await updatePushSubscription({ token: session.accessToken, id: currentPushSubscription.id, preferences: next })
+      setPushSubscriptions([saved])
+    } catch (err) {
+      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? err.message : 'push_update_failed', color: 'red' })
+    }
+  }
 
   function SectionCard({
     icon,
@@ -473,6 +624,12 @@ function ProfilePanel(props: SidebarProps) {
             title={sectionCopy.security}
             description={sectionCopy.securityHint}
             onClick={() => setProfileSection('security')}
+          />
+          <SectionCard
+            icon={<IconBell size={18} />}
+            title={sectionCopy.notifications}
+            description={sectionCopy.notificationsHint}
+            onClick={() => setProfileSection('notifications')}
           />
           <SectionCard
             icon={<IconDeviceDesktop size={18} />}
@@ -669,6 +826,101 @@ function ProfilePanel(props: SidebarProps) {
       </>
       )}
 
+      {profileSection === 'notifications' && (
+      <Stack gap="sm">
+        <Card withBorder radius="md" p="sm">
+          <Stack gap="xs">
+            <Group justify="space-between" wrap="nowrap">
+              <div style={{ minWidth: 0 }}>
+                <Text fw={800}>{sectionCopy.notifications}</Text>
+                <Text size="xs" c="dimmed">
+                  {locale === 'ru'
+                    ? 'Quietline отправляет только технические события без текста сообщений.'
+                    : 'Quietline sends only technical events without message content.'}
+                </Text>
+              </div>
+              <Badge color={currentPushSubscription ? 'green' : pushPermission === 'denied' ? 'red' : 'gray'} variant="light">
+                {currentPushSubscription
+                  ? (locale === 'ru' ? 'Включены' : 'Enabled')
+                  : pushPermission === 'denied'
+                    ? (locale === 'ru' ? 'Запрещены' : 'Blocked')
+                    : (locale === 'ru' ? 'Выключены' : 'Off')}
+              </Badge>
+            </Group>
+            {!pushInfo?.enabled && (
+              <Text size="xs" c="yellow">
+                {locale === 'ru'
+                  ? 'На сервере не заданы VAPID ключи, поэтому Web Push пока недоступен.'
+                  : 'VAPID keys are not configured on the server, so Web Push is unavailable.'}
+              </Text>
+            )}
+          </Stack>
+        </Card>
+
+        <Card withBorder radius="md" p="sm">
+          <Stack gap={6}>
+            <Text fw={800} size="sm">{locale === 'ru' ? 'Как включить' : 'How to enable'}</Text>
+            {(locale === 'ru'
+              ? [
+                  '1. Нажмите кнопку включения ниже.',
+                  '2. Разрешите уведомления в системном окне браузера.',
+                  '3. На iPhone добавьте сайт на экран Домой и откройте Quietline оттуда.',
+                  '4. Отправьте тестовое уведомление, чтобы проверить устройство.',
+                ]
+              : [
+                  '1. Press the enable button below.',
+                  '2. Allow notifications in the browser permission prompt.',
+                  '3. On iPhone, add the site to Home Screen and open Quietline from there.',
+                  '4. Send a test notification to verify this device.',
+                ]).map((line) => (
+                <Text key={line} size="xs" c="dimmed">{line}</Text>
+              ))}
+          </Stack>
+        </Card>
+
+        <Stack gap="xs">
+          <Switch
+            label={locale === 'ru' ? 'Новые сообщения' : 'New messages'}
+            checked={pushPrefs.messages}
+            onChange={(event) => void updatePushPrefs({ ...pushPrefs, messages: event.currentTarget.checked })}
+          />
+          <Switch
+            label={locale === 'ru' ? 'Чаты и приглашения' : 'Chats and invitations'}
+            checked={pushPrefs.chats}
+            onChange={(event) => void updatePushPrefs({ ...pushPrefs, chats: event.currentTarget.checked })}
+          />
+          <Switch
+            label={locale === 'ru' ? 'Сессии аккаунта' : 'Account sessions'}
+            checked={pushPrefs.sessions}
+            onChange={(event) => void updatePushPrefs({ ...pushPrefs, sessions: event.currentTarget.checked })}
+          />
+          <Switch
+            label={locale === 'ru' ? 'Друзья' : 'Friends'}
+            checked={pushPrefs.friends}
+            onChange={(event) => void updatePushPrefs({ ...pushPrefs, friends: event.currentTarget.checked })}
+          />
+        </Stack>
+
+        <Button
+          variant={currentPushSubscription ? 'light' : 'filled'}
+          onClick={currentPushSubscription ? disablePushNotifications : enablePushNotifications}
+          loading={pushLoading}
+          disabled={!pushInfo?.enabled && !currentPushSubscription}
+        >
+          {currentPushSubscription
+            ? (locale === 'ru' ? 'Выключить на этом устройстве' : 'Disable on this device')
+            : (locale === 'ru' ? 'Включить уведомления' : 'Enable notifications')}
+        </Button>
+        <Button
+          variant="light"
+          onClick={() => sendTestPush(session.accessToken).catch((err: Error) => notifications.show({ title: sectionCopy.notifications, message: err.message, color: 'red' }))}
+          disabled={!currentPushSubscription}
+        >
+          {locale === 'ru' ? 'Отправить тест' : 'Send test'}
+        </Button>
+      </Stack>
+      )}
+
       {profileSection === 'sessions' && (
       <>
       {/* Sessions */}
@@ -750,4 +1002,13 @@ function ProfilePanel(props: SidebarProps) {
     </Card>
     </>
   )
+}
+
+function urlBase64ToUint8Array(value: string) {
+  const padding = '='.repeat((4 - value.length % 4) % 4)
+  const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/')
+  const raw = window.atob(base64)
+  const output = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i += 1) output[i] = raw.charCodeAt(i)
+  return output
 }
