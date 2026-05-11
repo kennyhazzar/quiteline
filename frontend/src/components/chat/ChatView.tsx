@@ -365,19 +365,29 @@ export function ChatView(props: ChatViewProps) {
       size="lg"
       fullScreen={isMobile}
       scrollAreaComponent={ScrollArea.Autosize}
+      styles={{
+        content: isMobile ? { maxWidth: '100dvw', overflowX: 'hidden' } : undefined,
+        body: isMobile ? { maxWidth: '100dvw', overflowX: 'hidden', paddingInline: 16 } : undefined,
+      }}
     >
-      <Stack gap="xs">
+      <Stack gap="xs" style={{ width: '100%', minWidth: 0, maxWidth: '100%', overflowX: 'hidden' }}>
         {attachmentMessages.map((msg) => {
           const attachment = msg.body?.attachment
           if (!attachment) return null
           return (
-            <Card key={msg.id} withBorder radius="md" p="sm" style={{ maxWidth: '100%', overflow: 'hidden' }}>
-              <Stack gap="sm">
-                <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
-                  <ActionIcon variant="light" radius="xl" size="lg">
+            <Card
+              key={msg.id}
+              withBorder
+              radius="md"
+              p="sm"
+              style={{ width: '100%', minWidth: 0, maxWidth: '100%', boxSizing: 'border-box', overflow: 'hidden' }}
+            >
+              <Stack gap="sm" style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
+                <Group gap="sm" wrap="nowrap" style={{ width: '100%', minWidth: 0, overflow: 'hidden' }}>
+                  <ActionIcon variant="light" radius="xl" size="lg" style={{ flexShrink: 0 }}>
                     <IconPaperclip size={18} />
                   </ActionIcon>
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, flex: 1, maxWidth: '100%', overflow: 'hidden' }}>
                     <Text fw={700} size="sm" truncate>{attachment.name}</Text>
                     <Text size="xs" c="dimmed" truncate>
                       {(attachment.type || t('file'))} - {formatBytes(attachment.size)} - {msg.body?.senderName || t('unknownUser')}
@@ -385,14 +395,27 @@ export function ChatView(props: ChatViewProps) {
                     <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleString()}</Text>
                   </div>
                 </Group>
-                <Group gap={6} wrap={isMobile ? 'wrap' : 'nowrap'}>
+                <Group gap={6} wrap={isMobile ? 'wrap' : 'nowrap'} style={{ width: '100%', minWidth: 0 }}>
                   {attachment.type.startsWith('image/') && (
-                    <Button size="xs" variant="light" fullWidth={isMobile} onClick={() => openAttachmentPreview(msg)}>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      fullWidth={isMobile}
+                      onClick={() => openAttachmentPreview(msg)}
+                      style={{ minWidth: 0 }}
+                    >
                       {t('preview')}
                     </Button>
                   )}
                   {isMobile ? (
-                    <Button size="xs" variant="light" fullWidth leftSection={<IconDownload size={15} />} onClick={() => downloadAttachment(msg)}>
+                    <Button
+                      size="xs"
+                      variant="light"
+                      fullWidth
+                      leftSection={<IconDownload size={15} />}
+                      onClick={() => downloadAttachment(msg)}
+                      style={{ minWidth: 0 }}
+                    >
                       {t('download')}
                     </Button>
                   ) : (
