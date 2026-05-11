@@ -80,6 +80,7 @@ interface ChatViewProps {
   // messages
   visibleMessages: DecryptedMessage[]
   displayMessages: DecryptedMessage[]
+  attachmentMessages: DecryptedMessage[]
   highlightedMessageID: string
   messageSearch: string
   setMessageSearch: (v: string) => void
@@ -148,6 +149,7 @@ export function ChatView(props: ChatViewProps) {
     mobilePeerStatus,
     visibleMessages,
     displayMessages,
+    attachmentMessages,
     highlightedMessageID,
     messageSearch,
     setMessageSearch,
@@ -696,6 +698,26 @@ export function ChatView(props: ChatViewProps) {
           </Box>
 
           {/* Composer */}
+          {isMobile && attachmentMessages.length > 0 && (
+            <Box px="sm" py={6} style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+              <ScrollArea type="auto" offsetScrollbars scrollbarSize={4}>
+                <Group gap="xs" wrap="nowrap">
+                  {attachmentMessages.slice(0, 12).map((msg) => (
+                    <Button
+                      key={msg.id}
+                      size="xs"
+                      variant="light"
+                      rightSection={<IconDownload size={14} />}
+                      onClick={() => downloadAttachment(msg)}
+                      style={{ flexShrink: 0, maxWidth: 180 }}
+                    >
+                      <Text size="xs" truncate>{msg.body?.attachment?.name ?? t('file')}</Text>
+                    </Button>
+                  ))}
+                </Group>
+              </ScrollArea>
+            </Box>
+          )}
           <Stack className={isMobile ? 'mobile-composer' : 'composer-bar'} gap={6} mt="auto">
             {replyTarget && (
               <Card withBorder radius="sm" p="xs">

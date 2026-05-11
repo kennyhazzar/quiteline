@@ -96,21 +96,33 @@ type TOTPSetup struct {
 }
 
 type Session struct {
-	SessionID string    `json:"sessionId"`
-	UserID    string    `json:"userId"`
-	Username  string    `json:"username"`
-	CreatedAt time.Time `json:"createdAt"`
-	ExpiresAt time.Time `json:"expiresAt"`
-	RevokedAt time.Time `json:"revokedAt,omitempty"`
-	Current   bool      `json:"current,omitempty"`
+	SessionID  string    `json:"sessionId"`
+	UserID     string    `json:"userId"`
+	Username   string    `json:"username"`
+	DeviceName string    `json:"deviceName,omitempty"`
+	UserAgent  string    `json:"userAgent,omitempty"`
+	IPAddress  string    `json:"ipAddress,omitempty"`
+	Location   string    `json:"location,omitempty"`
+	CreatedAt  time.Time `json:"createdAt"`
+	ExpiresAt  time.Time `json:"expiresAt"`
+	RevokedAt  time.Time `json:"revokedAt,omitempty"`
+	Current    bool      `json:"current,omitempty"`
 }
 
 type SessionStore interface {
 	CreateSession(ctx context.Context, session Session) (Session, error)
+	UpdateSessionMetadata(ctx context.Context, userID string, sessionID string, deviceName string, userAgent string, ipAddress string, location string) error
 	GetSession(ctx context.Context, sessionID string) (Session, error)
 	ListSessions(ctx context.Context, userID string) ([]Session, error)
 	RevokeSession(ctx context.Context, userID string, sessionID string) error
 	RevokeOtherSessions(ctx context.Context, userID string, keepSessionID string) error
+}
+
+func (s *Service) UpdateSessionMetadata(ctx context.Context, principal Principal, deviceName string, userAgent string, ipAddress string, location string) error {
+	if principal.UserID == "" || principal.SessionID == "" {
+		return ErrInvalidToken
+	}
+	return s.sessions.UpdateSessionMetadata(ctx, principal.UserID, principal.SessionID, strings.TrimSpace(deviceName), strings.TrimSpace(userAgent), strings.TrimSpace(ipAddress), strings.TrimSpace(location))
 }
 
 func NewService(cfg config.Config, users UserStore) *Service {

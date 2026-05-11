@@ -21,7 +21,7 @@ import {
   IconUserPlus,
 } from '@tabler/icons-react'
 import type { UseQueryResult, UseMutationResult } from '@tanstack/react-query'
-import type { RefObject } from 'react'
+import { useState, type RefObject } from 'react'
 import type {
   AuthSession,
   AccountSession,
@@ -307,16 +307,31 @@ export function AppShellLayout(props: AppShellLayoutProps) {
 
 function ProfileModal({ profileUser, setProfileUser, presence, identity, ownAvatarSrc }: Pick<AppShellLayoutProps, 'profileUser' | 'setProfileUser' | 'presence' | 'identity' | 'ownAvatarSrc'>) {
   const { t } = useI18n()
+  const [avatarViewerOpened, setAvatarViewerOpened] = useState(false)
   if (!profileUser) return null
   const currentPresence = presence[profileUser.userId]
   const avatarSrc = profileUser.userId === identity.userId
     ? ownAvatarSrc
     : absoluteAvatarUrl(`/v1/users/${encodeURIComponent(profileUser.userId)}/avatar`)
   return (
+    <>
+    <Modal opened={avatarViewerOpened} onClose={() => setAvatarViewerOpened(false)} title={profileUser.displayName} centered size="lg">
+      <Stack align="center">
+        <Avatar src={avatarSrc} name={profileUser.displayName} radius="xl" size={160} color="blue" />
+      </Stack>
+    </Modal>
     <Modal opened={Boolean(profileUser)} onClose={() => setProfileUser(null)} title={t('profileTitle')} centered>
       <Stack gap="sm">
         <Group align="center" wrap="nowrap">
-          <Avatar src={avatarSrc} name={profileUser.displayName} radius="xl" size={64} color="blue" />
+          <Avatar
+            src={avatarSrc}
+            name={profileUser.displayName}
+            radius="xl"
+            size={64}
+            color="blue"
+            style={{ cursor: 'pointer' }}
+            onClick={() => setAvatarViewerOpened(true)}
+          />
           <div>
             <Text fw={700}>{profileUser.displayName}</Text>
             <Text size="xs" c="dimmed">
@@ -326,9 +341,9 @@ function ProfileModal({ profileUser, setProfileUser, presence, identity, ownAvat
             </Text>
           </div>
         </Group>
-        <Text size="sm" c="dimmed">{t('profilePublicDescription')}</Text>
       </Stack>
     </Modal>
+    </>
   )
 }
 

@@ -145,6 +145,21 @@ func (s *MemorySessionStore) CreateSession(_ context.Context, session Session) (
 	return session, nil
 }
 
+func (s *MemorySessionStore) UpdateSessionMetadata(_ context.Context, userID string, sessionID string, deviceName string, userAgent string, ipAddress string, location string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	if !ok || session.UserID != userID {
+		return ErrInvalidToken
+	}
+	session.DeviceName = strings.TrimSpace(deviceName)
+	session.UserAgent = strings.TrimSpace(userAgent)
+	session.IPAddress = strings.TrimSpace(ipAddress)
+	session.Location = strings.TrimSpace(location)
+	s.sessions[sessionID] = session
+	return nil
+}
+
 func (s *MemorySessionStore) GetSession(_ context.Context, sessionID string) (Session, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

@@ -335,6 +335,8 @@ func handleRegister(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusBadRequest, "invalid_registration")
 		return
 	}
+	updateSessionMetadata(r, deps, principal)
+	publishUserEvent(r.Context(), deps, principal.UserID, "sessions.changed", "", "")
 	writeJSON(w, http.StatusCreated, tokenResponse{AccessToken: token, TokenType: "Bearer", ExpiresAt: principal.Expires, Principal: principal})
 }
 
@@ -354,6 +356,8 @@ func handleLogin(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 		writeError(w, http.StatusUnauthorized, "invalid_credentials")
 		return
 	}
+	updateSessionMetadata(r, deps, principal)
+	publishUserEvent(r.Context(), deps, principal.UserID, "sessions.changed", "", "")
 	writeJSON(w, http.StatusOK, tokenResponse{AccessToken: token, TokenType: "Bearer", ExpiresAt: principal.Expires, Principal: principal})
 }
 
@@ -1468,6 +1472,79 @@ func clientIP(r *http.Request) string {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+func updateSessionMetadata(r *http.Request, deps Dependencies, principal auth.Principal) {
+	if principal.SessionID == "" {
+		return
+	}
+	userAgent := strings.TrimSpace(r.UserAgent())
+	deviceName := sessionDeviceName(userAgent)
+	ip := clientIP(r)
+	location := sessionLocation(r, ip)
+	if err := deps.Auth.UpdateSessionMetadata(r.Context(), principal, deviceName, userAgent, ip, location); err != nil {
+		deps.Logger.Warn("session metadata update failed", "user", principal.UserID, "session", principal.SessionID, "error", err)
+	}
+}
+
+func sessionDeviceName(userAgent string) string {
+	ua := strings.ToLower(userAgent)
+	if ua == "" {
+		return "Unknown device"
+	}
+	os := "Unknown"
+	switch {
+	case strings.Contains(ua, "windows"):
+		os = "Windows"
+	case strings.Contains(ua, "iphone") || strings.Contains(ua, "ipad"):
+		os = "iOS"
+	case strings.Contains(ua, "android"):
+		os = "Android"
+	case strings.Contains(ua, "mac os") || strings.Contains(ua, "macintosh"):
+		os = "macOS"
+	case strings.Contains(ua, "linux"):
+		os = "Linux"
+	}
+	browser := "Browser"
+	switch {
+	case strings.Contains(ua, "edg/"):
+		browser = "Edge"
+	case strings.Contains(ua, "firefox/"):
+		browser = "Firefox"
+	case strings.Contains(ua, "chrome/") || strings.Contains(ua, "chromium/"):
+		browser = "Chrome"
+	case strings.Contains(ua, "safari/"):
+		browser = "Safari"
+	}
+	return strings.TrimSpace(os + " · " + browser)
+}
+
+func sessionLocation(r *http.Request, ip string) string {
+	city := firstHeader(r, "CF-IPCity", "X-Geo-City", "X-Vercel-IP-City")
+	country := firstHeader(r, "CF-IPCountry", "X-Geo-Country", "X-Vercel-IP-Country", "X-Country-Code")
+	parts := make([]string, 0, 2)
+	if city != "" {
+		parts = append(parts, city)
+	}
+	if country != "" && country != "XX" {
+		parts = append(parts, country)
+	}
+	if len(parts) > 0 {
+		return strings.Join(parts, ", ")
+	}
+	if ip != "" {
+		return ip
+	}
+	return "Unknown"
+}
+
+func firstHeader(r *http.Request, names ...string) string {
+	for _, name := range names {
+		if value := strings.TrimSpace(r.Header.Get(name)); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // shareRoom reports whether userID1 and userID2 share at least one common room.

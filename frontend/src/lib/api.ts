@@ -34,6 +34,10 @@ export interface AccountSession {
   sessionId: string
   userId: string
   username: string
+  deviceName?: string
+  userAgent?: string
+  ipAddress?: string
+  location?: string
   createdAt: string
   expiresAt: string
   revokedAt?: string

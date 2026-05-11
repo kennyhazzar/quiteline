@@ -2,6 +2,7 @@
 
 import {
   ActionIcon,
+  Avatar,
   Badge,
   Box,
   Button,
@@ -10,6 +11,7 @@ import {
   FileInput,
   Group,
   Image,
+  Modal,
   PasswordInput,
   ScrollArea,
   SegmentedControl,
@@ -26,6 +28,7 @@ import {
   IconUserPlus,
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
+import { useState } from 'react'
 import type {
   AccountSession,
   AuthSession,
@@ -261,6 +264,7 @@ export function Sidebar(props: SidebarProps) {
 
 function ProfilePanel(props: SidebarProps) {
   const { t } = useI18n()
+  const [avatarViewerOpened, setAvatarViewerOpened] = useState(false)
   const {
     session,
     identity,
@@ -295,6 +299,16 @@ function ProfilePanel(props: SidebarProps) {
   } = props
 
   return (
+    <>
+    <Modal opened={avatarViewerOpened} onClose={() => setAvatarViewerOpened(false)} title={t('avatar')} centered size="lg">
+      {ownAvatarSrc ? (
+        <Image src={ownAvatarSrc} alt="avatar" mah="70dvh" fit="contain" radius="md" />
+      ) : (
+        <Stack align="center" py="xl">
+          <Avatar name={session.principal.displayName || identity.displayName} size={120} radius="xl" color="blue" />
+        </Stack>
+      )}
+    </Modal>
     <Card
       withBorder={!isMobile}
       className={!isMobile ? 'desktop-surface' : undefined}
@@ -310,9 +324,20 @@ function ProfilePanel(props: SidebarProps) {
       <Group justify="space-between" align="flex-start" mb="xs" wrap="nowrap">
         <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
           {ownAvatarSrc ? (
-            <Image src={ownAvatarSrc} alt="avatar" w={52} h={52} radius="xl" />
+            <Image
+              src={ownAvatarSrc}
+              alt="avatar"
+              w={52}
+              h={52}
+              radius="xl"
+              style={{ cursor: 'pointer' }}
+              onClick={() => setAvatarViewerOpened(true)}
+            />
           ) : (
-            <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--mantine-color-blue-6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 20 }}>
+            <div
+              onClick={() => setAvatarViewerOpened(true)}
+              style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--mantine-color-blue-6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 20, cursor: 'pointer' }}
+            >
               {(session.principal.displayName || identity.displayName).slice(0, 1).toUpperCase()}
             </div>
           )}
@@ -337,8 +362,6 @@ function ProfilePanel(props: SidebarProps) {
         clearable
         mb="sm"
       />
-
-      <Text size="xs" c="dimmed">{t('profilePrivateDescription')}</Text>
 
       <Divider my="sm" />
 
@@ -371,9 +394,10 @@ function ProfilePanel(props: SidebarProps) {
           <IconUserPlus size={18} />
         </ActionIcon>
       </Group>
-      <Stack gap="xs">
-        {(friends.data?.friends ?? []).map((friend) => (
-          <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
+      <ScrollArea.Autosize mah={260} type="auto" offsetScrollbars>
+        <Stack gap="xs" pr="xs">
+          {(friends.data?.friends ?? []).map((friend) => (
+            <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
               <Text size="sm" fw={friend.status === 'accepted' ? 700 : 500} truncate>
                 {friend.displayName || t('unknownUser')}
@@ -414,10 +438,11 @@ function ProfilePanel(props: SidebarProps) {
                 {t('invite')}
               </Button>
             ) : null}
-          </Group>
-        ))}
-        {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{t('noFriends')}</Text>}
-      </Stack>
+            </Group>
+          ))}
+          {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{t('noFriends')}</Text>}
+        </Stack>
+      </ScrollArea.Autosize>
 
       <Divider my="sm" />
 
@@ -486,21 +511,16 @@ function ProfilePanel(props: SidebarProps) {
       <Divider my="sm" />
 
       {/* Sessions */}
-      <Group justify="space-between" align="center" mb="xs">
-        <Text fw={700} size="sm">{t('sessions')}</Text>
-        <Button size="xs" variant="subtle" onClick={() => accountSessions.refetch()} loading={accountSessions.isFetching}>
-          {t('refresh')}
-        </Button>
-      </Group>
+      <Text fw={700} size="sm" mb="xs">{t('sessions')}</Text>
       <Stack gap="xs">
         {(accountSessions.data?.sessions ?? []).map((item) => (
           <Group key={item.sessionId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
               <Text size="xs" fw={item.current ? 700 : 500} truncate>
-                {item.current ? t('currentSession') : t('sessionDevice')}
+                {item.current ? `${t('currentSession')} · ${item.deviceName || t('sessionDevice')}` : item.deviceName || t('sessionDevice')}
               </Text>
               <Text size="xs" c="dimmed" truncate>
-                {t('created')}: {formatLastSeen(item.createdAt)}
+                {[item.location, `${t('created')}: ${formatLastSeen(item.createdAt)}`].filter(Boolean).join(' · ')}
               </Text>
             </div>
             <Button
@@ -536,5 +556,6 @@ function ProfilePanel(props: SidebarProps) {
         </Button>
       </Group>
     </Card>
+    </>
   )
 }
