@@ -308,6 +308,7 @@ export function ChatView(props: ChatViewProps) {
   useEffect(() => {
     if (!pendingImagePreviewID || !previews[pendingImagePreviewID]) return
     const msg = visibleMessages.find((item) => item.id === pendingImagePreviewID)
+    setAttachmentsOpened(false)
     setImageViewer({
       src: previews[pendingImagePreviewID],
       name: msg?.body?.attachment?.name || t('preview'),
@@ -318,6 +319,7 @@ export function ChatView(props: ChatViewProps) {
   function openAttachmentPreview(msg: DecryptedMessage) {
     const attachment = msg.body?.attachment
     if (!attachment) return
+    setAttachmentsOpened(false)
     if (attachment.type.startsWith('image/') && previews[msg.id]) {
       setImageViewer({ src: previews[msg.id], name: attachment.name })
       return
@@ -349,17 +351,19 @@ export function ChatView(props: ChatViewProps) {
       title={imageViewer?.name ?? t('preview')}
       centered
       size="xl"
+      fullScreen={isMobile}
     >
       {imageViewer && (
         <Image src={imageViewer.src} alt={imageViewer.name} mah="75dvh" fit="contain" radius="md" />
       )}
     </Modal>
     <Modal
-      opened={attachmentsOpened}
+      opened={attachmentsOpened && !imageViewer}
       onClose={() => setAttachmentsOpened(false)}
       title={t('attach')}
       centered
       size="lg"
+      fullScreen={isMobile}
       scrollAreaComponent={ScrollArea.Autosize}
     >
       <Stack gap="xs">
@@ -367,8 +371,8 @@ export function ChatView(props: ChatViewProps) {
           const attachment = msg.body?.attachment
           if (!attachment) return null
           return (
-            <Card key={msg.id} withBorder radius="md" p="sm">
-              <Group justify="space-between" align="center" wrap="nowrap">
+            <Card key={msg.id} withBorder radius="md" p="sm" style={{ maxWidth: '100%', overflow: 'hidden' }}>
+              <Stack gap="sm">
                 <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
                   <ActionIcon variant="light" radius="xl" size="lg">
                     <IconPaperclip size={18} />
@@ -381,17 +385,23 @@ export function ChatView(props: ChatViewProps) {
                     <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleString()}</Text>
                   </div>
                 </Group>
-                <Group gap={6} wrap="nowrap">
+                <Group gap={6} wrap={isMobile ? 'wrap' : 'nowrap'}>
                   {attachment.type.startsWith('image/') && (
-                    <Button size="xs" variant="light" onClick={() => openAttachmentPreview(msg)}>
+                    <Button size="xs" variant="light" fullWidth={isMobile} onClick={() => openAttachmentPreview(msg)}>
                       {t('preview')}
                     </Button>
                   )}
-                  <ActionIcon variant="light" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
-                    <IconDownload size={17} />
-                  </ActionIcon>
+                  {isMobile ? (
+                    <Button size="xs" variant="light" fullWidth leftSection={<IconDownload size={15} />} onClick={() => downloadAttachment(msg)}>
+                      {t('download')}
+                    </Button>
+                  ) : (
+                    <ActionIcon variant="light" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
+                      <IconDownload size={17} />
+                    </ActionIcon>
+                  )}
                 </Group>
-              </Group>
+              </Stack>
             </Card>
           )
         })}

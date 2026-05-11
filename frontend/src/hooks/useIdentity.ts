@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import {
   AuthError,
   fetchIdentity,
@@ -19,6 +19,11 @@ export function useIdentity(opts: {
   handleAuthExpired: () => void
 }) {
   const { session, identity, activeRoom, activeRoomID, handleAuthExpired } = opts
+  const handleAuthExpiredRef = useRef(handleAuthExpired)
+
+  useEffect(() => {
+    handleAuthExpiredRef.current = handleAuthExpired
+  }, [handleAuthExpired])
 
   const memberIdentities = useQuery({
     queryKey: ['chat-identities', activeRoomID, activeRoom?.members, session?.accessToken],
@@ -44,15 +49,15 @@ export function useIdentity(opts: {
   useEffect(() => {
     if (!identity || !session) return
     touchIdentity(identity.userId, session.accessToken).catch((err) => {
-      if (err instanceof AuthError) handleAuthExpired()
+      if (err instanceof AuthError) handleAuthExpiredRef.current()
     })
     const timer = window.setInterval(() => {
       touchIdentity(identity.userId, session.accessToken).catch((err) => {
-        if (err instanceof AuthError) handleAuthExpired()
+        if (err instanceof AuthError) handleAuthExpiredRef.current()
       })
     }, 60000)
     return () => window.clearInterval(timer)
-  }, [identity, session, handleAuthExpired])
+  }, [identity?.userId, session?.accessToken])
 
   const identitiesByID = useMemo(() => {
     const result = new Map<string, Identity>()

@@ -346,6 +346,8 @@ export function MessengerApp() {
     setPendingMessages: messages.setPendingMessages as (msgs: never[]) => void,
     setMobileView: (v) => setMobileView(v),
     setSidebarView: (v) => setSidebarView(v),
+    setMobileCreateRoomOpened,
+    setMobileImportInviteOpened,
     setMobileChatActionsOpened,
     setLeaveConfirmOpened,
     sendSystemMessage,

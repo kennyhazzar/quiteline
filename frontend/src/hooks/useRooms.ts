@@ -37,6 +37,8 @@ export function useRooms(opts: {
   setPendingMessages: (msgs: never[]) => void
   setMobileView: (v: 'rooms' | 'chat') => void
   setSidebarView: (v: 'rooms' | 'chat') => void
+  setMobileCreateRoomOpened: (v: boolean) => void
+  setMobileImportInviteOpened: (v: boolean) => void
   setMobileChatActionsOpened: (v: boolean) => void
   setLeaveConfirmOpened: (v: boolean) => void
   sendSystemMessage: (roomID: string, secret: string, type: 'join' | 'leave') => Promise<void>
@@ -55,6 +57,8 @@ export function useRooms(opts: {
     setPendingMessages,
     setMobileView,
     setSidebarView,
+    setMobileCreateRoomOpened,
+    setMobileImportInviteOpened,
     setMobileChatActionsOpened,
     setLeaveConfirmOpened,
     sendSystemMessage,
@@ -100,6 +104,7 @@ export function useRooms(opts: {
       setHighlightedMessageID('')
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
+      setMobileCreateRoomOpened(false)
       replaceAppURL({ view: 'chat', roomId: room.roomId })
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
@@ -129,6 +134,7 @@ export function useRooms(opts: {
       setHighlightedMessageID('')
       if (isMobile) setMobileView('chat')
       else setSidebarView('chat')
+      setMobileImportInviteOpened(false)
       replaceAppURL({ view: 'chat', roomId: room.roomId })
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
