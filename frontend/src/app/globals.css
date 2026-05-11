@@ -320,6 +320,10 @@ body {
     backdrop-filter: blur(18px);
   }
 
+  .mobile-chat-back {
+    flex: 0 0 auto;
+  }
+
   .mobile-message-list {
     padding: 12px 12px 10px;
   }
@@ -335,7 +339,7 @@ body {
     position: fixed;
     left: 12px;
     right: 12px;
-    bottom: calc(env(safe-area-inset-bottom) + 6px);
+    bottom: calc(env(safe-area-inset-bottom) + 12px);
     z-index: 40;
     height: 54px;
     padding: 6px;

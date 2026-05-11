@@ -15,8 +15,14 @@ import {
 } from '@mantine/core'
 import {
   IconLock,
+  IconCopy,
+  IconDoorExit,
+  IconLink,
   IconMessageCircle,
   IconMoon,
+  IconPaperclip,
+  IconPhone,
+  IconSearch,
   IconSun,
   IconUserPlus,
 } from '@tabler/icons-react'
@@ -138,6 +144,8 @@ interface AppShellLayoutProps {
   visibleMessages: DecryptedMessage[]
   displayMessages: DecryptedMessage[]
   attachmentMessages: DecryptedMessage[]
+  attachmentsOpened: boolean
+  setAttachmentsOpened: (v: boolean) => void
   highlightedMessageID: string
   messageSearch: string
   setMessageSearch: (v: string) => void
@@ -482,6 +490,8 @@ function ChatActionsModal(props: AppShellLayoutProps) {
     requestLeaveChat,
     leavingRoom,
     activeRoomID,
+    attachmentMessages,
+    setAttachmentsOpened,
   } = props
 
   function formatLastSeen(value?: string) {
@@ -497,13 +507,32 @@ function ChatActionsModal(props: AppShellLayoutProps) {
       centered
     >
       {activeRoom && (
-        <Stack gap="sm">
-          <input
-            placeholder="Search messages"
-            value={messageSearch}
-            onChange={(e) => setMessageSearch(e.currentTarget.value)}
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
-          />
+        <Stack gap="md">
+          <div>
+            <Text fw={800} truncate>{activeRoom.name}</Text>
+          </div>
+          <Card withBorder radius="lg" p="sm">
+            <Stack gap="xs">
+              <input
+                placeholder="Search messages"
+                value={messageSearch}
+                onChange={(e) => setMessageSearch(e.currentTarget.value)}
+                style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
+              />
+              <Button
+                variant="light"
+                leftSection={<IconPaperclip size={16} />}
+                onClick={() => {
+                  setMobileChatActionsOpened(false)
+                  setAttachmentsOpened(true)
+                }}
+                disabled={attachmentMessages.length === 0}
+                fullWidth
+              >
+                {t('file')} {attachmentMessages.length > 0 ? `(${attachmentMessages.length})` : ''}
+              </Button>
+            </Stack>
+          </Card>
           {!isMobile && peers.length > 0 && (
             <Group gap={6}>
               {peers.map((member) => {
@@ -523,43 +552,52 @@ function ChatActionsModal(props: AppShellLayoutProps) {
               })}
             </Group>
           )}
-          <Button variant="subtle" onClick={closeChat} fullWidth>{t('closeChat')}</Button>
-          <Button
-            variant={callState === 'idle' ? 'light' : 'filled'}
-            color={callState === 'idle' ? 'green' : 'red'}
-            onClick={callState === 'idle' ? () => startCall() : () => endCall(true)}
-            fullWidth
-            disabled={!activeRoomID}
-          >
-            {callState === 'idle' ? t('startCall') : t('endCall')}
-          </Button>
-          <Button
-            variant="light"
-            onClick={() => navigator.clipboard.writeText(activeInvite).catch(() => undefined)}
-            fullWidth
-            disabled={!activeInvite}
-          >
-            {t('copyInvite')}
-          </Button>
-          <Button
-            variant="light"
-            onClick={() => navigator.clipboard.writeText(activeInviteLink).catch(() => undefined)}
-            fullWidth
-            disabled={!activeInviteLink}
-          >
-            {t('copyInviteLink')}
-          </Button>
-          <Button
-            variant="light"
-            onClick={() => navigator.clipboard.writeText(activeChatLink).catch(() => undefined)}
-            fullWidth
-            disabled={!activeChatLink}
-          >
-            {t('copyChatLink')}
-          </Button>
+          <Card withBorder radius="lg" p="sm">
+            <Stack gap="xs">
+              <Button
+                variant={callState === 'idle' ? 'light' : 'filled'}
+                color={callState === 'idle' ? 'green' : 'red'}
+                leftSection={<IconPhone size={16} />}
+                onClick={callState === 'idle' ? () => startCall() : () => endCall(true)}
+                fullWidth
+                disabled={!activeRoomID}
+              >
+                {callState === 'idle' ? t('startCall') : t('endCall')}
+              </Button>
+              <Stack gap="xs">
+                <Button
+                  variant="light"
+                  leftSection={<IconLink size={16} />}
+                  onClick={() => navigator.clipboard.writeText(activeInviteLink).catch(() => undefined)}
+                  disabled={!activeInviteLink}
+                  fullWidth
+                >
+                  {t('copyInviteLink')}
+                </Button>
+                <Button
+                  variant="light"
+                  leftSection={<IconCopy size={16} />}
+                  onClick={() => navigator.clipboard.writeText(activeChatLink).catch(() => undefined)}
+                  disabled={!activeChatLink}
+                  fullWidth
+                >
+                  {t('copyChatLink')}
+                </Button>
+              </Stack>
+              <Button
+                variant="subtle"
+                leftSection={<IconSearch size={16} />}
+                onClick={closeChat}
+                fullWidth
+              >
+                {t('closeChat')}
+              </Button>
+            </Stack>
+          </Card>
           {acceptedFriends.length > 0 && (
+            <Card withBorder radius="lg" p="sm">
             <Stack gap={6}>
-              <Text size="xs" c="dimmed">{t('inviteFriend')}</Text>
+              <Text size="xs" c="dimmed" fw={700}>{t('inviteFriend')}</Text>
               {acceptedFriends
                 .filter((friend) => !activeRoom.members.includes(friend.userId))
                 .slice(0, 4)
@@ -574,11 +612,13 @@ function ChatActionsModal(props: AppShellLayoutProps) {
                   </Button>
                 ))}
             </Stack>
+            </Card>
           )}
           {!activeInvite && <Text size="xs" c="dimmed">{t('inviteSecretMissing')}</Text>}
           <Button
             variant="light"
             color="red"
+            leftSection={<IconDoorExit size={16} />}
             onClick={requestLeaveChat}
             loading={leavingRoom}
             fullWidth

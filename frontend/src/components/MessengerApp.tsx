@@ -123,6 +123,7 @@ export function MessengerApp() {
   const [mobileImportInviteOpened, setMobileImportInviteOpened] = useState(false)
   const [leaveConfirmOpened, setLeaveConfirmOpened] = useState(false)
   const [profileUser, setProfileUser] = useState<Identity | null>(null)
+  const [attachmentsOpened, setAttachmentsOpened] = useState(false)
 
   // ─── Presence / typing ────────────────────────────────────────────────────
   const [typingUsers, setTypingUsers] = useState<Record<string, { displayName: string; until: number }>>({})
@@ -1368,6 +1369,8 @@ export function MessengerApp() {
       visibleMessages={messages.visibleMessages}
       displayMessages={messages.displayMessages}
       attachmentMessages={messages.attachmentMessages}
+      attachmentsOpened={attachmentsOpened}
+      setAttachmentsOpened={setAttachmentsOpened}
       highlightedMessageID={highlightedMessageID}
       messageSearch={messages.messageSearch}
       setMessageSearch={messages.setMessageSearch}

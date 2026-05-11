@@ -25,6 +25,7 @@ import {
   IconCheck,
   IconChecks,
   IconChevronDown,
+  IconChevronLeft,
   IconClock,
   IconCopy,
   IconDotsVertical,
@@ -82,6 +83,8 @@ interface ChatViewProps {
   visibleMessages: DecryptedMessage[]
   displayMessages: DecryptedMessage[]
   attachmentMessages: DecryptedMessage[]
+  attachmentsOpened: boolean
+  setAttachmentsOpened: (v: boolean) => void
   highlightedMessageID: string
   messageSearch: string
   setMessageSearch: (v: string) => void
@@ -152,6 +155,8 @@ export function ChatView(props: ChatViewProps) {
     visibleMessages,
     displayMessages,
     attachmentMessages,
+    attachmentsOpened,
+    setAttachmentsOpened,
     highlightedMessageID,
     messageSearch,
     setMessageSearch,
@@ -192,7 +197,6 @@ export function ChatView(props: ChatViewProps) {
   const [unreadCount, setUnreadCount] = useState(0)
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [imageViewer, setImageViewer] = useState<{ src: string; name: string } | null>(null)
-  const [attachmentsOpened, setAttachmentsOpened] = useState(false)
   const [pendingImagePreviewID, setPendingImagePreviewID] = useState('')
   const isNearBottomRef = useRef(true)
   const previousMessageIDsRef = useRef<string[]>([])
@@ -464,6 +468,18 @@ export function ChatView(props: ChatViewProps) {
             align={isMobile ? 'center' : 'flex-start'}
             wrap="nowrap"
           >
+            {isMobile && (
+              <ActionIcon
+                variant="light"
+                size="lg"
+                radius="xl"
+                onClick={() => setMobileView('rooms')}
+                aria-label={t('rooms')}
+                className="mobile-chat-back"
+              >
+                <IconChevronLeft size={21} />
+              </ActionIcon>
+            )}
             <div style={{ minWidth: 0, flex: 1 }}>
               {isMobile ? (
                 <Text fw={800} size="lg" truncate>{activeRoom.name}</Text>
@@ -471,19 +487,14 @@ export function ChatView(props: ChatViewProps) {
                 <Title order={3}>{activeRoom.name}</Title>
               )}
               {isMobile ? (
-                <Text size="xs" c="dimmed" truncate>{mobilePeerStatus || ' '}</Text>
+                <Text size="xs" c="dimmed" truncate>
+                  {activeTyping.length > 0 ? `${activeTyping.join(', ')} ${t('typing')}` : (mobilePeerStatus || ' ')}
+                </Text>
               ) : null}
             </div>
             <ActionIcon variant="subtle" size="lg" onClick={() => setMobileChatActionsOpened(true)} aria-label={t('chat')}>
               <IconDotsVertical size={20} />
             </ActionIcon>
-            {isMobile && attachmentMessages.length > 0 && (
-              <Indicator label={attachmentMessages.length} size={16} color="blue" offset={4}>
-                <ActionIcon variant="light" size="lg" onClick={() => setAttachmentsOpened(true)} aria-label={t('attach')}>
-                  <IconPaperclip size={19} />
-                </ActionIcon>
-              </Indicator>
-            )}
           </Group>
 
           <audio ref={remoteAudioRef as React.RefObject<HTMLAudioElement>} autoPlay />
