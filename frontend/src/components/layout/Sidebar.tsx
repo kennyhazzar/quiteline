@@ -469,11 +469,19 @@ function ProfilePanel(props: SidebarProps) {
           ? 'Push API недоступен. На iPhone нужно открыть приложение с экрана Домой.'
           : 'Push API is unavailable. On iPhone, open the app from Home Screen.')
       }
+      const applicationServerKey = urlBase64ToUint8Array(pushInfo.publicKey)
+      if (applicationServerKey.byteLength !== 65) {
+        throw new Error(locale === 'ru'
+          ? 'VAPID public key на сервере некорректный. Сгенерируйте новую пару ключей и обновите .env.'
+          : 'The server VAPID public key is invalid. Generate a new key pair and update the .env file.')
+      }
       const existing = await registration.pushManager.getSubscription()
       if (existing) await existing.unsubscribe()
       const browserSub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(pushInfo.publicKey),
+        applicationServerKey,
+      }).catch((err: unknown) => {
+        throw new Error(pushSubscribeErrorMessage(err, locale))
       })
       const json = browserSub.toJSON()
       const saved = await savePushSubscription({
@@ -489,7 +497,7 @@ function ProfilePanel(props: SidebarProps) {
       setPushPrefs(saved.preferences)
       notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Уведомления включены.' : 'Notifications enabled.', color: 'green' })
     } catch (err) {
-      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? err.message : 'push_failed', color: 'red' })
+      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? pushSubscribeErrorMessage(err, locale) : 'push_failed', color: 'red' })
     } finally {
       setPushLoading(false)
     }
@@ -1032,4 +1040,15 @@ function urlBase64ToUint8Array(value: string) {
   const output = new Uint8Array(raw.length)
   for (let i = 0; i < raw.length; i += 1) output[i] = raw.charCodeAt(i)
   return output
+}
+
+function pushSubscribeErrorMessage(err: unknown, locale: 'ru' | 'en') {
+  const raw = err instanceof Error ? err.message : String(err)
+  const name = err instanceof Error ? err.name : ''
+  if (/VAPID|applicationServerKey|push service error|Registration failed/i.test(`${name} ${raw}`)) {
+    return locale === 'ru'
+      ? 'Push-сервис отклонил подписку. Чаще всего VAPID ключи на сервере некорректны или были заменены. Сгенерируйте одну пару VAPID ключей, обновите VAPID_PUBLIC_KEY и VAPID_PRIVATE_KEY на бекенде, перезапустите контейнер и включите уведомления заново.'
+      : 'The push service rejected the subscription. This usually means the server VAPID keys are invalid or were rotated. Generate one VAPID key pair, update VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY on the backend, restart the container, then enable notifications again.'
+  }
+  return raw
 }

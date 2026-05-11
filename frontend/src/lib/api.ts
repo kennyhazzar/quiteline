@@ -109,6 +109,7 @@ export interface PushSubscriptionRecord {
 export interface PushPublicKey {
   enabled: boolean
   publicKey: string
+  reason?: string
 }
 
 export interface MessageEnvelope {

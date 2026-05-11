@@ -2,7 +2,10 @@ package notifications
 
 import (
 	"context"
+	"crypto/elliptic"
+	"encoding/base64"
 	"encoding/json"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -33,6 +36,12 @@ type Service struct {
 	cfg    config.Config
 	store  Store
 	logger *slog.Logger
+	vapid  vapidState
+}
+
+type vapidState struct {
+	enabled bool
+	reason  string
 }
 
 func NewService(cfg config.Config, store Store, logger *slog.Logger) *Service {
@@ -42,15 +51,26 @@ func NewService(cfg config.Config, store Store, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{cfg: cfg, store: store, logger: logger}
+	vapid := validateVAPID(cfg.VAPIDPublicKey, cfg.VAPIDPrivateKey)
+	if !vapid.enabled && vapid.reason != "missing" {
+		logger.Warn("web push disabled because VAPID keys are invalid", "reason", vapid.reason)
+	}
+	return &Service{cfg: cfg, store: store, logger: logger, vapid: vapid}
 }
 
 func (s *Service) Enabled() bool {
-	return strings.TrimSpace(s.cfg.VAPIDPublicKey) != "" && strings.TrimSpace(s.cfg.VAPIDPrivateKey) != ""
+	return s.vapid.enabled
 }
 
 func (s *Service) PublicKey() string {
 	return strings.TrimSpace(s.cfg.VAPIDPublicKey)
+}
+
+func (s *Service) DisabledReason() string {
+	if s.Enabled() {
+		return ""
+	}
+	return s.vapid.reason
 }
 
 func (s *Service) Store() Store {
@@ -107,7 +127,15 @@ func (s *Service) send(ctx context.Context, sub Subscription, data []byte) {
 		return
 	}
 	if resp != nil && resp.StatusCode >= 300 {
-		s.logger.Warn("push endpoint returned non-success", "subscription", sub.ID, "status", resp.StatusCode)
+		responseBody := ""
+		if resp.Body != nil {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+			responseBody = strings.TrimSpace(string(body))
+		}
+		s.logger.Warn("push endpoint returned non-success", "subscription", sub.ID, "status", resp.StatusCode, "body", responseBody)
+		if resp.StatusCode == http.StatusForbidden {
+			_ = s.store.Delete(context.Background(), sub.UserID, sub.ID)
+		}
 		return
 	}
 	_ = s.store.Touch(context.Background(), sub.ID)
@@ -126,4 +154,40 @@ func allows(prefs Preferences, event EventType) bool {
 	default:
 		return false
 	}
+}
+
+func validateVAPID(publicKey string, privateKey string) vapidState {
+	publicKey = strings.TrimSpace(publicKey)
+	privateKey = strings.TrimSpace(privateKey)
+	if publicKey == "" || privateKey == "" {
+		return vapidState{reason: "missing"}
+	}
+	privateBytes, err := decodeVAPIDKey(privateKey)
+	if err != nil || len(privateBytes) != 32 {
+		return vapidState{reason: "invalid_private_key"}
+	}
+	publicBytes, err := decodeVAPIDKey(publicKey)
+	if err != nil || len(publicBytes) != 65 || publicBytes[0] != 4 {
+		return vapidState{reason: "invalid_public_key"}
+	}
+	curve := elliptic.P256()
+	x, y := curve.ScalarBaseMult(privateBytes)
+	derived := elliptic.Marshal(curve, x, y)
+	if string(derived) != string(publicBytes) {
+		return vapidState{reason: "key_pair_mismatch"}
+	}
+	return vapidState{enabled: true}
+}
+
+func decodeVAPIDKey(value string) ([]byte, error) {
+	if decoded, err := base64.RawURLEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.URLEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	if decoded, err := base64.RawStdEncoding.DecodeString(value); err == nil {
+		return decoded, nil
+	}
+	return base64.StdEncoding.DecodeString(value)
 }

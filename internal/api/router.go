@@ -537,10 +537,14 @@ func handleRevokeOtherSessions(w http.ResponseWriter, r *http.Request, deps Depe
 func handlePushPublicKey(w http.ResponseWriter, r *http.Request, deps Dependencies) {
 	enabled := deps.Push != nil && deps.Push.Enabled()
 	publicKey := ""
+	reason := "not_configured"
 	if enabled {
 		publicKey = deps.Push.PublicKey()
+		reason = ""
+	} else if deps.Push != nil {
+		reason = deps.Push.DisabledReason()
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled, "publicKey": publicKey})
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": enabled, "publicKey": publicKey, "reason": reason})
 }
 
 func handleListPushSubscriptions(w http.ResponseWriter, r *http.Request, deps Dependencies) {
