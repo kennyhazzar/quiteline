@@ -8,6 +8,16 @@ import type { Metadata, Viewport } from 'next'
 export const metadata: Metadata = {
   title: 'Quietline',
   description: 'Client-side encrypted WebSocket messenger',
+  manifest: '/manifest.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'Quietline',
+  },
+  icons: {
+    icon: '/icon.svg',
+    apple: '/icon.svg',
+  },
 }
 
 export const viewport: Viewport = {

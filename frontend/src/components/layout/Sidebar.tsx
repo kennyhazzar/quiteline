@@ -412,6 +412,10 @@ function ProfilePanel(props: SidebarProps) {
 
   const currentPushSubscription = pushSubscriptions[0] ?? null
   const pushPermission = typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  const isIOSStandalone = typeof window !== 'undefined'
+    && 'standalone' in navigator
+    && (navigator as Navigator & { standalone?: boolean }).standalone === true
+  const looksLikeIOS = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent)
 
   useEffect(() => {
     if (profileSection !== 'notifications') return
@@ -440,17 +444,34 @@ function ProfilePanel(props: SidebarProps) {
       notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Push не настроен на сервере.' : 'Push is not configured on the server.', color: 'yellow' })
       return
     }
-    if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) {
+    if (!('serviceWorker' in navigator) || !('Notification' in window)) {
       notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Этот браузер не поддерживает Web Push.' : 'This browser does not support Web Push.', color: 'yellow' })
+      return
+    }
+    if (looksLikeIOS && !isIOSStandalone) {
+      notifications.show({
+        title: sectionCopy.notifications,
+        message: locale === 'ru'
+          ? 'На iPhone откройте Quietline именно с иконки на экране Домой. После обновления удалите старую иконку и добавьте сайт заново.'
+          : 'On iPhone, open Quietline from the Home Screen icon. After this update, remove the old icon and add the site again.',
+        color: 'yellow',
+      })
       return
     }
     setPushLoading(true)
     try {
       const permission = await Notification.requestPermission()
       if (permission !== 'granted') throw new Error(locale === 'ru' ? 'Разрешение на уведомления не выдано.' : 'Notification permission was not granted.')
-      const registration = await navigator.serviceWorker.register('/sw.js')
+      await navigator.serviceWorker.register('/sw.js', { scope: '/' })
+      const registration = await navigator.serviceWorker.ready
+      if (!registration.pushManager) {
+        throw new Error(locale === 'ru'
+          ? 'Push API недоступен. На iPhone нужно открыть приложение с экрана Домой.'
+          : 'Push API is unavailable. On iPhone, open the app from Home Screen.')
+      }
       const existing = await registration.pushManager.getSubscription()
-      const browserSub = existing ?? await registration.pushManager.subscribe({
+      if (existing) await existing.unsubscribe()
+      const browserSub = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(pushInfo.publicKey),
       })
@@ -864,13 +885,13 @@ function ProfilePanel(props: SidebarProps) {
               ? [
                   '1. Нажмите кнопку включения ниже.',
                   '2. Разрешите уведомления в системном окне браузера.',
-                  '3. На iPhone добавьте сайт на экран Домой и откройте Quietline оттуда.',
+                  '3. На iPhone удалите старую иконку, добавьте сайт на экран Домой заново и откройте Quietline оттуда.',
                   '4. Отправьте тестовое уведомление, чтобы проверить устройство.',
                 ]
               : [
                   '1. Press the enable button below.',
                   '2. Allow notifications in the browser permission prompt.',
-                  '3. On iPhone, add the site to Home Screen and open Quietline from there.',
+                  '3. On iPhone, remove the old icon, add the site to Home Screen again, and open Quietline from there.',
                   '4. Send a test notification to verify this device.',
                 ]).map((line) => (
                 <Text key={line} size="xs" c="dimmed">{line}</Text>
