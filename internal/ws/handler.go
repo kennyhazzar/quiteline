@@ -114,7 +114,7 @@ func (h *Handler) readPump(ctx context.Context, conn *websocket.Conn, client *Cl
 				client.SendError("topic_required")
 				continue
 			}
-			if !h.authorizePublishTopic(ctx, principal, topic, command.Data) {
+			if !h.authorizeTopic(ctx, principal, topic) {
 				client.SendError("forbidden")
 				continue
 			}
@@ -134,7 +134,7 @@ func (h *Handler) readPump(ctx context.Context, conn *websocket.Conn, client *Cl
 				client.SendError("topic_and_data_required")
 				continue
 			}
-			if !h.authorizeTopic(ctx, principal, topic) {
+			if !h.authorizePublishTopic(ctx, principal, topic, command.Data) {
 				client.SendError("forbidden")
 				continue
 			}

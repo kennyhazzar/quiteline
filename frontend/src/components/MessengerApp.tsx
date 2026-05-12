@@ -603,7 +603,15 @@ export function MessengerApp() {
     }
     ws.onmessage = (event) => {
       try {
-        const envelope = JSON.parse(event.data) as MessageEnvelope
+        const envelope = JSON.parse(event.data) as MessageEnvelope & { type?: string; code?: string }
+        if (envelope.type === 'error') {
+          notifications.show({
+            title: t('wsError'),
+            message: envelope.code ?? 'websocket_error',
+            color: 'red',
+          })
+          return
+        }
         if (envelope.topic === `room:${roomID}` || envelope.topic === `user:${userID}`) {
           handleIncomingData(envelope.data)
         }
