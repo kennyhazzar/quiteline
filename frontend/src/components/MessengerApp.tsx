@@ -247,6 +247,7 @@ export function MessengerApp() {
     refetchOnMount: 'always',
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
+    placeholderData: (previous) => previous,
     staleTime: 30000,
   })
   const accountSessions = useQuery({
@@ -1373,6 +1374,7 @@ export function MessengerApp() {
       mobilePeerStatus={mobilePeerStatus}
       // messages
       visibleMessages={messages.visibleMessages}
+      isMessagesLoading={messages.history.isLoading}
       displayMessages={messages.displayMessages}
       attachmentMessages={messages.attachmentMessages}
       attachmentsOpened={attachmentsOpened}

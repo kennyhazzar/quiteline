@@ -283,6 +283,11 @@ type createRoomRequest struct {
 	RoomSecret string   `json:"roomSecret,omitempty"`
 }
 
+type roomResponse struct {
+	zk.Room
+	MemberProfiles []zk.Identity `json:"memberProfiles,omitempty"`
+}
+
 type friendRequest struct {
 	Username   string `json:"username"`
 	UserID     string `json:"userId"`
@@ -974,7 +979,7 @@ func handleCreateRoom(w http.ResponseWriter, r *http.Request, deps Dependencies)
 		Body:  "Chat created.",
 		URL:   "/chats/" + room.RoomID,
 	})
-	writeJSON(w, http.StatusCreated, room)
+	writeJSON(w, http.StatusCreated, decorateRoom(r.Context(), deps, room))
 }
 
 func handleListRooms(w http.ResponseWriter, r *http.Request, deps Dependencies) {
@@ -983,7 +988,23 @@ func handleListRooms(w http.ResponseWriter, r *http.Request, deps Dependencies) 
 		writeStoreError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"rooms": rooms})
+	result := make([]roomResponse, 0, len(rooms))
+	for _, room := range rooms {
+		result = append(result, decorateRoom(r.Context(), deps, room))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rooms": result})
+}
+
+func decorateRoom(ctx context.Context, deps Dependencies, room zk.Room) roomResponse {
+	response := roomResponse{Room: room}
+	for _, memberID := range room.Members {
+		identity, err := deps.ZKStore.GetIdentity(ctx, memberID)
+		if err != nil {
+			continue
+		}
+		response.MemberProfiles = append(response.MemberProfiles, identity)
+	}
+	return response
 }
 
 func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependencies) {

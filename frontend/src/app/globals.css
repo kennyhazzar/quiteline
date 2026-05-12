@@ -169,6 +169,36 @@ body {
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
+.chat-list-card {
+  width: 100%;
+  min-height: 66px;
+  padding: 10px;
+  border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4));
+  border-radius: 16px;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  background: light-dark(rgba(255, 255, 255, 0.82), rgba(31, 31, 33, 0.86));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.06);
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+}
+
+.chat-list-card:hover {
+  transform: translateY(-1px);
+  border-color: light-dark(var(--mantine-color-blue-4), var(--mantine-color-blue-6));
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.1);
+}
+
+.chat-list-card[data-active='true'] {
+  border-color: var(--mantine-color-blue-5);
+  background: light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.18));
+  box-shadow: 0 0 0 1px rgba(34, 139, 230, 0.16), 0 14px 30px rgba(0, 0, 0, 0.12);
+}
+
+.chat-list-card-skeleton {
+  pointer-events: none;
+}
+
 .composer-bar {
   padding: 10px;
   border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));

@@ -14,6 +14,7 @@ import {
   PasswordInput,
   ScrollArea,
   SegmentedControl,
+  Skeleton,
   Stack,
   Switch,
   Text,
@@ -46,6 +47,7 @@ import type {
   Room,
 } from '@/lib/api'
 import {
+  API_BASE,
   deletePushSubscription,
   fetchPushPublicKey,
   fetchPushSubscriptions,
@@ -134,6 +136,7 @@ export function Sidebar(props: SidebarProps) {
   const {
     isMobile,
     isTablet,
+    identity,
     leftView,
     sidebarView,
     setSidebarView,
@@ -155,6 +158,22 @@ export function Sidebar(props: SidebarProps) {
   useEffect(() => {
     setSettingsSection('overview')
   }, [props.settingsResetKey])
+
+  function roomPeer(room: Room) {
+    const peerID = room.members.find((member) => member !== identity.userId)
+    return room.memberProfiles?.find((member) => member.userId === peerID)
+  }
+
+  function roomDisplayName(room: Room) {
+    const peer = roomPeer(room)
+    return room.name?.trim() || (room.members.length === 2 && peer?.displayName) || (locale === 'ru' ? 'Чат' : 'Chat')
+  }
+
+  function roomAvatarUrl(room: Room) {
+    const peer = roomPeer(room)
+    if (!peer || room.members.length !== 2) return ''
+    return `${API_BASE}/v1/users/${encodeURIComponent(peer.userId)}/avatar`
+  }
 
   return (
     <Stack
@@ -240,38 +259,38 @@ export function Sidebar(props: SidebarProps) {
         />
         <ScrollArea type="auto" offsetScrollbars style={{ flex: 1, minHeight: 0 }}>
           <Stack gap="sm" pr="xs">
-            {filteredRooms.map((room) => {
+            {rooms.isLoading && filteredRooms.length === 0 && Array.from({ length: 7 }).map((_, index) => (
+              <Card key={index} withBorder radius="lg" p="sm" className="chat-list-card chat-list-card-skeleton">
+                <Group gap="sm" wrap="nowrap">
+                  <Skeleton circle height={42} width={42} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <Skeleton height={14} width="66%" mb={8} />
+                    <Skeleton height={10} width="42%" />
+                  </div>
+                </Group>
+              </Card>
+            ))}
+            {!rooms.isLoading && filteredRooms.map((room) => {
               const isActive = activeRoomID === room.roomId
               const lastActivity = room.lastMessageAt || room.createdAt
+              const title = roomDisplayName(room)
+              const avatarUrl = roomAvatarUrl(room)
               return (
                 <button
                   key={room.roomId}
                   type="button"
-                  aria-label={room.name}
+                  aria-label={title}
                   className="chat-list-card"
                   data-active={isActive ? 'true' : 'false'}
-                  style={{
-                    width: '100%',
-                    border: isActive ? '1px solid var(--mantine-color-blue-5)' : '1px solid var(--mantine-color-default-border)',
-                    borderRadius: 14,
-                    padding: 10,
-                    background: isActive
-                      ? 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.18))'
-                      : 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    textAlign: 'left',
-                    boxShadow: isActive ? '0 0 0 1px rgba(34, 139, 230, 0.16)' : undefined,
-                  }}
                     onClick={() => selectRoom(room)}
                 >
                   <Group gap="sm" wrap="nowrap">
-                    <Avatar radius="xl" size={42} color={isActive ? 'blue' : 'gray'}>
+                    <Avatar src={avatarUrl} name={title} radius="xl" size={44} color={isActive ? 'blue' : 'gray'}>
                       <IconMessageCircle size={20} />
                     </Avatar>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <Group justify="space-between" gap="xs" wrap="nowrap">
-                        <Text fw={800} size="sm" truncate>{room.name}</Text>
+                        <Text fw={800} size="sm" truncate>{title}</Text>
                         <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
                           {new Date(lastActivity).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}
                         </Text>
@@ -291,7 +310,7 @@ export function Sidebar(props: SidebarProps) {
                 </button>
               )
             })}
-            {filteredRooms.length === 0 && (
+            {!rooms.isLoading && filteredRooms.length === 0 && (
               <Stack align="center" py="xl" gap="xs">
                 <Avatar radius="xl" color="gray" variant="light">
                   <IconMessageCircle size={20} />
@@ -424,6 +443,7 @@ function ProfilePanel(props: SidebarProps & {
 
   const currentPushSubscription = pushSubscriptions[0] ?? null
   const pushPermission = typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
+  const isPushInitialLoading = pushLoading && !pushInfo && pushSubscriptions.length === 0
   const isIOSStandalone = typeof window !== 'undefined'
     && 'standalone' in navigator
     && (navigator as Navigator & { standalone?: boolean }).standalone === true
@@ -966,6 +986,34 @@ function ProfilePanel(props: SidebarProps & {
 
       {profileSection === 'notifications' && (
       <Stack gap="sm">
+        {isPushInitialLoading ? (
+          <>
+            <Card withBorder radius="md" p="sm">
+              <Group justify="space-between" wrap="nowrap">
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <Skeleton height={16} width="42%" mb={8} />
+                  <Skeleton height={10} width="88%" />
+                </div>
+                <Skeleton height={22} width={86} radius="xl" />
+              </Group>
+            </Card>
+            <Card withBorder radius="md" p="sm">
+              <Stack gap="xs">
+                <Skeleton height={14} width="34%" />
+                <Skeleton height={10} width="94%" />
+                <Skeleton height={10} width="88%" />
+                <Skeleton height={10} width="72%" />
+              </Stack>
+            </Card>
+            <Stack gap="xs">
+              {Array.from({ length: 4 }).map((_, index) => (
+                <Skeleton key={index} height={26} radius="xl" />
+              ))}
+            </Stack>
+            <Skeleton height={36} radius="md" />
+          </>
+        ) : (
+        <>
         <Card withBorder radius="md" p="sm">
           <Stack gap="xs">
             <Group justify="space-between" wrap="nowrap">
@@ -1052,6 +1100,8 @@ function ProfilePanel(props: SidebarProps & {
             ? (locale === 'ru' ? 'Выключить на этом устройстве' : 'Disable on this device')
             : (locale === 'ru' ? 'Включить уведомления' : 'Enable notifications')}
         </Button>
+        </>
+        )}
       </Stack>
       )}
 

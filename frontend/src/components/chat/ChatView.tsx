@@ -16,6 +16,7 @@ import {
   Modal,
   PasswordInput,
   ScrollArea,
+  Skeleton,
   Stack,
   Text,
   TextInput,
@@ -81,6 +82,7 @@ interface ChatViewProps {
   mobilePeerStatus: string
   // messages
   visibleMessages: DecryptedMessage[]
+  isMessagesLoading: boolean
   displayMessages: DecryptedMessage[]
   attachmentMessages: DecryptedMessage[]
   attachmentsOpened: boolean
@@ -154,6 +156,7 @@ export function ChatView(props: ChatViewProps) {
     identitiesByID,
     mobilePeerStatus,
     visibleMessages,
+    isMessagesLoading,
     displayMessages,
     attachmentMessages,
     attachmentsOpened,
@@ -511,9 +514,15 @@ export function ChatView(props: ChatViewProps) {
                 <Title order={3}>{activeRoom.name}</Title>
               )}
               {isMobile ? (
-                <Text size="xs" c="dimmed" truncate>
-                  {activeTyping.length > 0 ? `${activeTyping.join(', ')} ${t('typing')}` : (mobilePeerStatus || ' ')}
-                </Text>
+                <Box style={{ minHeight: 18, display: 'flex', alignItems: 'center', minWidth: 0 }}>
+                  {memberIdentities.isLoading ? (
+                    <Skeleton height={10} width={150} radius="xl" />
+                  ) : (
+                    <Text size="xs" c="dimmed" truncate style={{ width: '100%' }}>
+                      {activeTyping.length > 0 ? `${activeTyping.join(', ')} ${t('typing')}` : (mobilePeerStatus || ' ')}
+                    </Text>
+                  )}
+                </Box>
               ) : null}
             </div>
             <ActionIcon variant="subtle" size="lg" onClick={() => setMobileChatActionsOpened(true)} aria-label={t('chat')}>
@@ -537,7 +546,14 @@ export function ChatView(props: ChatViewProps) {
             </Text>
           )}
 
-          {!isMobile && memberIdentities.data && memberIdentities.data.length > 0 && (
+          {!isMobile && memberIdentities.isLoading && (
+            <Group gap={6}>
+              <Skeleton height={22} width={170} radius="xl" />
+              <Skeleton height={22} width={130} radius="xl" />
+            </Group>
+          )}
+
+          {!isMobile && !memberIdentities.isLoading && memberIdentities.data && memberIdentities.data.length > 0 && (
             <Group gap={6}>
               {peers.map((member) => {
                 const current = presence[member.userId]
@@ -610,6 +626,28 @@ export function ChatView(props: ChatViewProps) {
               }}
             >
               <Stack className={isMobile ? 'mobile-message-list' : undefined} gap={isMobile ? 8 : 'xs'} pr={isMobile ? 0 : 'sm'}>
+                {isMessagesLoading && visibleMessages.length === 0 && Array.from({ length: 6 }).map((_, index) => (
+                  <Card
+                    key={index}
+                    withBorder={!isMobile}
+                    radius="lg"
+                    p="sm"
+                    className="message-bubble"
+                    style={{
+                      alignSelf: index % 3 === 0 ? 'flex-end' : 'flex-start',
+                      width: index % 3 === 0 ? '46%' : '62%',
+                      maxWidth: isMobile ? '88%' : '76%',
+                      background: 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+                    }}
+                  >
+                    <Group gap="xs" wrap="nowrap" mb={8}>
+                      <Skeleton circle height={30} width={30} />
+                      <Skeleton height={12} width="42%" />
+                    </Group>
+                    <Skeleton height={12} width="92%" mb={7} />
+                    <Skeleton height={12} width="64%" />
+                  </Card>
+                ))}
                 {visibleMessages.map((msg) => (
                   <Card
                     key={msg.id}
@@ -790,7 +828,7 @@ export function ChatView(props: ChatViewProps) {
                     )}
                   </Card>
                 ))}
-                {visibleMessages.length === 0 && (
+                {!isMessagesLoading && visibleMessages.length === 0 && (
                   <Text c="dimmed" ta="center" mt="xl">{t('noMessages')}</Text>
                 )}
               </Stack>

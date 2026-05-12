@@ -49,6 +49,7 @@ export interface Room {
   roomId: string
   name: string
   members: string[]
+  memberProfiles?: Identity[]
   roomSecret?: string
   lastMessageAt?: string
   unreadCount?: number

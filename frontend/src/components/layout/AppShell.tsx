@@ -156,6 +156,7 @@ interface AppShellLayoutProps {
   mobilePeerStatus: string
   // messages
   visibleMessages: DecryptedMessage[]
+  isMessagesLoading: boolean
   displayMessages: DecryptedMessage[]
   attachmentMessages: DecryptedMessage[]
   attachmentsOpened: boolean
