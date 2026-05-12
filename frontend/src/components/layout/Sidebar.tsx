@@ -36,7 +36,6 @@ import {
   IconUsers,
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
-import { notifications } from '@mantine/notifications'
 import jsQR from 'jsqr'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type {
@@ -51,7 +50,6 @@ import {
   fetchPushPublicKey,
   fetchPushSubscriptions,
   savePushSubscription,
-  sendTestPush,
   updatePushSubscription,
   type PushPreferences,
   type PushPublicKey,
@@ -124,10 +122,14 @@ interface SidebarProps {
   setMobileCreateRoomOpened: (v: boolean) => void
   setMobileImportInviteOpened: (v: boolean) => void
   downloadAttachment: (msg: DecryptedMessage) => void
+  contactsResetKey?: number
+  settingsResetKey?: number
 }
 
 export function Sidebar(props: SidebarProps) {
   const { t, locale } = useI18n()
+  const [contactsSection, setContactsSection] = useState<'friends'>('friends')
+  const [settingsSection, setSettingsSection] = useState<'overview' | 'account' | 'security' | 'notifications' | 'sessions'>('overview')
   const {
     isMobile,
     isTablet,
@@ -144,6 +146,14 @@ export function Sidebar(props: SidebarProps) {
     setMobileCreateRoomOpened,
     setMobileImportInviteOpened,
   } = props
+
+  useEffect(() => {
+    setContactsSection('friends')
+  }, [props.contactsResetKey])
+
+  useEffect(() => {
+    setSettingsSection('overview')
+  }, [props.settingsResetKey])
 
   return (
     <Stack
@@ -173,8 +183,26 @@ export function Sidebar(props: SidebarProps) {
       )}
 
       {/* Contacts / settings */}
-      {leftView === 'contacts' && <ProfilePanel {...props} mode="contacts" />}
-      {(leftView === 'settings' || leftView === 'profile') && <ProfilePanel {...props} mode="settings" />}
+      {leftView === 'contacts' && (
+        <ProfilePanel
+          {...props}
+          mode="contacts"
+          profileSection={contactsSection}
+          setProfileSection={(section) => {
+            if (section === 'friends') setContactsSection('friends')
+          }}
+        />
+      )}
+      {(leftView === 'settings' || leftView === 'profile') && (
+        <ProfilePanel
+          {...props}
+          mode="settings"
+          profileSection={settingsSection}
+          setProfileSection={(section) => {
+            if (section !== 'friends') setSettingsSection(section)
+          }}
+        />
+      )}
 
       {/* Room list */}
       <Card
@@ -277,10 +305,15 @@ export function Sidebar(props: SidebarProps) {
   )
 }
 
-function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) {
+type ProfileSection = 'overview' | 'account' | 'friends' | 'security' | 'notifications' | 'sessions'
+
+function ProfilePanel(props: SidebarProps & {
+  mode?: 'contacts' | 'settings'
+  profileSection: ProfileSection
+  setProfileSection: (section: ProfileSection) => void
+}) {
   const { t, locale } = useI18n()
   const [avatarViewerOpened, setAvatarViewerOpened] = useState(false)
-  const [profileSection, setProfileSection] = useState<'overview' | 'account' | 'friends' | 'security' | 'notifications' | 'sessions'>(props.mode === 'contacts' ? 'friends' : 'overview')
   const [contactQRCode, setContactQRCode] = useState('')
   const [contactScanOpened, setContactScanOpened] = useState(false)
   const [contactScanError, setContactScanError] = useState('')
@@ -288,6 +321,7 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
   const [pushInfo, setPushInfo] = useState<PushPublicKey | null>(null)
   const [pushSubscriptions, setPushSubscriptions] = useState<PushSubscriptionRecord[]>([])
   const [pushLoading, setPushLoading] = useState(false)
+  const [pushFeedback, setPushFeedback] = useState<{ color: 'red' | 'yellow' | 'green'; text: string } | null>(null)
   const [pushPrefs, setPushPrefs] = useState<PushPreferences>({ messages: true, chats: true, sessions: true, friends: true })
   const {
     session,
@@ -319,6 +353,8 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
     revokeOtherSessionsMutation,
     logout,
     isMobile,
+    profileSection,
+    setProfileSection,
   } = props
   const sessions = accountSessions.data?.sessions ?? []
   const cleanSessionText = (value?: string) =>
@@ -393,10 +429,6 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
   const looksLikeIOS = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent)
 
   useEffect(() => {
-    setProfileSection(props.mode === 'contacts' ? 'friends' : 'overview')
-  }, [props.mode])
-
-  useEffect(() => {
     let cancelled = false
     if (!friendCode) {
       setContactQRCode('')
@@ -444,7 +476,6 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
             if (raw) {
               setFriendUsername(raw)
               setContactScanOpened(false)
-              notifications.show({ title: friendCodeCopy.scannerTitle, message: friendCodeCopy.scanned, color: 'green' })
               return
             }
           }
@@ -478,7 +509,7 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
         setPushSubscriptions(subs.subscriptions ?? [])
         if (subs.subscriptions?.[0]?.preferences) setPushPrefs(subs.subscriptions[0].preferences)
       })
-      .catch((err: Error) => notifications.show({ title: sectionCopy.notifications, message: err.message, color: 'red' }))
+      .catch((err: Error) => setPushFeedback({ color: 'red', text: err.message }))
       .finally(() => {
         if (!cancelled) setPushLoading(false)
       })
@@ -488,20 +519,19 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
 
   async function enablePushNotifications() {
     if (!pushInfo?.enabled || !pushInfo.publicKey) {
-      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Push не настроен на сервере.' : 'Push is not configured on the server.', color: 'yellow' })
+      setPushFeedback({ color: 'yellow', text: locale === 'ru' ? 'Push не настроен на сервере.' : 'Push is not configured on the server.' })
       return
     }
     if (!('serviceWorker' in navigator) || !('Notification' in window)) {
-      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Этот браузер не поддерживает Web Push.' : 'This browser does not support Web Push.', color: 'yellow' })
+      setPushFeedback({ color: 'yellow', text: locale === 'ru' ? 'Этот браузер не поддерживает Web Push.' : 'This browser does not support Web Push.' })
       return
     }
     if (looksLikeIOS && !isIOSStandalone) {
-      notifications.show({
-        title: sectionCopy.notifications,
-        message: locale === 'ru'
+      setPushFeedback({
+        color: 'yellow',
+        text: locale === 'ru'
           ? 'На iPhone откройте Quietline именно с иконки на экране Домой. После обновления удалите старую иконку и добавьте сайт заново.'
           : 'On iPhone, open Quietline from the Home Screen icon. After this update, remove the old icon and add the site again.',
-        color: 'yellow',
       })
       return
     }
@@ -537,9 +567,9 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
       })
       setPushSubscriptions([saved])
       setPushPrefs(saved.preferences)
-      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Уведомления включены.' : 'Notifications enabled.', color: 'green' })
+      setPushFeedback({ color: 'green', text: locale === 'ru' ? 'Уведомления включены.' : 'Notifications enabled.' })
     } catch (err) {
-      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? pushSubscribeErrorMessage(err, locale) : 'push_failed', color: 'red' })
+      setPushFeedback({ color: 'red', text: err instanceof Error ? pushSubscribeErrorMessage(err, locale) : 'push_failed' })
     } finally {
       setPushLoading(false)
     }
@@ -556,9 +586,9 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
       }
       await deletePushSubscription({ token: session.accessToken, id: currentPushSubscription.id })
       setPushSubscriptions([])
-      notifications.show({ title: sectionCopy.notifications, message: locale === 'ru' ? 'Уведомления выключены.' : 'Notifications disabled.', color: 'green' })
+      setPushFeedback({ color: 'green', text: locale === 'ru' ? 'Уведомления выключены.' : 'Notifications disabled.' })
     } catch (err) {
-      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? err.message : 'push_disable_failed', color: 'red' })
+      setPushFeedback({ color: 'red', text: err instanceof Error ? err.message : 'push_disable_failed' })
     } finally {
       setPushLoading(false)
     }
@@ -571,7 +601,7 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
       const saved = await updatePushSubscription({ token: session.accessToken, id: currentPushSubscription.id, preferences: next })
       setPushSubscriptions([saved])
     } catch (err) {
-      notifications.show({ title: sectionCopy.notifications, message: err instanceof Error ? err.message : 'push_update_failed', color: 'red' })
+      setPushFeedback({ color: 'red', text: err instanceof Error ? err.message : 'push_update_failed' })
     }
   }
 
@@ -694,7 +724,7 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
         </Badge>
       </Group>
 
-      {profileSection !== 'overview' && (
+      {props.mode !== 'contacts' && profileSection !== 'overview' && (
         <Group gap="xs" mb="sm" wrap="nowrap">
           <ActionIcon variant="subtle" onClick={() => setProfileSection('overview')} aria-label={sectionCopy.back}>
             <IconChevronLeft size={18} />
@@ -710,12 +740,6 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
             title={sectionCopy.account}
             description={sectionCopy.accountHint}
             onClick={() => setProfileSection('account')}
-          />
-          <SectionCard
-            icon={<IconUsers size={18} />}
-            title={sectionCopy.friends}
-            description={sectionCopy.friendsHint}
-            onClick={() => setProfileSection('friends')}
           />
           <SectionCard
             icon={<IconShieldLock size={18} />}
@@ -978,13 +1002,11 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
                   '1. Нажмите кнопку включения ниже.',
                   '2. Разрешите уведомления в системном окне браузера.',
                   '3. На iPhone удалите старую иконку, добавьте сайт на экран Домой заново и откройте Quietline оттуда.',
-                  '4. Отправьте тестовое уведомление, чтобы проверить устройство.',
                 ]
               : [
                   '1. Press the enable button below.',
                   '2. Allow notifications in the browser permission prompt.',
                   '3. On iPhone, remove the old icon, add the site to Home Screen again, and open Quietline from there.',
-                  '4. Send a test notification to verify this device.',
                 ]).map((line) => (
                 <Text key={line} size="xs" c="dimmed">{line}</Text>
               ))}
@@ -992,6 +1014,11 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
         </Card>
 
         <Stack gap="xs">
+          {pushFeedback && (
+            <Text size="xs" c={pushFeedback.color}>
+              {pushFeedback.text}
+            </Text>
+          )}
           <Switch
             label={locale === 'ru' ? 'Новые сообщения' : 'New messages'}
             checked={pushPrefs.messages}
@@ -1023,13 +1050,6 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
           {currentPushSubscription
             ? (locale === 'ru' ? 'Выключить на этом устройстве' : 'Disable on this device')
             : (locale === 'ru' ? 'Включить уведомления' : 'Enable notifications')}
-        </Button>
-        <Button
-          variant="light"
-          onClick={() => sendTestPush(session.accessToken).catch((err: Error) => notifications.show({ title: sectionCopy.notifications, message: err.message, color: 'red' }))}
-          disabled={!currentPushSubscription}
-        >
-          {locale === 'ru' ? 'Отправить тест' : 'Send test'}
         </Button>
       </Stack>
       )}

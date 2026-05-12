@@ -123,6 +123,20 @@ func (h *Hub) ConnectionCount() int {
 	return len(h.clients)
 }
 
+func (h *Hub) HasUserSubscription(topic string, userID string) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if userID == "" {
+		return false
+	}
+	for client := range h.topics[topic] {
+		if client.UserID() == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func (h *Hub) Close() {
 	h.mu.Lock()
 	defer h.mu.Unlock()

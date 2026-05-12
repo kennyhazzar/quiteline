@@ -16,12 +16,12 @@ import {
 import {
   IconCopy,
   IconDoorExit,
+  IconLogout,
   IconLink,
   IconMessageCircle,
   IconMoon,
   IconPaperclip,
   IconPhone,
-  IconSearch,
   IconSettings,
   IconSun,
   IconUsers,
@@ -213,7 +213,10 @@ export function AppShellLayout(props: AppShellLayoutProps) {
     setLocale,
     colorScheme,
     toggleTheme,
+    closeChat,
   } = props
+  const [contactsResetKey, setContactsResetKey] = useState(0)
+  const [settingsResetKey, setSettingsResetKey] = useState(0)
   const liveBadge = {
     color: liveStatus === 'connected' ? 'green' : liveStatus === 'connecting' ? 'yellow' : 'red',
     label: liveStatus === 'connected'
@@ -226,6 +229,16 @@ export function AppShellLayout(props: AppShellLayoutProps) {
     contacts: locale === 'ru' ? 'Контакты' : 'Contacts',
     chats: locale === 'ru' ? 'Чаты' : 'Chats',
     settings: locale === 'ru' ? 'Настройки' : 'Settings',
+  }
+  function openMobileTab(value: 'contacts' | 'rooms' | 'settings') {
+    const current = mobileView === 'chat' ? 'rooms' : mobileView
+    if (value === 'rooms' && current === 'rooms') {
+      closeChat()
+      return
+    }
+    if (value === 'contacts' && current === 'contacts') setContactsResetKey((key) => key + 1)
+    if (value === 'settings' && current === 'settings') setSettingsResetKey((key) => key + 1)
+    setMobileView(value)
   }
 
   return (
@@ -297,7 +310,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
             minHeight: 0,
           }}
         >
-          <Sidebar {...props} />
+          <Sidebar {...props} contactsResetKey={contactsResetKey} settingsResetKey={settingsResetKey} />
           <ChatView {...props} />
         </Group>
 
@@ -312,7 +325,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
                 key={item.value}
                 type="button"
                 className={`mobile-nav-item${mobileView === item.value || (item.value === 'rooms' && mobileView === 'chat') ? ' mobile-nav-item-active' : ''}`}
-                onClick={() => setMobileView(item.value)}
+                onClick={() => openMobileTab(item.value)}
               >
                 <Stack gap={1} align="center">
                   {item.icon}
@@ -594,7 +607,7 @@ function ChatActionsModal(props: AppShellLayoutProps) {
               </Stack>
               <Button
                 variant="subtle"
-                leftSection={<IconSearch size={16} />}
+                leftSection={<IconLogout size={16} />}
                 onClick={closeChat}
                 fullWidth
               >

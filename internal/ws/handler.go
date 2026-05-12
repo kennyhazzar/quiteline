@@ -77,7 +77,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := NewClient(h.cfg, h.authorizedTopics(r.Context(), principal, topicsFromQuery(r)))
+	client := NewClient(h.cfg, principal.UserID, h.authorizedTopics(r.Context(), principal, topicsFromQuery(r)))
 	h.hub.Register(client)
 
 	go h.writePump(conn, client)

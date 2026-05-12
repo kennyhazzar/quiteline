@@ -316,15 +316,15 @@ export function MessengerApp() {
   // We need to provide persistence. Let's handle this by overriding the hook's persistLocalDeletedMessages.
 
   // ─── Rooms ────────────────────────────────────────────────────────────────
-  async function sendSystemMessage(roomID: string, _secret: string, type: 'join' | 'leave') {
+  async function sendSystemMessage(roomID: string, _secret: string, _type: 'leave') {
     if (!identity || !session || !roomID) return
-    const text = type === 'join' ? t('systemJoined') : t('systemLeft')
+    const text = t('systemLeft')
     const payload = encodePlainMessage({
       text: '',
       senderName: identity.displayName,
       senderAvatarUrl: session.principal.avatarUrl,
       sentAt: new Date().toISOString(),
-      system: { type, text: `${identity.displayName} ${text}` },
+      system: { type: 'leave', text: `${identity.displayName} ${text}` },
     })
     await sendEncryptedMessage({
       roomId: roomID,
@@ -485,7 +485,7 @@ export function MessengerApp() {
         ...prev,
         [event.userId]: { displayName: event.displayName, status: event.status, lastSeenAt: event.lastSeenAt },
       }))
-      notifyChat(event.status === 'online' ? t('userJoined') : t('userLeft'), event.displayName)
+      if (event.status === 'offline') notifyChat(t('userLeft'), event.displayName)
       return
     }
     if (event.kind === 'chats.changed' || event.kind === 'rooms.changed') {

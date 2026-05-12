@@ -41,7 +41,7 @@ export function useRooms(opts: {
   setMobileImportInviteOpened: (v: boolean) => void
   setMobileChatActionsOpened: (v: boolean) => void
   setLeaveConfirmOpened: (v: boolean) => void
-  sendSystemMessage: (roomID: string, secret: string, type: 'join' | 'leave') => Promise<void>
+  sendSystemMessage: (roomID: string, secret: string, type: 'leave') => Promise<void>
 }) {
   const {
     session,
@@ -107,7 +107,6 @@ export function useRooms(opts: {
       setMobileCreateRoomOpened(false)
       replaceAppURL({ view: 'chat', roomId: room.roomId })
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
-      sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
       notifications.show({ title: t('roomReady'), message: t('roomReadyMessage'), color: 'green' })
     },
     onError: (err: Error) => handleRequestError(err, t('roomError')),
@@ -137,7 +136,6 @@ export function useRooms(opts: {
       setMobileImportInviteOpened(false)
       replaceAppURL({ view: 'chat', roomId: room.roomId })
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
-      sendSystemMessage(room.roomId, secret, 'join').catch(() => undefined)
       notifications.show({ title: t('inviteImported'), message: t('inviteImportedMessage'), color: 'green' })
     },
     onError: (err: Error) => handleRequestError(err, t('inviteError')),
@@ -160,7 +158,7 @@ export function useRooms(opts: {
     activeSecret: string
     roomSecrets: Record<string, string>
     persistRoomSecrets: (s: Record<string, string>) => void
-    sendSystemMessage: (roomID: string, secret: string, type: 'join' | 'leave') => Promise<void>
+    sendSystemMessage: (roomID: string, secret: string, type: 'leave') => Promise<void>
   }) {
     if (!activeRoomID || !identity || !session) return
     try {

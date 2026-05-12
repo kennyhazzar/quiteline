@@ -1416,6 +1416,9 @@ func notifyRoomMembers(deps Dependencies, roomID string, exceptUserID string, ev
 		if member == exceptUserID {
 			continue
 		}
+		if deps.Hub != nil && event == notifications.EventMessage && deps.Hub.HasUserSubscription("room:"+roomID, member) {
+			continue
+		}
 		notifyUser(deps, member, event, payload)
 	}
 }

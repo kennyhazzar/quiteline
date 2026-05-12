@@ -146,6 +146,7 @@ export function ChatView(props: ChatViewProps) {
     roomSecret,
     setRoomSecret,
     saveManualSecret,
+    closeChat,
     peers,
     presence,
     setProfileUser,
@@ -473,7 +474,7 @@ export function ChatView(props: ChatViewProps) {
                 variant="light"
                 size="lg"
                 radius="xl"
-                onClick={() => setMobileView('rooms')}
+                onClick={closeChat}
                 aria-label={t('rooms')}
                 className="mobile-chat-back"
               >

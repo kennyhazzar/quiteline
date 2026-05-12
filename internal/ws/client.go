@@ -10,15 +10,17 @@ import (
 
 type Client struct {
 	cfg    config.Config
+	userID string
 	send   chan []byte
 	topics map[string]struct{}
 	mu     sync.RWMutex
 	closed bool
 }
 
-func NewClient(cfg config.Config, initialTopics []string) *Client {
+func NewClient(cfg config.Config, userID string, initialTopics []string) *Client {
 	client := &Client{
 		cfg:    cfg,
+		userID: userID,
 		send:   make(chan []byte, cfg.ClientBuffer),
 		topics: make(map[string]struct{}),
 	}
@@ -26,6 +28,10 @@ func NewClient(cfg config.Config, initialTopics []string) *Client {
 		client.topics[topic] = struct{}{}
 	}
 	return client
+}
+
+func (c *Client) UserID() string {
+	return c.userID
 }
 
 func (c *Client) Send(msg message.Envelope) bool {
