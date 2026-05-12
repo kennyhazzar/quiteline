@@ -717,6 +717,25 @@ export function MessengerApp() {
     }
   }
 
+  function waitForIceGatheringComplete(peer: RTCPeerConnection, timeoutMs = 2500) {
+    if (peer.iceGatheringState === 'complete') return Promise.resolve()
+    return new Promise<void>((resolve) => {
+      let done = false
+      const finish = () => {
+        if (done) return
+        done = true
+        window.clearTimeout(timer)
+        peer.removeEventListener('icegatheringstatechange', handleChange)
+        resolve()
+      }
+      const handleChange = () => {
+        if (peer.iceGatheringState === 'complete') finish()
+      }
+      const timer = window.setTimeout(finish, timeoutMs)
+      peer.addEventListener('icegatheringstatechange', handleChange)
+    })
+  }
+
   async function ensurePeer(callId: string, targetUserId: string, roomID: string) {
     if (peerRef.current) return peerRef.current
     const iceServers = await loadCallIceServers()
@@ -806,6 +825,8 @@ export function MessengerApp() {
       const peer = await ensurePeer(callId, target.userId, activeRoomID)
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
+      addCallDiagnostic('Waiting for local ICE')
+      await waitForIceGatheringComplete(peer)
       setCallPeerID(target.userId)
       setCallPeerName(target.displayName)
       setCallError('')
@@ -820,7 +841,7 @@ export function MessengerApp() {
         fromUserId: identity.userId,
         toUserId: target.userId,
         displayName: identity.displayName,
-        offer,
+        offer: peer.localDescription?.toJSON() ?? offer,
       })
     } catch (err) {
       setCallError(err instanceof Error ? err.message : 'call_failed')
@@ -841,6 +862,8 @@ export function MessengerApp() {
       await flushPendingIce(peer)
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
+      addCallDiagnostic('Waiting for local ICE')
+      await waitForIceGatheringComplete(peer)
       setCallPeerID(incomingCall.fromUserId)
       setCallState('connecting')
       setCallPeerName(incomingCall.displayName)
@@ -852,7 +875,7 @@ export function MessengerApp() {
         roomId: incomingCall.roomId,
         fromUserId: identity.userId,
         toUserId: incomingCall.fromUserId,
-        answer,
+        answer: peer.localDescription?.toJSON() ?? answer,
       })
       addCallDiagnostic('Answer sent')
       setIncomingCall(null)
