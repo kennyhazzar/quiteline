@@ -314,7 +314,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
           <ChatView {...props} />
         </Group>
 
-        {isMobile && (
+        {isMobile && mobileView !== 'chat' && (
           <Group className="mobile-bottom-nav" gap={4} wrap="nowrap">
             {([
               { value: 'contacts', label: navCopy.contacts, icon: <IconUsers size={18} /> },
@@ -324,7 +324,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
               <button
                 key={item.value}
                 type="button"
-                className={`mobile-nav-item${mobileView === item.value || (item.value === 'rooms' && mobileView === 'chat') ? ' mobile-nav-item-active' : ''}`}
+                className={`mobile-nav-item${mobileView === item.value ? ' mobile-nav-item-active' : ''}`}
                 onClick={() => openMobileTab(item.value)}
               >
                 <Stack gap={1} align="center">

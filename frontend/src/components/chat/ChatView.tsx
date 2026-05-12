@@ -231,6 +231,29 @@ export function ChatView(props: ChatViewProps) {
     }
   }
 
+  function imageFileFromClipboard(event: React.ClipboardEvent<HTMLInputElement>) {
+    const item = Array.from(event.clipboardData.items).find((entry) => (
+      entry.kind === 'file' && entry.type.startsWith('image/')
+    ))
+    const file = item?.getAsFile()
+    if (!file) return null
+    const extension = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png'
+    const fallbackName = `pasted-image-${new Date().toISOString().replace(/[:.]/g, '-')}.${extension}`
+    return new File([file], file.name || fallbackName, {
+      type: file.type || 'image/png',
+      lastModified: Date.now(),
+    })
+  }
+
+  function handleMessagePaste(event: React.ClipboardEvent<HTMLInputElement>) {
+    if (!activeRoomID || (sendMutation as UseMutationResult<unknown, Error, unknown>).isPending) return
+    const file = imageFileFromClipboard(event)
+    if (!file) return
+    event.preventDefault()
+    selectFile(file)
+    window.requestAnimationFrame(() => messageInputRef.current?.focus())
+  }
+
   // Reset transient scroll state when changing chats.
   useEffect(() => {
     setUnreadCount(0)
@@ -840,6 +863,7 @@ export function ChatView(props: ChatViewProps) {
                 aria-label={t('message')}
                 placeholder={activeRoomID ? t('typeMessage') : t('unlockFirst')}
                 onChange={(event) => updateMessageText(event.currentTarget.value)}
+                onPaste={handleMessagePaste}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey) {
                     event.preventDefault()
