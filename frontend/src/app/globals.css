@@ -329,7 +329,7 @@ body {
   }
 
   .mobile-composer {
-    padding: 8px 10px calc(env(safe-area-inset-bottom) + 8px);
+    padding: 8px 10px calc(max(env(safe-area-inset-bottom), 14px) + 10px);
     border-top: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
     background: light-dark(rgba(255, 255, 255, 0.9), rgba(20, 21, 23, 0.9));
     backdrop-filter: blur(18px);
