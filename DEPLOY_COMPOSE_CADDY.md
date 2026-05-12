@@ -195,7 +195,7 @@ ufw status verbose
 
 Do not expose Postgres, Redis, MinIO, backend `8080`, or frontend `3000` to the public internet. TURN ports are public by design and are protected by long-term credentials from `.env`.
 
-For calls, set `TURN_EXTERNAL_IP` in `.env` to the public IPv4 address of the VPS. The compose file maps it as `public-ip/0.0.0.0` for Docker NAT, so coturn advertises a public relay address instead of Docker's internal network.
+For calls, set `TURN_EXTERNAL_IP` in `.env` to the public IPv4 address of the VPS. In production compose, coturn runs with `network_mode: host` so TURN and relay ports are bound directly on the VPS instead of going through Docker NAT.
 
 ## 11. Update deploy
 

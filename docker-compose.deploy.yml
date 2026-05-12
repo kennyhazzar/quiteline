@@ -51,13 +51,14 @@ services:
   coturn:
     image: coturn/coturn:4
     restart: unless-stopped
+    network_mode: host
     command:
       - -n
       - --log-file=stdout
       - --listening-port=3478
       - --listening-ip=0.0.0.0
       - --relay-ip=0.0.0.0
-      - --external-ip=${TURN_EXTERNAL_IP}/0.0.0.0
+      - --external-ip=${TURN_EXTERNAL_IP}
       - --realm=${TURN_REALM}
       - --server-name=${TURN_REALM}
       - --fingerprint
@@ -68,10 +69,6 @@ services:
       - --no-dtls
       - --min-port=49160
       - --max-port=49200
-    ports:
-      - "3478:3478/tcp"
-      - "3478:3478/udp"
-      - "49160-49200:49160-49200/udp"
 
   backend:
     build:
