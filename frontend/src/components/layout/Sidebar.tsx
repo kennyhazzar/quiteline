@@ -445,7 +445,8 @@ function ProfilePanel(props: SidebarProps & {
   const pushPermission = typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
   const isPushInitialLoading = pushLoading && !pushInfo && pushSubscriptions.length === 0
   const friendList = friends.data?.friends ?? []
-  const isContactsInitialLoading = profileSection === 'friends' && friends.isLoading && friendList.length === 0
+  const isContactsInitialLoading = profileSection === 'friends'
+    && ((friends.isLoading && friendList.length === 0) || Boolean(friendCode && !contactQRCode))
   const isIOSStandalone = typeof window !== 'undefined'
     && 'standalone' in navigator
     && (navigator as Navigator & { standalone?: boolean }).standalone === true
@@ -803,6 +804,46 @@ function ProfilePanel(props: SidebarProps & {
       )}
 
       {profileSection === 'friends' && (
+      isContactsInitialLoading ? (
+      <Stack gap="sm">
+        <Card withBorder radius="md" p="sm">
+          <Group justify="space-between" gap="sm" align="flex-start" wrap={isMobile ? 'wrap' : 'nowrap'}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <Skeleton height={14} width="38%" mb={8} />
+              <Skeleton height={10} width="84%" mb={10} />
+              <Skeleton height={24} width={140} />
+            </div>
+            <Skeleton height={104} width={104} radius={14} />
+          </Group>
+          <Group gap="xs" mt="sm" grow={isMobile}>
+            <Skeleton height={30} radius="md" />
+            <Skeleton height={30} radius="md" />
+          </Group>
+        </Card>
+        <Group justify="space-between" align="center">
+          <Skeleton height={14} width={110} />
+          <Skeleton height={28} width={28} radius="md" />
+        </Group>
+        <Group align="flex-end" gap="xs" wrap="nowrap">
+          <Skeleton height={56} radius="md" style={{ flex: 1 }} />
+          <Skeleton height={42} width={42} radius="md" />
+        </Group>
+        <Stack gap="xs">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index} withBorder radius="md" p="sm">
+              <Group gap="sm" wrap="nowrap">
+                <Skeleton circle height={34} width={34} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <Skeleton height={13} width="58%" mb={8} />
+                  <Skeleton height={10} width="38%" />
+                </div>
+                <Skeleton height={28} width={82} radius="md" />
+              </Group>
+            </Card>
+          ))}
+        </Stack>
+      </Stack>
+      ) : (
       <>
       {/* Friends */}
       <Card withBorder radius="md" p="sm" mb="sm">
@@ -870,19 +911,7 @@ function ProfilePanel(props: SidebarProps & {
       </Group>
       <ScrollArea.Autosize mah={260} type="auto" offsetScrollbars>
         <Stack gap="xs" pr="xs">
-          {isContactsInitialLoading && Array.from({ length: 4 }).map((_, index) => (
-            <Card key={index} withBorder radius="md" p="sm">
-              <Group gap="sm" wrap="nowrap">
-                <Skeleton circle height={34} width={34} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <Skeleton height={13} width="58%" mb={8} />
-                  <Skeleton height={10} width="38%" />
-                </div>
-                <Skeleton height={28} width={82} radius="md" />
-              </Group>
-            </Card>
-          ))}
-          {!isContactsInitialLoading && friendList.map((friend) => (
+          {friendList.map((friend) => (
             <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
               <Text size="sm" fw={friend.status === 'accepted' ? 700 : 500} truncate>
@@ -926,10 +955,11 @@ function ProfilePanel(props: SidebarProps & {
             ) : null}
             </Group>
           ))}
-          {!isContactsInitialLoading && friendList.length === 0 && <Text size="xs" c="dimmed">{contactStatusCopy.empty}</Text>}
+          {friendList.length === 0 && <Text size="xs" c="dimmed">{contactStatusCopy.empty}</Text>}
         </Stack>
       </ScrollArea.Autosize>
       </>
+      )
       )}
 
       {profileSection === 'security' && (

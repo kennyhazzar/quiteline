@@ -1,40 +1,40 @@
 # Quietline
 
-Quietline — приватный мессенджер-петпроект, который вырос из идеи high-load WebSocket pub/sub сервера. Сейчас это полноценное full-stack приложение с аккаунтами, контактами, чатами, вложениями, push-уведомлениями, сессиями, 2FA и адаптивным PWA-интерфейсом.
+Quietline is a private messenger pet project that grew out of a high-load WebSocket pub/sub server idea. It is now a full-stack chat application with accounts, contacts, chats, attachments, push notifications, sessions, 2FA, and a responsive PWA frontend.
 
-Проект сделан как практичный инженерный стенд: Go на бекенде, Next.js на фронтенде, PostgreSQL/Redis/S3 для состояния и Docker Compose для локального и серверного запуска.
+The stack is intentionally practical: Go on the backend, Next.js on the frontend, PostgreSQL/Redis/S3 for state, and Docker Compose for local and production deployment.
 
-## Возможности
+## Features
 
-- Регистрация и вход по логину/паролю.
-- Короткоживущий access token и refresh-сессии в HttpOnly cookie.
-- Управление сессиями: просмотр устройств, выход, отзыв других сессий.
-- TOTP 2FA с QR-кодом.
-- Контакты, invite-коды и QR-сканирование.
-- Чаты с realtime-обновлениями через WebSocket.
-- Ответы на сообщения, реакции, редактирование, удаление, статусы прочтения, счетчики непрочитанного и ссылки на сообщения.
-- Вложения до 100 MiB, хранение через S3-compatible storage.
-- Просмотр изображений, скачивание файлов.
-- Аватары пользователей со сжатием на фронтенде перед загрузкой.
-- Browser push notifications через VAPID.
-- Online/presence, typing status, last seen и базовый WebRTC signaling для звонков.
-- RU/EN интерфейс, светлая/темная тема, мобильная/планшетная/десктопная верстка.
+- Username/password registration and login.
+- Short-lived access tokens with refresh sessions stored in HttpOnly cookies.
+- Session management with device list and revoke actions.
+- TOTP 2FA with QR setup.
+- Contacts with invite codes and in-app QR scanning.
+- Chats with realtime WebSocket updates.
+- Replies, reactions, message editing, deletion, read states, unread counters, and message links.
+- Attachments up to 100 MiB with S3-compatible storage.
+- Image viewer and file downloads.
+- User avatars with client-side compression before upload.
+- Browser push notifications through VAPID.
+- Online presence, typing status, last seen, and lightweight WebRTC call signaling.
+- RU/EN UI, light/dark themes, and responsive mobile/tablet/desktop layout.
 
-## Стек
+## Stack
 
-| Слой | Технологии |
+| Layer | Technology |
 | --- | --- |
 | Backend | Go, `net/http`, Gorilla WebSocket |
 | API | REST + WebSocket |
-| База данных | PostgreSQL |
+| Database | PostgreSQL |
 | Realtime fanout | Redis Pub/Sub |
-| Файлы | S3-compatible storage, локально MinIO |
+| Files | S3-compatible storage, MinIO locally |
 | Frontend | Next.js 15, React 18, Mantine 7, TanStack Query |
 | PWA | Web App Manifest, Service Worker, Web Push |
-| Crypto | Web Crypto API для клиентского шифрования сообщений и файлов |
-| Reverse proxy | Caddy в production compose |
+| Crypto | Web Crypto API for client-side message/file encryption |
+| Reverse proxy | Caddy in production compose |
 
-## Архитектура
+## Architecture
 
 ```text
 Browser / PWA
@@ -49,63 +49,63 @@ Go backend
   +-- S3/MinIO: avatars and attachments
 ```
 
-Бекенд можно масштабировать горизонтально: каждый Go-процесс держит только свои локальные WebSocket-подключения, а Redis разносит события между инстансами.
+The backend can be scaled horizontally. Each Go process keeps only its own local WebSocket clients; Redis distributes events between backend instances.
 
-## Модель безопасности
+## Security Model
 
-В проекте уже есть несколько практичных security-решений:
+Quietline already includes several practical security choices:
 
-- Пароли хранятся bcrypt-хешами.
-- Refresh token хранится в HttpOnly cookie.
-- Access token живет недолго и обновляется через refresh flow.
-- Есть TOTP 2FA.
-- CORS задается явно.
-- Размер загрузки файлов ограничен.
-- Redis поддерживает пароль.
-- Production-секреты выносятся в env.
-- Next.js telemetry отключена.
+- Passwords are stored as bcrypt hashes.
+- Refresh tokens are stored in HttpOnly cookies.
+- Access tokens are short-lived and refreshed through the session flow.
+- TOTP 2FA is supported.
+- CORS origins are explicit.
+- Upload size is limited.
+- Redis password is supported.
+- Production secrets are configured through env files.
+- Next.js telemetry is disabled.
 
-Сообщения и файлы шифруются в браузере перед отправкой. При этом Quietline пока не является Signal-grade E2EE системой. Для настоящего production E2EE нужно отдельно проектировать multi-device key management, device verification, recovery flow и ratcheting-протокол.
+Messages and files are encrypted in the browser before upload. Quietline is still not a Signal-grade E2EE protocol: production-grade E2EE would require multi-device key management, device verification, recovery flows, and a ratcheting protocol.
 
-## Структура Репозитория
+## Repository Layout
 
 ```text
 cmd/server       Go API/WebSocket server
-cmd/loadgen      генератор нагрузки для WebSocket/pub-sub
-cmd/vapid        генератор VAPID-ключей
+cmd/loadgen      WebSocket/pub-sub load generator
+cmd/vapid        VAPID key generator
 internal/api     HTTP routes, auth middleware, REST handlers
-internal/auth    аккаунты, сессии, токены
-internal/zk      доменная storage-логика чатов, историческое имя пакета
+internal/auth    accounts, sessions, tokens
+internal/zk      chat/domain storage layer; historical package name
 internal/ws      WebSocket hub
 internal/files   S3/MinIO file storage
-frontend         Next.js приложение
+frontend         Next.js application
 deploy/caddy     production Caddy config
-deploy/nginx     старые nginx-примеры
+deploy/nginx     older nginx examples
 ```
 
-## Локальный Запуск
+## Local Development
 
-### Требования
+### Requirements
 
 - Go 1.25+
 - Node.js 20+
-- Docker Desktop или Docker Engine
+- Docker Desktop or Docker Engine
 
-### Полный Стек Через Docker Compose
+### Full Stack With Docker Compose
 
-1. При необходимости скопировать локальный env-шаблон:
+Copy the local env template if you want to override defaults:
 
 ```powershell
 cp .env.example .env
 ```
 
-2. Если нужно тестировать push-уведомления, сгенерировать VAPID-ключи:
+Generate VAPID keys if you want to test browser push notifications:
 
 ```powershell
 go run ./cmd/vapid
 ```
 
-И положить ключи в `.env`:
+Put the generated keys into `.env`:
 
 ```env
 VAPID_PUBLIC_KEY=...
@@ -113,15 +113,15 @@ VAPID_PRIVATE_KEY=...
 VAPID_SUBJECT=mailto:admin@example.com
 ```
 
-3. Запустить весь стек:
+Start the stack:
 
 ```powershell
 docker compose up --build
 ```
 
-Локальные адреса:
+Local URLs:
 
-| Сервис | URL |
+| Service | URL |
 | --- | --- |
 | Frontend | `http://localhost:3000` |
 | Backend API | `http://localhost:18080` |
@@ -130,15 +130,15 @@ docker compose up --build
 | Postgres | `localhost:5432` |
 | Redis | `localhost:6380` |
 
-Логин MinIO по умолчанию:
+Default local MinIO login:
 
 ```text
 minioadmin / minioadmin
 ```
 
-### Запуск Бекенда Вручную
+### Backend Only
 
-Быстрый режим без PostgreSQL/Redis durability:
+Quick backend-only mode without PostgreSQL/Redis durability:
 
 ```powershell
 $env:BROKER="memory"
@@ -147,9 +147,9 @@ $env:AUTH_ENABLED="false"
 go run ./cmd/server
 ```
 
-Для обычной разработки удобнее Docker Compose: он сразу поднимает Postgres, Redis и MinIO.
+For normal development, Docker Compose is preferred because it provides Postgres, Redis, and MinIO.
 
-### Запуск Фронтенда Вручную
+### Frontend Only
 
 ```powershell
 cd frontend
@@ -157,33 +157,33 @@ npm install
 npm run dev
 ```
 
-Фронтенд ожидает:
+The frontend expects:
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:18080
 NEXT_PUBLIC_WS_URL=ws://localhost:18080
 ```
 
-## Production Deploy
+## Production Deployment
 
-Основной рекомендуемый вариант для VPS — Docker Compose + Caddy.
+The recommended VPS setup is Docker Compose + Caddy.
 
-Текущие домены проекта:
+Current project domain:
 
 ```text
 chat.2vault.site
 ```
 
-Production compose поднимает:
+The production compose file includes:
 
 - PostgreSQL
-- Redis с паролем
+- Redis with password
 - MinIO
 - Go backend
 - Next.js frontend
-- Caddy с автоматическим TLS
+- Caddy with automatic TLS
 
-Короткий путь:
+Quick path:
 
 ```bash
 git clone git@github.com:kennyhazzar/quiteline.git /opt/quietline
@@ -193,89 +193,89 @@ nano .env.prod
 APP_ENV_FILE=.env.prod docker compose -f docker-compose.deploy.yml --env-file .env.prod up -d --build
 ```
 
-Подробные гайды:
+Detailed guides:
 
 - [DEPLOY_COMPOSE_CADDY.md](DEPLOY_COMPOSE_CADDY.md)
 - [DEPLOY_CHAT_2VAULT.md](DEPLOY_CHAT_2VAULT.md)
 - [DEPLOY_DOKPLOY.md](DEPLOY_DOKPLOY.md)
 
-## Env-Переменные
+## Environment Variables
 
 Backend:
 
-| Переменная | Описание |
+| Variable | Description |
 | --- | --- |
-| `HTTP_ADDR` | Адрес прослушивания бекенда, обычно `:8080` |
-| `AUTH_ENABLED` | Включает account auth |
-| `AUTH_SECRET` | HMAC secret для access tokens |
-| `AUTH_TOKEN_TTL` | Время жизни access token, например `15m` |
-| `AUTH_REFRESH_TTL` | Время жизни refresh-сессии, например `2160h` |
-| `API_KEYS` | Опциональные service API keys |
-| `POSTGRES_DSN` | Строка подключения к PostgreSQL |
-| `BROKER` | `redis` или `memory` |
-| `REDIS_ADDR` | Адрес Redis |
-| `REDIS_PASSWORD` | Пароль Redis |
-| `REDIS_DB` | Номер Redis DB |
-| `REDIS_CHANNEL_PREFIX` | Namespace для Pub/Sub |
-| `CORS_ALLOWED_ORIGINS` | Разрешенные browser origins |
+| `HTTP_ADDR` | Backend listen address, usually `:8080` |
+| `AUTH_ENABLED` | Enables account auth |
+| `AUTH_SECRET` | HMAC secret for access tokens |
+| `AUTH_TOKEN_TTL` | Access token lifetime, for example `15m` |
+| `AUTH_REFRESH_TTL` | Refresh session lifetime, for example `2160h` |
+| `API_KEYS` | Optional service API keys |
+| `POSTGRES_DSN` | PostgreSQL connection string |
+| `BROKER` | `redis` or `memory` |
+| `REDIS_ADDR` | Redis address |
+| `REDIS_PASSWORD` | Redis password |
+| `REDIS_DB` | Redis DB number |
+| `REDIS_CHANNEL_PREFIX` | Pub/Sub namespace |
+| `CORS_ALLOWED_ORIGINS` | Allowed browser origins |
 | `S3_ENDPOINT` | S3/MinIO endpoint |
 | `S3_ACCESS_KEY` | S3 access key |
 | `S3_SECRET_KEY` | S3 secret key |
-| `S3_BUCKET` | Bucket для аватаров и вложений |
-| `S3_USE_SSL` | Использовать HTTPS для S3 |
-| `MAX_FILE_BYTES` | Максимальный размер encrypted upload |
-| `VAPID_PUBLIC_KEY` | Public key для Web Push |
-| `VAPID_PRIVATE_KEY` | Private key для Web Push |
-| `VAPID_SUBJECT` | Subject для Web Push, обычно `mailto:...` |
+| `S3_BUCKET` | Bucket for avatars and attachments |
+| `S3_USE_SSL` | Use HTTPS for S3 |
+| `MAX_FILE_BYTES` | Maximum encrypted upload size |
+| `VAPID_PUBLIC_KEY` | Web Push public key |
+| `VAPID_PRIVATE_KEY` | Web Push private key |
+| `VAPID_SUBJECT` | Web Push subject, usually `mailto:...` |
 
 Frontend:
 
-| Переменная | Описание |
+| Variable | Description |
 | --- | --- |
-| `NEXT_PUBLIC_API_URL` | Public API URL для браузера |
-| `NEXT_PUBLIC_WS_URL` | Public WebSocket URL для браузера |
-| `NEXT_TELEMETRY_DISABLED` | Оставить `1` |
+| `NEXT_PUBLIC_API_URL` | Public API URL used by the browser |
+| `NEXT_PUBLIC_WS_URL` | Public WebSocket URL used by the browser |
+| `NEXT_TELEMETRY_DISABLED` | Keep as `1` |
 
-## Полезные Команды
+## Useful Commands
 
-Сборка фронтенда:
+Build frontend:
 
 ```powershell
 cd frontend
 npm run build
 ```
 
-Go-тесты:
+Run Go tests:
 
 ```powershell
 go test ./...
 ```
 
-Генерация VAPID-ключей:
+Generate VAPID keys:
 
 ```powershell
 go run ./cmd/vapid
 ```
 
-Проверка production compose:
+Validate production compose config:
 
 ```bash
 APP_ENV_FILE=.env.prod docker compose -f docker-compose.deploy.yml --env-file .env.prod config
 ```
 
-Логи бекенда:
+View backend logs:
 
 ```bash
 docker logs -f quietline-backend-1
 ```
 
-Имя контейнера может отличаться из-за имени compose-проекта. Если команда не сработала, проверьте `docker ps`.
+Container names can differ depending on the Compose project name. Use `docker ps` when in doubt.
 
-## Основные API
+## Main API Surface
 
-Фронтенд в основном использует эти endpoints:
+The frontend mostly uses these endpoints:
 
-| Область | Endpoints |
+| Area | Endpoints |
 | --- | --- |
 | Auth | `POST /v1/auth/register`, `POST /v1/auth/login`, `POST /v1/auth/refresh`, `POST /v1/auth/logout` |
 | Profile | `GET /v1/me`, `PUT /v1/me/theme`, `PUT /v1/me/avatar` |
@@ -290,22 +290,22 @@ docker logs -f quietline-backend-1
 | Attachments | `GET /v1/chats/{id}/attachments`, `POST /v1/chat/files`, `GET /v1/chat/files/{fileId}` |
 | Realtime | `GET /ws?topics=user:{userId},room:{roomId}` |
 
-Старые `/v1/zk/...` paths остаются compatibility aliases, но новый код и документацию лучше вести через `/v1/chat/...` и `/v1/chats/...`.
+Older `/v1/zk/...` paths remain as compatibility aliases, but new code and docs should use `/v1/chat/...` and `/v1/chats/...`.
 
-## Текущий Фокус
+## Current Focus
 
-Quietline еще развивается. Сейчас основные направления:
+Quietline is still evolving. The current focus is making it feel like a normal messenger:
 
-- меньше polling, больше WebSocket-driven updates;
-- более стабильный UX на мобильных и десктопе;
-- меньше отображения внутренних identifiers;
-- больше skeleton/loading states вместо прыжков верстки;
-- аккуратнее профиль, контакты и уведомления;
-- проще и надежнее production deploy.
+- less polling, more WebSocket-driven updates;
+- more stable mobile and desktop UX;
+- fewer internal identifiers in the UI;
+- more skeleton/loading states instead of layout jumps;
+- cleaner profile, contacts, and notification flows;
+- simpler and more reliable production deployment.
 
-Хорошие следующие технические шаги:
+Good next technical steps:
 
-- Интеграционные тесты для auth/session refresh и realtime chat events.
-- Playwright smoke tests для login, создания чата, сообщений и вложений.
-- Полнее перевести обновления списков на WebSocket invalidation.
-- Улучшить E2EE/key management, если проект выйдет за рамки pet-project.
+- Add integration tests for auth/session refresh and realtime chat events.
+- Add Playwright smoke tests for login, chat creation, messaging, and attachments.
+- Move more list updates to WebSocket invalidation.
+- Improve E2EE/key management if the project moves beyond pet-project scope.

@@ -208,7 +208,7 @@ export function ChatView(props: ChatViewProps) {
   const loadingHistoryRef = useRef(false)
   const historyPaginationEnabledRef = useRef(false)
   const bottomScrollTimersRef = useRef<number[]>([])
-  const historyAnchorRef = useRef<{ id: string; top: number } | null>(null)
+  const historyAnchorRef = useRef<{ id: string; top: number; length: number } | null>(null)
 
   function clearBottomScrollTimers() {
     for (const timer of bottomScrollTimersRef.current) window.clearTimeout(timer)
@@ -325,7 +325,9 @@ export function ChatView(props: ChatViewProps) {
     const firstMessage = visibleMessages[0]
     if (el && firstMessage) {
       const firstNode = document.getElementById(`message-${firstMessage.id}`)
-      historyAnchorRef.current = firstNode ? { id: firstMessage.id, top: firstNode.getBoundingClientRect().top } : null
+      historyAnchorRef.current = firstNode
+        ? { id: firstMessage.id, top: firstNode.getBoundingClientRect().top, length: visibleMessages.length }
+        : null
     } else {
       historyAnchorRef.current = null
     }
@@ -341,6 +343,7 @@ export function ChatView(props: ChatViewProps) {
     const anchor = historyAnchorRef.current
     const el = messagesViewportRef.current
     if (!anchor || !el || isLoadingMoreMessages) return
+    if (visibleMessages.length <= anchor.length && hasMoreMessages) return
     const node = document.getElementById(`message-${anchor.id}`)
     if (node) {
       const nextTop = node.getBoundingClientRect().top
@@ -348,7 +351,7 @@ export function ChatView(props: ChatViewProps) {
     }
     historyAnchorRef.current = null
     loadingHistoryRef.current = false
-  }, [isLoadingMoreMessages, visibleMessages.length])
+  }, [hasMoreMessages, isLoadingMoreMessages, visibleMessages.length])
 
   useEffect(() => {
     if (!pendingImagePreviewID || !previews[pendingImagePreviewID]) return
@@ -634,7 +637,13 @@ export function ChatView(props: ChatViewProps) {
                 isNearBottomRef.current = atBottom
                 setShowScrollBtn(!atBottom)
                 if (atBottom) setUnreadCount(0)
-                if (historyPaginationEnabledRef.current && y < 120 && hasMoreMessages && !isLoadingMoreMessages) {
+                if (
+                  historyPaginationEnabledRef.current
+                  && y < 120
+                  && hasMoreMessages
+                  && !isLoadingMoreMessages
+                  && !loadingHistoryRef.current
+                ) {
                   void handleLoadMoreMessages()
                 }
               }}
