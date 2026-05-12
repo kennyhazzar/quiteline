@@ -41,7 +41,8 @@ services:
       - --log-file=stdout
       - --listening-port=3478
       - --listening-ip=0.0.0.0
-      - --external-ip=${TURN_EXTERNAL_IP:-127.0.0.1}
+      - --relay-ip=0.0.0.0
+      - --external-ip=${TURN_EXTERNAL_IP:-127.0.0.1}/0.0.0.0
       - --realm=${TURN_REALM:-localhost}
       - --server-name=${TURN_REALM:-localhost}
       - --fingerprint
