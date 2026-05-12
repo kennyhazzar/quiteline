@@ -9,6 +9,8 @@ import {
   Card,
   Group,
   Modal,
+  Select,
+  Slider,
   Stack,
   Text,
 } from '@mantine/core'
@@ -18,9 +20,13 @@ import {
   IconLogout,
   IconLink,
   IconMessageCircle,
+  IconMicrophone,
+  IconMicrophoneOff,
   IconPaperclip,
   IconPhone,
+  IconPhoneOff,
   IconSettings,
+  IconVolume,
   IconUsers,
 } from '@tabler/icons-react'
 import type { UseQueryResult, UseMutationResult } from '@tanstack/react-query'
@@ -201,6 +207,19 @@ interface AppShellLayoutProps {
   incomingCall: Extract<RealtimeEvent, { kind: 'call-offer' }> | null
   callPeerName: string
   callPeerID: string
+  callStatus: string
+  callError: string
+  callDurationSec: number
+  isCallMuted: boolean
+  setIsCallMuted: (v: boolean) => void
+  peerVolume: number
+  setPeerVolume: (v: number) => void
+  audioInputDevices: MediaDeviceInfo[]
+  audioOutputDevices: MediaDeviceInfo[]
+  selectedAudioInputId: string
+  setSelectedAudioInputId: (v: string) => void
+  selectedAudioOutputId: string
+  setSelectedAudioOutputId: (v: string) => void
   remoteAudioRef: RefObject<HTMLAudioElement | null>
   startCall: (targetUserId?: string) => void
   endCall: (notifyPeer?: boolean) => void
@@ -301,6 +320,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
       <EditMessageModal {...props} />
       <DeleteMessageModal {...props} />
       <ChatActionsModal {...props} />
+      <CallPanelModal {...props} />
       <LeaveConfirmModal {...props} />
       <CreateRoomModal {...props} />
       <ImportInviteModal {...props} />
@@ -539,6 +559,163 @@ function DeleteMessageModal({
             Delete
           </Button>
         </Group>
+      </Stack>
+    </Modal>
+  )
+}
+
+function formatCallDuration(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, '0')
+  const seconds = Math.floor(totalSeconds % 60).toString().padStart(2, '0')
+  return `${minutes}:${seconds}`
+}
+
+function CallPanelModal({
+  isMobile,
+  locale,
+  callState,
+  incomingCall,
+  callPeerName,
+  callStatus,
+  callError,
+  callDurationSec,
+  isCallMuted,
+  setIsCallMuted,
+  peerVolume,
+  setPeerVolume,
+  audioInputDevices,
+  audioOutputDevices,
+  selectedAudioInputId,
+  setSelectedAudioInputId,
+  selectedAudioOutputId,
+  setSelectedAudioOutputId,
+  remoteAudioRef,
+  answerCall,
+  declineIncomingCall,
+  endCall,
+}: Pick<AppShellLayoutProps,
+  | 'isMobile'
+  | 'locale'
+  | 'callState'
+  | 'incomingCall'
+  | 'callPeerName'
+  | 'callStatus'
+  | 'callError'
+  | 'callDurationSec'
+  | 'isCallMuted'
+  | 'setIsCallMuted'
+  | 'peerVolume'
+  | 'setPeerVolume'
+  | 'audioInputDevices'
+  | 'audioOutputDevices'
+  | 'selectedAudioInputId'
+  | 'setSelectedAudioInputId'
+  | 'selectedAudioOutputId'
+  | 'setSelectedAudioOutputId'
+  | 'remoteAudioRef'
+  | 'answerCall'
+  | 'declineIncomingCall'
+  | 'endCall'
+>) {
+  const { t } = useI18n()
+  const opened = callState !== 'idle' || Boolean(incomingCall)
+  const peerName = callPeerName || incomingCall?.displayName || t('unknownUser')
+  const isIncoming = callState === 'ringing' && Boolean(incomingCall)
+  const isActive = callState === 'connected'
+  const isFailed = callState === 'failed'
+  const microphoneOptions = audioInputDevices.map((device, index) => ({
+    value: device.deviceId,
+    label: device.label || (locale === 'ru' ? `Микрофон ${index + 1}` : `Microphone ${index + 1}`),
+  }))
+  const speakerOptions = audioOutputDevices.map((device, index) => ({
+    value: device.deviceId,
+    label: device.label || (locale === 'ru' ? `Динамик ${index + 1}` : `Speaker ${index + 1}`),
+  }))
+
+  return (
+    <Modal
+      opened={opened}
+      onClose={() => endCall(true)}
+      centered
+      fullScreen={isMobile}
+      size="md"
+      title={locale === 'ru' ? 'Звонок' : 'Call'}
+    >
+      <audio ref={remoteAudioRef as RefObject<HTMLAudioElement>} autoPlay />
+      <Stack gap="lg" align="stretch">
+        <Stack gap={4} align="center">
+          <Avatar name={peerName} radius="xl" size={84} color="blue" />
+          <Text fw={800} size="xl" ta="center">{peerName}</Text>
+          <Text size="sm" c={callError ? 'red' : 'dimmed'} ta="center" style={{ minHeight: 20 }}>
+            {callError || (isActive ? formatCallDuration(callDurationSec) : callStatus || t('calling'))}
+          </Text>
+        </Stack>
+
+        {isFailed ? (
+          <Button color="red" variant="light" leftSection={<IconPhoneOff size={18} />} onClick={() => endCall(false)}>
+            {locale === 'ru' ? 'Закрыть' : 'Close'}
+          </Button>
+        ) : isIncoming ? (
+          <Group grow>
+            <Button color="red" variant="light" leftSection={<IconPhoneOff size={18} />} onClick={declineIncomingCall}>
+              {t('declineCall')}
+            </Button>
+            <Button color="green" leftSection={<IconPhone size={18} />} onClick={answerCall}>
+              {t('answerCall')}
+            </Button>
+          </Group>
+        ) : (
+          <Group grow>
+            <Button
+              variant={isCallMuted ? 'filled' : 'light'}
+              color={isCallMuted ? 'yellow' : 'blue'}
+              leftSection={isCallMuted ? <IconMicrophoneOff size={18} /> : <IconMicrophone size={18} />}
+              onClick={() => setIsCallMuted(!isCallMuted)}
+            >
+              {locale === 'ru' ? (isCallMuted ? 'Включить микрофон' : 'Выключить микрофон') : (isCallMuted ? 'Unmute' : 'Mute')}
+            </Button>
+            <Button color="red" leftSection={<IconPhoneOff size={18} />} onClick={() => endCall(true)}>
+              {t('endCall')}
+            </Button>
+          </Group>
+        )}
+
+        {!isIncoming && !isFailed && (
+          <Stack gap="sm">
+            <div>
+              <Group justify="space-between" mb={4}>
+                <Text size="sm" fw={700}>{locale === 'ru' ? 'Громкость собеседника' : 'Peer volume'}</Text>
+                <IconVolume size={18} />
+              </Group>
+              <Slider
+                min={0}
+                max={1}
+                step={0.05}
+                value={peerVolume}
+                onChange={setPeerVolume}
+                label={(value) => `${Math.round(value * 100)}%`}
+              />
+            </div>
+            <Select
+              label={locale === 'ru' ? 'Микрофон' : 'Microphone'}
+              value={selectedAudioInputId || null}
+              onChange={(value) => setSelectedAudioInputId(value ?? '')}
+              data={microphoneOptions}
+              placeholder={locale === 'ru' ? 'Системный микрофон' : 'System default'}
+              clearable
+            />
+            {speakerOptions.length > 0 && (
+              <Select
+                label={locale === 'ru' ? 'Вывод звука' : 'Audio output'}
+                value={selectedAudioOutputId || null}
+                onChange={(value) => setSelectedAudioOutputId(value ?? '')}
+                data={speakerOptions}
+                placeholder={locale === 'ru' ? 'Системный вывод' : 'System default'}
+                clearable
+              />
+            )}
+          </Stack>
+        )}
       </Stack>
     </Modal>
   )

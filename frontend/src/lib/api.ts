@@ -113,6 +113,12 @@ export interface PushPublicKey {
   reason?: string
 }
 
+export interface CallIceServer {
+  urls: string | string[]
+  username?: string
+  credential?: string
+}
+
 export interface MessageEnvelope {
   id: string
   topic: string
@@ -303,6 +309,13 @@ export async function revokeOtherAccountSessions(token: string): Promise<void> {
 
 export async function fetchPushPublicKey(token: string): Promise<PushPublicKey> {
   const res = await fetch(`${BASE}/v1/me/push-public-key`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
+export async function fetchCallIceServers(token: string): Promise<{ iceServers: CallIceServer[] }> {
+  const res = await fetch(`${BASE}/v1/calls/ice-servers`, {
     headers: authHeaders(token),
   })
   return readJSON(res)

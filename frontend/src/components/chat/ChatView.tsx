@@ -37,7 +37,6 @@ import {
   IconLock,
   IconMessageCircle,
   IconPaperclip,
-  IconPhone,
   IconSend,
   IconTrash,
   IconX,
@@ -187,13 +186,6 @@ export function ChatView(props: ChatViewProps) {
     setMessageInfo,
     copyAppURL,
     activeTyping,
-    callState,
-    incomingCall,
-    callPeerName,
-    callPeerID,
-    remoteAudioRef,
-    answerCall,
-    declineIncomingCall,
     setMobileChatActionsOpened,
   } = props
 
@@ -562,22 +554,6 @@ export function ChatView(props: ChatViewProps) {
               <IconDotsVertical size={20} />
             </ActionIcon>
           </Group>
-
-          <audio ref={remoteAudioRef as React.RefObject<HTMLAudioElement>} autoPlay />
-
-          {callState === 'ringing' && incomingCall && (
-            <Alert color="green" title={`${t('incomingCall')}: ${incomingCall.displayName}`}>
-              <Group mt="xs">
-                <Button leftSection={<IconPhone size={16} />} onClick={answerCall}>{t('answerCall')}</Button>
-                <Button variant="light" color="red" onClick={declineIncomingCall}>{t('declineCall')}</Button>
-              </Group>
-            </Alert>
-          )}
-          {callState !== 'idle' && callState !== 'ringing' && (
-            <Text size="xs" c="dimmed">
-              {t('callStatus')}: {callPeerName || identitiesByID.get(callPeerID)?.displayName || t(callState === 'calling' ? 'calling' : 'connected')}
-            </Text>
-          )}
 
           {!isMobile && memberIdentities.isLoading && (
             <Group gap={6}>

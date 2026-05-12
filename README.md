@@ -17,7 +17,7 @@ The stack is intentionally practical: Go on the backend, Next.js on the frontend
 - Image viewer and file downloads.
 - User avatars with client-side compression before upload.
 - Browser push notifications through VAPID.
-- Online presence, typing status, last seen, and lightweight WebRTC call signaling.
+- Online presence, typing status, last seen, and WebRTC audio calls with TURN support.
 - RU/EN UI, light/dark themes, and responsive mobile/tablet/desktop layout.
 
 ## Stack
@@ -29,6 +29,7 @@ The stack is intentionally practical: Go on the backend, Next.js on the frontend
 | Database | PostgreSQL |
 | Realtime fanout | Redis Pub/Sub |
 | Files | S3-compatible storage, MinIO locally |
+| Calls | WebRTC audio + coturn TURN relay |
 | Frontend | Next.js 15, React 18, Mantine 7, TanStack Query |
 | PWA | Web App Manifest, Service Worker, Web Push |
 | Crypto | Web Crypto API for client-side message/file encryption |
@@ -47,6 +48,7 @@ Go backend
   +-- PostgreSQL: users, sessions, chats, messages, contacts, push subscriptions
   +-- Redis: cross-instance realtime fanout
   +-- S3/MinIO: avatars and attachments
+  +-- coturn: TURN relay for WebRTC calls across NAT/mobile networks
 ```
 
 The backend can be scaled horizontally. Each Go process keeps only its own local WebSocket clients; Redis distributes events between backend instances.
@@ -129,6 +131,7 @@ Local URLs:
 | MinIO API | `http://localhost:19000` |
 | Postgres | `localhost:5432` |
 | Redis | `localhost:6380` |
+| TURN | `localhost:3478` |
 
 Default local MinIO login:
 
@@ -181,6 +184,7 @@ The production compose file includes:
 - MinIO
 - Go backend
 - Next.js frontend
+- coturn for WebRTC calls
 - Caddy with automatic TLS
 
 Quick path:
@@ -227,6 +231,10 @@ Backend:
 | `VAPID_PUBLIC_KEY` | Web Push public key |
 | `VAPID_PRIVATE_KEY` | Web Push private key |
 | `VAPID_SUBJECT` | Web Push subject, usually `mailto:...` |
+| `TURN_URLS` | Comma-separated TURN URLs returned to the frontend |
+| `TURN_USERNAME` | TURN long-term credential username |
+| `TURN_CREDENTIAL` | TURN long-term credential password |
+| `TURN_REALM` | coturn realm/server name in Docker Compose |
 
 Frontend:
 
@@ -288,6 +296,7 @@ The frontend mostly uses these endpoints:
 | Read states | `POST /v1/chats/{id}/read` |
 | Reactions | `POST /v1/chats/{id}/messages/{messageId}/reactions` |
 | Attachments | `GET /v1/chats/{id}/attachments`, `POST /v1/chat/files`, `GET /v1/chat/files/{fileId}` |
+| Calls | `GET /v1/calls/ice-servers` |
 | Realtime | `GET /ws?topics=user:{userId},room:{roomId}` |
 
 Older `/v1/zk/...` paths remain as compatibility aliases, but new code and docs should use `/v1/chat/...` and `/v1/chats/...`.

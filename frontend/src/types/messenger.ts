@@ -42,7 +42,7 @@ export type RealtimeEvent =
   | { kind: 'call-hangup'; callId: string; roomId: string; fromUserId: string; toUserId: string }
   | { kind: 'call-decline'; callId: string; roomId: string; fromUserId: string; toUserId: string; reason?: 'busy' | 'declined' }
 
-export type CallState = 'idle' | 'calling' | 'ringing' | 'connected'
+export type CallState = 'idle' | 'calling' | 'ringing' | 'connecting' | 'connected' | 'failed'
 export type AppView = 'chat' | 'rooms' | 'profile' | 'contacts' | 'settings'
 
 export const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'

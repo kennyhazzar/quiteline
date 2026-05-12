@@ -34,6 +34,26 @@ services:
       timeout: 5s
       retries: 10
 
+  coturn:
+    image: coturn/coturn:4
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --realm=${TURN_REALM:-localhost}
+      - --server-name=${TURN_REALM:-localhost}
+      - --fingerprint
+      - --lt-cred-mech
+      - --user=${TURN_USERNAME:-quietline}:${TURN_CREDENTIAL:-quietline-turn-secret}
+      - --no-cli
+      - --no-multicast-peers
+      - --min-port=49160
+      - --max-port=49200
+    ports:
+      - "3478:3478/tcp"
+      - "3478:3478/udp"
+      - "49160-49200:49160-49200/udp"
+
   backend:
     build: .
     environment:
@@ -55,6 +75,9 @@ services:
       VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
       VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
       VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:admin@example.com}"
+      TURN_URLS: "${TURN_URLS:-turn:localhost:3478?transport=udp,turn:localhost:3478?transport=tcp}"
+      TURN_USERNAME: "${TURN_USERNAME:-quietline}"
+      TURN_CREDENTIAL: "${TURN_CREDENTIAL:-quietline-turn-secret}"
     ports:
       - "18080:8080"
     depends_on:

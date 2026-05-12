@@ -114,7 +114,7 @@ func (h *Handler) readPump(ctx context.Context, conn *websocket.Conn, client *Cl
 				client.SendError("topic_required")
 				continue
 			}
-			if !h.authorizeTopic(ctx, principal, topic) {
+			if !h.authorizePublishTopic(ctx, principal, topic, command.Data) {
 				client.SendError("forbidden")
 				continue
 			}
@@ -178,6 +178,41 @@ func (h *Handler) authorizeTopic(ctx context.Context, principal auth.Principal, 
 		return false
 	}
 	return allowed
+}
+
+type callSignal struct {
+	Kind       string `json:"kind"`
+	RoomID     string `json:"roomId"`
+	FromUserID string `json:"fromUserId"`
+	ToUserID   string `json:"toUserId"`
+}
+
+func (h *Handler) authorizePublishTopic(ctx context.Context, principal auth.Principal, topic string, data json.RawMessage) bool {
+	if h.authorizeTopic(ctx, principal, topic) {
+		return true
+	}
+	targetUserID, ok := userIDFromTopic(topic)
+	if !ok || targetUserID == "" || h.rooms == nil || principal.UserID == "" {
+		return false
+	}
+	var signal callSignal
+	if err := json.Unmarshal(data, &signal); err != nil {
+		return false
+	}
+	switch signal.Kind {
+	case "call-offer", "call-answer", "call-ice", "call-hangup", "call-decline":
+	default:
+		return false
+	}
+	if signal.FromUserID != principal.UserID || signal.ToUserID != targetUserID || signal.RoomID == "" {
+		return false
+	}
+	senderAllowed, err := h.rooms.IsRoomMember(ctx, signal.RoomID, principal.UserID)
+	if err != nil || !senderAllowed {
+		return false
+	}
+	targetAllowed, err := h.rooms.IsRoomMember(ctx, signal.RoomID, targetUserID)
+	return err == nil && targetAllowed
 }
 
 func userIDFromTopic(topic string) (string, bool) {

@@ -110,6 +110,9 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /v1/me/push-public-key", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handlePushPublicKey(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/calls/ice-servers", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleCallICEServers(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/me/push-subscriptions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleListPushSubscriptions(w, r, deps)
 	}))
@@ -324,6 +327,16 @@ type reactionRequest struct {
 type fileUploadResponse struct {
 	FileID string `json:"fileId"`
 	Size   int64  `json:"size"`
+}
+
+type iceServersResponse struct {
+	ICEServers []iceServer `json:"iceServers"`
+}
+
+type iceServer struct {
+	URLs       []string `json:"urls"`
+	Username   string   `json:"username,omitempty"`
+	Credential string   `json:"credential,omitempty"`
 }
 
 type realtimeStateEvent struct {
@@ -1364,6 +1377,18 @@ func handleDownloadEncryptedFile(w http.ResponseWriter, r *http.Request, deps De
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(http.StatusOK)
 	_, _ = io.Copy(w, reader)
+}
+
+func handleCallICEServers(w http.ResponseWriter, _ *http.Request, deps Dependencies) {
+	servers := []iceServer{{URLs: []string{"stun:stun.l.google.com:19302"}}}
+	if len(deps.Config.TURNURLs) > 0 {
+		servers = append(servers, iceServer{
+			URLs:       deps.Config.TURNURLs,
+			Username:   deps.Config.TURNUsername,
+			Credential: deps.Config.TURNCredential,
+		})
+	}
+	writeJSON(w, http.StatusOK, iceServersResponse{ICEServers: servers})
 }
 
 func publishRoomMembersEvent(ctx context.Context, deps Dependencies, roomID string, kind string) {

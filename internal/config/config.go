@@ -39,6 +39,9 @@ type Config struct {
 	VAPIDPublicKey     string
 	VAPIDPrivateKey    string
 	VAPIDSubject       string
+	TURNURLs           []string
+	TURNUsername       string
+	TURNCredential     string
 	Production         bool
 }
 
@@ -75,6 +78,9 @@ func Load() Config {
 		VAPIDPublicKey:     stringEnv("VAPID_PUBLIC_KEY", ""),
 		VAPIDPrivateKey:    stringEnv("VAPID_PRIVATE_KEY", ""),
 		VAPIDSubject:       stringEnv("VAPID_SUBJECT", "mailto:admin@example.com"),
+		TURNURLs:           csvEnv("TURN_URLS", ""),
+		TURNUsername:       stringEnv("TURN_USERNAME", ""),
+		TURNCredential:     stringEnv("TURN_CREDENTIAL", ""),
 		Production:         boolEnv("PRODUCTION", false),
 	}
 }
