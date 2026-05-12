@@ -7,7 +7,6 @@ import {
   Box,
   Button,
   Card,
-  Divider,
   FileInput,
   Group,
   Image,
@@ -26,10 +25,10 @@ import {
   IconChevronLeft,
   IconCopy,
   IconDeviceDesktop,
-  IconDownload,
   IconKey,
   IconMessageCircle,
   IconPlus,
+  IconQrcode,
   IconRefresh,
   IconShieldLock,
   IconUser,
@@ -38,7 +37,7 @@ import {
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type {
   AccountSession,
   AuthSession,
@@ -59,7 +58,7 @@ import {
 } from '@/lib/api'
 import { useI18n } from '@/lib/i18n'
 import type { AppView, DecryptedMessage } from '@/types/messenger'
-import { formatBytes, formatLastSeen } from '@/types/messenger'
+import { formatLastSeen } from '@/types/messenger'
 
 interface SidebarProps {
   isMobile: boolean
@@ -93,7 +92,7 @@ interface SidebarProps {
   revokeSessionMutation: UseMutationResult<unknown, Error, AccountSession>
   revokeOtherSessionsMutation: UseMutationResult<unknown, Error, void>
   logout: () => void
-  // friends
+  // contacts
   friends: UseQueryResult<{ friends: Friend[] }>
   friendUsername: string
   setFriendUsername: (v: string) => void
@@ -138,13 +137,11 @@ export function Sidebar(props: SidebarProps) {
     filteredRooms,
     activeRoomID,
     activeRoom,
-    attachmentMessages,
     selectRoom,
     roomSearch,
     setRoomSearch,
     setMobileCreateRoomOpened,
     setMobileImportInviteOpened,
-    downloadAttachment,
   } = props
 
   return (
@@ -167,55 +164,16 @@ export function Sidebar(props: SidebarProps) {
           value={sidebarView}
           onChange={(value) => setSidebarView(value as AppView)}
           data={[
-            { value: 'chat', label: t('chat') },
-            { value: 'rooms', label: t('rooms') },
-            { value: 'profile', label: t('profile') },
+            { value: 'contacts', label: locale === 'ru' ? 'Контакты' : 'Contacts' },
+            { value: 'rooms', label: locale === 'ru' ? 'Чаты' : 'Chats' },
+            { value: 'settings', label: locale === 'ru' ? 'Настройки' : 'Settings' },
           ]}
         />
       )}
 
-      {/* Chat details panel */}
-      <Card
-        className={!isMobile ? 'desktop-surface' : undefined}
-        withBorder={!isMobile}
-        radius={isMobile ? 0 : 'lg'}
-        p={isMobile ? 'xs' : 'md'}
-        style={{ display: leftView === 'chat' ? undefined : 'none' }}
-      >
-        <Title order={4} mb="xs">{t('chat')}</Title>
-        {activeRoom ? (
-          <Stack gap="xs">
-            <Text fw={700} truncate>{activeRoom.name}</Text>
-            <Button variant="light" onClick={() => setSidebarView('rooms')}>{t('rooms')}</Button>
-            <Divider />
-            <Text fw={700} size="sm">Attachments</Text>
-            <Stack gap={6}>
-              {attachmentMessages.slice(0, 8).map((msg) => (
-                <Group key={msg.id} gap="xs" wrap="nowrap">
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <Text size="sm" truncate>{msg.body?.attachment?.name}</Text>
-                    <Text size="xs" c="dimmed" truncate>
-                      {msg.body?.senderName} · {formatBytes(msg.body?.attachment?.size ?? 0)}
-                    </Text>
-                  </div>
-                  <ActionIcon variant="light" size="sm" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
-                    <IconDownload size={15} />
-                  </ActionIcon>
-                </Group>
-              ))}
-              {attachmentMessages.length === 0 && <Text size="xs" c="dimmed">No attachments yet.</Text>}
-            </Stack>
-          </Stack>
-        ) : (
-          <Stack gap="xs">
-            <Text size="sm" c="dimmed">{t('chooseRoom')}</Text>
-            <Button variant="light" onClick={() => setSidebarView('rooms')}>{t('rooms')}</Button>
-          </Stack>
-        )}
-      </Card>
-
-      {/* Profile panel */}
-      {leftView === 'profile' && <ProfilePanel {...props} />}
+      {/* Contacts / settings */}
+      {leftView === 'contacts' && <ProfilePanel {...props} mode="contacts" />}
+      {(leftView === 'settings' || leftView === 'profile') && <ProfilePanel {...props} mode="settings" />}
 
       {/* Room list */}
       <Card
@@ -224,14 +182,14 @@ export function Sidebar(props: SidebarProps) {
         radius={isMobile ? 'lg' : 'md'}
         p={isMobile ? 'sm' : 'md'}
         style={{
-          display: leftView === 'rooms' ? 'flex' : 'none',
+          display: leftView === 'rooms' || leftView === 'chat' ? 'flex' : 'none',
           flex: 1,
           minHeight: 0,
           flexDirection: 'column',
         }}
       >
         <Group justify="space-between" mb="sm">
-          <Title order={4}>{t('rooms')}</Title>
+          <Title order={4}>{locale === 'ru' ? 'Чаты' : 'Chats'}</Title>
           <Group gap={6} wrap="nowrap">
             <ActionIcon variant="light" onClick={() => setMobileCreateRoomOpened(true)} aria-label={t('createRoom')}>
               <IconPlus size={16} />
@@ -246,7 +204,7 @@ export function Sidebar(props: SidebarProps) {
         </Group>
         <TextInput
           mb="sm"
-          placeholder="Search rooms"
+          placeholder={locale === 'ru' ? 'Поиск чатов' : 'Search chats'}
           value={roomSearch}
           onChange={(event) => setRoomSearch(event.currentTarget.value)}
         />
@@ -318,10 +276,14 @@ export function Sidebar(props: SidebarProps) {
   )
 }
 
-function ProfilePanel(props: SidebarProps) {
+function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) {
   const { t, locale } = useI18n()
   const [avatarViewerOpened, setAvatarViewerOpened] = useState(false)
-  const [profileSection, setProfileSection] = useState<'overview' | 'account' | 'friends' | 'security' | 'notifications' | 'sessions'>('overview')
+  const [profileSection, setProfileSection] = useState<'overview' | 'account' | 'friends' | 'security' | 'notifications' | 'sessions'>(props.mode === 'contacts' ? 'friends' : 'overview')
+  const [contactQRCode, setContactQRCode] = useState('')
+  const [contactScanOpened, setContactScanOpened] = useState(false)
+  const [contactScanError, setContactScanError] = useState('')
+  const contactVideoRef = useRef<HTMLVideoElement | null>(null)
   const [pushInfo, setPushInfo] = useState<PushPublicKey | null>(null)
   const [pushSubscriptions, setPushSubscriptions] = useState<PushSubscriptionRecord[]>([])
   const [pushLoading, setPushLoading] = useState(false)
@@ -338,7 +300,6 @@ function ProfilePanel(props: SidebarProps) {
     requestFriendMutation,
     respondFriendMutation,
     inviteFriendMutation,
-    acceptedFriends,
     activeRoomID,
     activeRoom,
     totpSetup,
@@ -369,13 +330,26 @@ function ProfilePanel(props: SidebarProps) {
   }
   const friendCode = session.principal.friendCode || ''
   const friendCodeCopy = {
-    title: locale === 'ru' ? 'Код для друзей' : 'Friend code',
+    title: locale === 'ru' ? 'Код контакта' : 'Contact code',
     hint: locale === 'ru'
-      ? 'Скопируйте код и отправьте его человеку вне Quietline.'
-      : 'Copy this code and send it outside Quietline.',
-    label: locale === 'ru' ? 'Код друга' : 'Friend code',
+      ? 'Покажите QR-код или отправьте числовой код человеку вне Quietline.'
+      : 'Show the QR code or send this numeric code outside Quietline.',
+    label: locale === 'ru' ? 'Код контакта' : 'Contact code',
     placeholder: locale === 'ru' ? 'Введите код' : 'Enter code',
     copied: locale === 'ru' ? 'Код скопирован' : 'Code copied',
+    scan: locale === 'ru' ? 'Сканировать QR' : 'Scan QR',
+    scannerTitle: locale === 'ru' ? 'Сканер контакта' : 'Contact scanner',
+    scannerHint: locale === 'ru' ? 'Наведите камеру на QR-код контакта.' : 'Point the camera at a contact QR code.',
+    scannerUnsupported: locale === 'ru' ? 'Браузер не поддерживает встроенное сканирование QR.' : 'This browser does not support built-in QR scanning.',
+    scanned: locale === 'ru' ? 'Код контакта считан' : 'Contact code scanned',
+  }
+  const contactStatusCopy = {
+    accepted: locale === 'ru' ? 'В контактах' : 'In contacts',
+    incoming: locale === 'ru' ? 'Входящая заявка' : 'Incoming request',
+    outgoing: locale === 'ru' ? 'Заявка отправлена' : 'Request sent',
+    empty: locale === 'ru' ? 'Контактов пока нет.' : 'No contacts yet.',
+    notifications: locale === 'ru' ? 'Контакты' : 'Contacts',
+    add: locale === 'ru' ? 'Добавить контакт' : 'Add contact',
   }
   const liveBadge = {
     color: liveStatus === 'connected' ? 'green' : liveStatus === 'connecting' ? 'yellow' : 'red',
@@ -389,8 +363,8 @@ function ProfilePanel(props: SidebarProps) {
     back: locale === 'ru' ? 'Назад' : 'Back',
     account: locale === 'ru' ? 'Аккаунт' : 'Account',
     accountHint: locale === 'ru' ? 'Аватар и внешний вид профиля' : 'Avatar and profile appearance',
-    friends: t('friends'),
-    friendsHint: locale === 'ru' ? 'Код, заявки и приглашения' : 'Code, requests and invites',
+    friends: locale === 'ru' ? 'Контакты' : 'Contacts',
+    friendsHint: locale === 'ru' ? 'QR-код, заявки и приглашения' : 'QR code, requests and invites',
     security: locale === 'ru' ? 'Безопасность' : 'Security',
     securityHint: locale === 'ru' ? 'Двухфакторная защита' : 'Two-factor protection',
     notifications: locale === 'ru' ? 'Уведомления' : 'Notifications',
@@ -408,7 +382,7 @@ function ProfilePanel(props: SidebarProps) {
           ? sectionCopy.notifications
           : profileSection === 'sessions'
             ? sectionCopy.sessions
-            : t('profile')
+            : (locale === 'ru' ? 'Настройки' : 'Settings')
 
   const currentPushSubscription = pushSubscriptions[0] ?? null
   const pushPermission = typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
@@ -416,6 +390,78 @@ function ProfilePanel(props: SidebarProps) {
     && 'standalone' in navigator
     && (navigator as Navigator & { standalone?: boolean }).standalone === true
   const looksLikeIOS = typeof navigator !== 'undefined' && /iphone|ipad|ipod/i.test(navigator.userAgent)
+
+  useEffect(() => {
+    setProfileSection(props.mode === 'contacts' ? 'friends' : 'overview')
+  }, [props.mode])
+
+  useEffect(() => {
+    let cancelled = false
+    if (!friendCode) {
+      setContactQRCode('')
+      return
+    }
+    import('qrcode').then((QRCode) => {
+      QRCode.toDataURL(friendCode, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: 180,
+        color: { dark: '#111827', light: '#ffffff' },
+      })
+        .then((url) => { if (!cancelled) setContactQRCode(url) })
+        .catch(() => { if (!cancelled) setContactQRCode('') })
+    })
+    return () => { cancelled = true }
+  }, [friendCode])
+
+  useEffect(() => {
+    if (!contactScanOpened) return
+    let stream: MediaStream | null = null
+    let frame = 0
+    let cancelled = false
+
+    async function startScanner() {
+      const BarcodeDetectorCtor = (window as unknown as { BarcodeDetector?: new (options: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector
+      if (!BarcodeDetectorCtor) {
+        setContactScanError(friendCodeCopy.scannerUnsupported)
+        return
+      }
+      try {
+        setContactScanError('')
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
+        const video = contactVideoRef.current
+        if (!video || cancelled) return
+        video.srcObject = stream
+        await video.play()
+        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] })
+        const tick = async () => {
+          if (cancelled) return
+          const currentVideo = contactVideoRef.current
+          if (currentVideo && currentVideo.readyState >= 2) {
+            const codes = await detector.detect(currentVideo).catch(() => [])
+            const raw = codes[0]?.rawValue?.trim()
+            if (raw) {
+              setFriendUsername(raw)
+              setContactScanOpened(false)
+              notifications.show({ title: friendCodeCopy.scannerTitle, message: friendCodeCopy.scanned, color: 'green' })
+              return
+            }
+          }
+          frame = window.requestAnimationFrame(tick)
+        }
+        frame = window.requestAnimationFrame(tick)
+      } catch (err) {
+        setContactScanError(err instanceof Error ? err.message : friendCodeCopy.scannerUnsupported)
+      }
+    }
+
+    void startScanner()
+    return () => {
+      cancelled = true
+      if (frame) window.cancelAnimationFrame(frame)
+      stream?.getTracks().forEach((track) => track.stop())
+    }
+  }, [contactScanOpened, friendCodeCopy.scanned, friendCodeCopy.scannerTitle, friendCodeCopy.scannerUnsupported, setFriendUsername])
 
   useEffect(() => {
     if (profileSection !== 'notifications') return
@@ -578,6 +624,33 @@ function ProfilePanel(props: SidebarProps) {
         </Stack>
       )}
     </Modal>
+    <Modal
+      opened={contactScanOpened}
+      onClose={() => setContactScanOpened(false)}
+      title={friendCodeCopy.scannerTitle}
+      centered
+      fullScreen={isMobile}
+    >
+      <Stack gap="sm">
+        <Text size="sm" c="dimmed">{friendCodeCopy.scannerHint}</Text>
+        <Box
+          style={{
+            overflow: 'hidden',
+            borderRadius: 18,
+            border: '1px solid var(--mantine-color-default-border)',
+            background: 'var(--mantine-color-dark-8)',
+          }}
+        >
+          <video
+            ref={contactVideoRef}
+            muted
+            playsInline
+            style={{ width: '100%', minHeight: isMobile ? 320 : 260, objectFit: 'cover', display: 'block' }}
+          />
+        </Box>
+        {contactScanError && <Text size="sm" c="red">{contactScanError}</Text>}
+      </Stack>
+    </Modal>
     <Card
       withBorder={!isMobile}
       className={!isMobile ? 'desktop-surface' : undefined}
@@ -612,7 +685,7 @@ function ProfilePanel(props: SidebarProps) {
           )}
           <div style={{ minWidth: 0 }}>
             <Text fw={700} truncate>{session.principal.displayName || identity.displayName}</Text>
-            <Text size="xs" c="dimmed" truncate>{t('profile')}</Text>
+            <Text size="xs" c="dimmed" truncate>{props.mode === 'contacts' ? sectionCopy.friends : (locale === 'ru' ? 'Настройки' : 'Settings')}</Text>
           </div>
         </Group>
         <Badge color={liveBadge.color} style={{ flexShrink: 0 }}>
@@ -685,27 +758,42 @@ function ProfilePanel(props: SidebarProps) {
       <>
       {/* Friends */}
       <Card withBorder radius="md" p="sm" mb="sm">
-        <Group justify="space-between" gap="xs" wrap="nowrap">
+        <Group justify="space-between" gap="sm" align="flex-start" wrap={isMobile ? 'wrap' : 'nowrap'}>
           <div style={{ minWidth: 0 }}>
             <Text fw={700} size="sm">{friendCodeCopy.title}</Text>
             <Text size="xs" c="dimmed" lineClamp={2}>{friendCodeCopy.hint}</Text>
             <Text size="lg" fw={800} mt={4} style={{ letterSpacing: 1 }}>{friendCode || '--------'}</Text>
           </div>
-          <ActionIcon
+          {contactQRCode && (
+            <Box p={6} bg="white" style={{ borderRadius: 14, flexShrink: 0 }}>
+              <Image src={contactQRCode} alt={friendCodeCopy.title} w={104} h={104} fit="contain" />
+            </Box>
+          )}
+        </Group>
+        <Group gap="xs" mt="sm" grow={isMobile}>
+          <Button
             variant="light"
-            size="lg"
+            size="xs"
+            leftSection={<IconCopy size={16} />}
             disabled={!friendCode}
             onClick={() => {
               void navigator.clipboard?.writeText(friendCode)
             }}
-            aria-label={friendCodeCopy.copied}
           >
-            <IconCopy size={18} />
-          </ActionIcon>
+            {t('copyInvite')}
+          </Button>
+          <Button
+            variant="light"
+            size="xs"
+            leftSection={<IconQrcode size={16} />}
+            onClick={() => setContactScanOpened(true)}
+          >
+            {friendCodeCopy.scan}
+          </Button>
         </Group>
       </Card>
       <Group justify="space-between" align="center" mb="xs">
-        <Text fw={700} size="sm">{t('friends')}</Text>
+        <Text fw={700} size="sm">{sectionCopy.friends}</Text>
         <ActionIcon variant="subtle" onClick={() => friends.refetch()} loading={friends.isFetching}>
           <IconRefresh size={16} />
         </ActionIcon>
@@ -727,7 +815,7 @@ function ProfilePanel(props: SidebarProps) {
           onClick={() => (requestFriendMutation as UseMutationResult<unknown, Error, void>).mutate()}
           loading={(requestFriendMutation as UseMutationResult<unknown, Error, void>).isPending}
           disabled={!friendUsername.trim()}
-          aria-label={t('addFriend')}
+          aria-label={contactStatusCopy.add}
         >
           <IconUserPlus size={18} />
         </ActionIcon>
@@ -742,10 +830,10 @@ function ProfilePanel(props: SidebarProps) {
               </Text>
               <Text size="xs" c="dimmed" truncate>
                 {friend.status === 'accepted'
-                  ? t('friendAccepted')
+                  ? contactStatusCopy.accepted
                   : friend.direction === 'incoming'
-                    ? t('friendIncoming')
-                    : t('friendOutgoing')}
+                    ? contactStatusCopy.incoming
+                    : contactStatusCopy.outgoing}
               </Text>
             </div>
             {friend.status === 'pending' && friend.direction === 'incoming' ? (
@@ -778,7 +866,7 @@ function ProfilePanel(props: SidebarProps) {
             ) : null}
             </Group>
           ))}
-          {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{t('noFriends')}</Text>}
+          {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{contactStatusCopy.empty}</Text>}
         </Stack>
       </ScrollArea.Autosize>
       </>
@@ -919,7 +1007,7 @@ function ProfilePanel(props: SidebarProps) {
             onChange={(event) => void updatePushPrefs({ ...pushPrefs, sessions: event.currentTarget.checked })}
           />
           <Switch
-            label={locale === 'ru' ? 'Друзья' : 'Friends'}
+            label={contactStatusCopy.notifications}
             checked={pushPrefs.friends}
             onChange={(event) => void updatePushPrefs({ ...pushPrefs, friends: event.currentTarget.checked })}
           />

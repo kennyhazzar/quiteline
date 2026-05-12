@@ -14,7 +14,6 @@ import {
   Text,
 } from '@mantine/core'
 import {
-  IconLock,
   IconCopy,
   IconDoorExit,
   IconLink,
@@ -23,8 +22,9 @@ import {
   IconPaperclip,
   IconPhone,
   IconSearch,
+  IconSettings,
   IconSun,
-  IconUserPlus,
+  IconUsers,
 } from '@tabler/icons-react'
 import type { UseQueryResult, UseMutationResult } from '@tanstack/react-query'
 import { useState, type RefObject } from 'react'
@@ -222,6 +222,11 @@ export function AppShellLayout(props: AppShellLayoutProps) {
         ? (locale === 'ru' ? 'Соединение' : 'Connecting')
         : t('offline'),
   }
+  const navCopy = {
+    contacts: locale === 'ru' ? 'Контакты' : 'Contacts',
+    chats: locale === 'ru' ? 'Чаты' : 'Chats',
+    settings: locale === 'ru' ? 'Настройки' : 'Settings',
+  }
 
   return (
     <>
@@ -247,8 +252,10 @@ export function AppShellLayout(props: AppShellLayoutProps) {
               <Text size="xs" c="dimmed" truncate>
                 {isMobile
                   ? mobileView === 'rooms'
-                    ? t('rooms')
-                    : t('profile')
+                    ? navCopy.chats
+                    : mobileView === 'contacts'
+                      ? navCopy.contacts
+                      : navCopy.settings
                   : t('encryptedBadge')}
               </Text>
             </div>
@@ -297,14 +304,14 @@ export function AppShellLayout(props: AppShellLayoutProps) {
         {isMobile && (
           <Group className="mobile-bottom-nav" gap={4} wrap="nowrap">
             {([
-              { value: 'chat', label: t('chat'), icon: <IconMessageCircle size={18} /> },
-              { value: 'rooms', label: t('rooms'), icon: <IconLock size={18} /> },
-              { value: 'profile', label: t('profile'), icon: <IconUserPlus size={18} /> },
+              { value: 'contacts', label: navCopy.contacts, icon: <IconUsers size={18} /> },
+              { value: 'rooms', label: navCopy.chats, icon: <IconMessageCircle size={18} /> },
+              { value: 'settings', label: navCopy.settings, icon: <IconSettings size={18} /> },
             ] as const).map((item) => (
               <button
                 key={item.value}
                 type="button"
-                className={`mobile-nav-item${mobileView === item.value ? ' mobile-nav-item-active' : ''}`}
+                className={`mobile-nav-item${mobileView === item.value || (item.value === 'rooms' && mobileView === 'chat') ? ' mobile-nav-item-active' : ''}`}
                 onClick={() => setMobileView(item.value)}
               >
                 <Stack gap={1} align="center">
@@ -473,6 +480,7 @@ function ChatActionsModal(props: AppShellLayoutProps) {
     setMobileChatActionsOpened,
     activeRoom,
     isMobile,
+    locale,
     messageSearch,
     setMessageSearch,
     peers,
@@ -597,7 +605,7 @@ function ChatActionsModal(props: AppShellLayoutProps) {
           {acceptedFriends.length > 0 && (
             <Card withBorder radius="lg" p="sm">
             <Stack gap={6}>
-              <Text size="xs" c="dimmed" fw={700}>{t('inviteFriend')}</Text>
+              <Text size="xs" c="dimmed" fw={700}>{locale === 'ru' ? 'Пригласить контакт' : 'Invite contact'}</Text>
               {acceptedFriends
                 .filter((friend) => !activeRoom.members.includes(friend.userId))
                 .slice(0, 4)

@@ -43,7 +43,7 @@ export type RealtimeEvent =
   | { kind: 'call-decline'; callId: string; roomId: string; fromUserId: string; toUserId: string; reason?: 'busy' | 'declined' }
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connected'
-export type AppView = 'chat' | 'rooms' | 'profile'
+export type AppView = 'chat' | 'rooms' | 'profile' | 'contacts' | 'settings'
 
 export const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'
 export const LOCAL_DELETED_MESSAGES_KEY = 'quietline.deletedMessages.v1'
@@ -134,7 +134,7 @@ export function parseInviteToken(value: string): InvitePayload | null {
 export function buildAppPath(options: AppRouteOptions = {}) {
   if (typeof window === 'undefined') return '/'
   const view = options.view ?? 'rooms'
-  if (view === 'profile') return '/profile'
+  if (view === 'profile' || view === 'settings') return '/profile'
   if (view === 'chat' && options.roomId) {
     const chatPath = `/chats/${encodeURIComponent(options.roomId)}`
     return options.messageId ? `${chatPath}/messages/${encodeURIComponent(options.messageId)}` : chatPath

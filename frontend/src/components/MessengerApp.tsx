@@ -61,7 +61,7 @@ import { AppShellLayout } from './layout/AppShell'
 import { AuthPage } from './layout/AuthPage'
 import { LoadingPage } from './layout/LoadingPage'
 
-const APP_VIEWS: AppView[] = ['chat', 'rooms', 'profile']
+const APP_VIEWS: AppView[] = ['chat', 'rooms', 'profile', 'contacts', 'settings']
 
 function appViewFromParam(value: string | null): AppView {
   if (value === 'chats') return 'rooms'
@@ -71,7 +71,7 @@ function appViewFromParam(value: string | null): AppView {
 
 function appRouteFromPath(pathname: string) {
   const parts = pathname.split('/').filter(Boolean).map((part) => decodeURIComponent(part))
-  if (parts[0] === 'profile') return { view: 'profile' as AppView }
+  if (parts[0] === 'profile') return { view: 'settings' as AppView }
   if (parts[0] !== 'chats') return {}
   const roomId = parts[1]
   const messageId = parts[2] === 'messages' ? parts[3] : undefined
@@ -908,7 +908,7 @@ export function MessengerApp() {
     } else if (linkedChatID) {
       setActiveRoomID(linkedChatID)
       setMobileView(linkedView as AppView)
-      setSidebarView(linkedView as AppView)
+      setSidebarView(linkedView === 'chat' ? 'rooms' : linkedView as AppView)
     } else {
       setMobileView(linkedView as AppView)
       setSidebarView(linkedView as AppView)
@@ -1171,7 +1171,7 @@ export function MessengerApp() {
     messages.setPendingMessages([])
     requestNotifications()
     if (isMobile) setMobileView('chat')
-    else setSidebarView('chat')
+    else setSidebarView('rooms')
   }
 
   function closeChat() {
