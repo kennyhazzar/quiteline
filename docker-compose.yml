@@ -40,12 +40,16 @@ services:
       - -n
       - --log-file=stdout
       - --listening-port=3478
+      - --listening-ip=0.0.0.0
+      - --external-ip=${TURN_EXTERNAL_IP:-127.0.0.1}
       - --realm=${TURN_REALM:-localhost}
       - --server-name=${TURN_REALM:-localhost}
       - --fingerprint
       - --lt-cred-mech
       - --user=${TURN_USERNAME:-quietline}:${TURN_CREDENTIAL:-quietline-turn-secret}
       - --no-multicast-peers
+      - --no-tls
+      - --no-dtls
       - --min-port=49160
       - --max-port=49200
     ports:

@@ -232,6 +232,7 @@ Backend:
 | `VAPID_PRIVATE_KEY` | Web Push private key |
 | `VAPID_SUBJECT` | Web Push subject, usually `mailto:...` |
 | `TURN_URLS` | Comma-separated TURN URLs returned to the frontend |
+| `TURN_EXTERNAL_IP` | Public VPS IP advertised by coturn when running behind Docker NAT |
 | `TURN_USERNAME` | TURN long-term credential username |
 | `TURN_CREDENTIAL` | TURN long-term credential password |
 | `TURN_REALM` | coturn realm/server name in Docker Compose |
