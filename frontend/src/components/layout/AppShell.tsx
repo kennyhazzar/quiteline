@@ -209,6 +209,7 @@ interface AppShellLayoutProps {
   callPeerID: string
   callStatus: string
   callError: string
+  callDiagnostics: string[]
   callDurationSec: number
   isCallMuted: boolean
   setIsCallMuted: (v: boolean) => void
@@ -578,6 +579,7 @@ function CallPanelModal({
   callPeerName,
   callStatus,
   callError,
+  callDiagnostics,
   callDurationSec,
   isCallMuted,
   setIsCallMuted,
@@ -601,6 +603,7 @@ function CallPanelModal({
   | 'callPeerName'
   | 'callStatus'
   | 'callError'
+  | 'callDiagnostics'
   | 'callDurationSec'
   | 'isCallMuted'
   | 'setIsCallMuted'
@@ -715,6 +718,20 @@ function CallPanelModal({
               />
             )}
           </Stack>
+        )}
+        {callDiagnostics.length > 0 && (
+          <Card withBorder radius="lg" p="sm">
+            <Text size="xs" fw={800} mb={6}>
+              {locale === 'ru' ? 'Диагностика соединения' : 'Connection diagnostics'}
+            </Text>
+            <Stack gap={3}>
+              {callDiagnostics.map((item) => (
+                <Text key={item} size="xs" c="dimmed" style={{ fontFamily: 'var(--font-geist-mono), monospace' }}>
+                  {item}
+                </Text>
+              ))}
+            </Stack>
+          </Card>
         )}
       </Stack>
     </Modal>

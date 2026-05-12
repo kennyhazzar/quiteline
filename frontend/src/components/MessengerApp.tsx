@@ -138,6 +138,7 @@ export function MessengerApp() {
   const [callPeerID, setCallPeerID] = useState('')
   const [callStatus, setCallStatus] = useState('')
   const [callError, setCallError] = useState('')
+  const [callDiagnostics, setCallDiagnostics] = useState<string[]>([])
   const [callStartedAt, setCallStartedAt] = useState('')
   const [callDurationSec, setCallDurationSec] = useState(0)
   const [isCallMuted, setIsCallMuted] = useState(false)
@@ -663,6 +664,18 @@ export function MessengerApp() {
     setAudioOutputDevices(devices.filter((device) => device.kind === 'audiooutput'))
   }
 
+  function addCallDiagnostic(message: string) {
+    const stamp = new Date().toLocaleTimeString()
+    setCallDiagnostics((prev) => [...prev.slice(-7), `${stamp} ${message}`])
+  }
+
+  function describeIceCandidate(candidate: RTCIceCandidate | RTCIceCandidateInit) {
+    const raw = 'candidate' in candidate ? candidate.candidate : ''
+    const type = raw?.match(/\btyp\s+(\w+)/)?.[1]
+    const protocol = raw?.match(/\b(udp|tcp)\b/i)?.[1]
+    return [type ? `typ ${type}` : 'candidate', protocol?.toUpperCase()].filter(Boolean).join(' ')
+  }
+
   function clearCallTimeout() {
     if (!callTimeoutRef.current) return
     clearTimeout(callTimeoutRef.current)
@@ -693,6 +706,7 @@ export function MessengerApp() {
     for (const candidate of pending) {
       try {
         await peer.addIceCandidate(candidate)
+        addCallDiagnostic(`ICE added: ${describeIceCandidate(candidate)}`)
       } catch {
         // ICE can race with browser state changes; the connection state will surface real failures.
       }
@@ -708,7 +722,12 @@ export function MessengerApp() {
     activeCallRoomIDRef.current = roomID
     pendingIceCandidatesRef.current = []
     peer.onicecandidate = (event) => {
-      if (!event.candidate || !identity || !activeCallRoomIDRef.current || !activeCallPeerIDRef.current) return
+      if (!event.candidate) {
+        addCallDiagnostic('ICE gathering complete')
+        return
+      }
+      addCallDiagnostic(`ICE local: ${describeIceCandidate(event.candidate)}`)
+      if (!identity || !activeCallRoomIDRef.current || !activeCallPeerIDRef.current) return
       sendRealtimeRaw({
         kind: 'call-ice',
         callId,
@@ -719,6 +738,7 @@ export function MessengerApp() {
       })
     }
     peer.ontrack = (event) => {
+      addCallDiagnostic('Remote audio track received')
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0]
         remoteAudioRef.current.volume = peerVolume
@@ -727,6 +747,7 @@ export function MessengerApp() {
     peer.onconnectionstatechange = () => {
       if (!activeCallIDRef.current) return
       const state = peer.connectionState
+      addCallDiagnostic(`Peer connection: ${state}`)
       setCallStatus(state)
       if (state === 'connected') {
         clearCallTimeout()
@@ -737,6 +758,12 @@ export function MessengerApp() {
         setCallError(locale === 'ru' ? 'Соединение звонка прервано.' : 'Call connection failed.')
         cleanupCall(false, state === 'failed')
       }
+    }
+    peer.oniceconnectionstatechange = () => {
+      addCallDiagnostic(`ICE connection: ${peer.iceConnectionState}`)
+    }
+    peer.onicegatheringstatechange = () => {
+      addCallDiagnostic(`ICE gathering: ${peer.iceGatheringState}`)
     }
     const audio: MediaTrackConstraints | boolean = selectedAudioInputId
       ? { deviceId: { exact: selectedAudioInputId } }
@@ -766,6 +793,8 @@ export function MessengerApp() {
     }
     try {
       const callId = crypto.randomUUID()
+      setCallDiagnostics([])
+      addCallDiagnostic('Creating peer connection')
       const peer = await ensurePeer(callId, target.userId, activeRoomID)
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
@@ -774,6 +803,7 @@ export function MessengerApp() {
       setCallError('')
       setCallStatus(locale === 'ru' ? 'Ожидаем ответ...' : 'Waiting for answer...')
       setCallState('calling')
+      addCallDiagnostic('Offer sent')
       armCallTimeout(callId, target.userId, activeRoomID)
       sendRealtimeRaw({
         kind: 'call-offer',
@@ -795,9 +825,11 @@ export function MessengerApp() {
     if (!incomingCall || !identity) return
     try {
       setCallState('connecting')
+      addCallDiagnostic('Answering call')
       setCallStatus(locale === 'ru' ? 'Соединяем...' : 'Connecting...')
       const peer = await ensurePeer(incomingCall.callId, incomingCall.fromUserId, incomingCall.roomId)
       await peer.setRemoteDescription(incomingCall.offer)
+      addCallDiagnostic('Remote offer accepted')
       await flushPendingIce(peer)
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
@@ -814,6 +846,7 @@ export function MessengerApp() {
         toUserId: incomingCall.fromUserId,
         answer,
       })
+      addCallDiagnostic('Answer sent')
       setIncomingCall(null)
     } catch (err) {
       setCallError(err instanceof Error ? err.message : 'call_failed')
@@ -851,6 +884,7 @@ export function MessengerApp() {
     setCallDurationSec(0)
     setCallStatus('')
     if (!keepError) setCallError('')
+    if (!keepError) setCallDiagnostics([])
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
     peerToClose?.close()
   }
@@ -889,28 +923,34 @@ export function MessengerApp() {
         return
       }
       setIncomingCall(event)
+      setCallDiagnostics([])
       setCallState('ringing')
       setCallPeerID(event.fromUserId)
       setCallPeerName(event.displayName)
       setCallError('')
       setCallStatus(locale === 'ru' ? 'Входящий звонок' : 'Incoming call')
+      addCallDiagnostic('Incoming offer received')
       armCallTimeout(event.callId, event.fromUserId, event.roomId)
+      return
+    }
+    if (event.kind === 'call-ice') {
+      if (event.callId !== activeCallIDRef.current && event.callId !== incomingCall?.callId) return
+      if (!peerRef.current || !peerRef.current.remoteDescription) {
+        pendingIceCandidatesRef.current.push(event.candidate)
+        addCallDiagnostic(`ICE queued: ${describeIceCandidate(event.candidate)}`)
+        return
+      }
+      await peerRef.current.addIceCandidate(event.candidate)
+      addCallDiagnostic(`ICE added: ${describeIceCandidate(event.candidate)}`)
       return
     }
     if (event.callId !== activeCallIDRef.current) return
     if (event.kind === 'call-answer' && peerRef.current) {
       await peerRef.current.setRemoteDescription(event.answer)
+      addCallDiagnostic('Remote answer accepted')
       await flushPendingIce(peerRef.current)
       setCallState('connecting')
       setCallStatus(locale === 'ru' ? 'Соединяем...' : 'Connecting...')
-      return
-    }
-    if (event.kind === 'call-ice' && peerRef.current) {
-      if (!peerRef.current.remoteDescription) {
-        pendingIceCandidatesRef.current.push(event.candidate)
-        return
-      }
-      await peerRef.current.addIceCandidate(event.candidate)
       return
     }
     if (event.kind === 'call-hangup') {
@@ -1618,6 +1658,7 @@ export function MessengerApp() {
       callPeerID={callPeerID}
       callStatus={callStatus}
       callError={callError}
+      callDiagnostics={callDiagnostics}
       callDurationSec={callDurationSec}
       isCallMuted={isCallMuted}
       setIsCallMuted={setIsCallMuted}
