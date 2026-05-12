@@ -657,6 +657,9 @@ export function ChatView(props: ChatViewProps) {
                 const isScrollingUp = y < previousY
                 const crossedTopThreshold = previousY >= 120 && y < 120
                 lastScrollTopRef.current = y
+                if (loadingHistoryRef.current && historyScrollSnapshotRef.current) {
+                  historyScrollSnapshotRef.current.top = y
+                }
                 if (y > 260 && Date.now() >= suppressPaginationUntilRef.current) {
                   paginationArmedRef.current = true
                 }
