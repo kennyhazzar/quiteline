@@ -469,8 +469,8 @@ export function ChatView(props: ChatViewProps) {
         flex: 1,
         width: isMobile ? '100%' : undefined,
         minWidth: 0,
-        height: isMobile ? 'calc(100dvh - 76px)' : undefined,
-        maxHeight: isMobile ? 'calc(100dvh - 76px)' : undefined,
+        height: isMobile ? '100dvh' : undefined,
+        maxHeight: isMobile ? '100dvh' : undefined,
         minHeight: isMobile ? 0 : 0,
       }}
     >
