@@ -153,6 +153,7 @@ export function MessengerApp() {
   const activeCallPeerIDRef = useRef('')
   const activeCallRoomIDRef = useRef('')
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([])
+  const earlyIceByCallIDRef = useRef<Record<string, RTCIceCandidateInit[]>>({})
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
   const urlStateReadyRef = useRef(false)
@@ -650,7 +651,10 @@ export function MessengerApp() {
     if (!session) return [{ urls: 'stun:stun.l.google.com:19302' }]
     try {
       const response = await fetchCallIceServers(session.accessToken)
-      if (response.iceServers.length > 0) return response.iceServers
+      if (response.iceServers.length > 0) {
+        addCallDiagnostic(`ICE servers: ${response.iceServers.length}`)
+        return response.iceServers
+      }
     } catch {
       // Keep calls usable in local development if the backend endpoint is unavailable.
     }
@@ -666,7 +670,7 @@ export function MessengerApp() {
 
   function addCallDiagnostic(message: string) {
     const stamp = new Date().toLocaleTimeString()
-    setCallDiagnostics((prev) => [...prev.slice(-7), `${stamp} ${message}`])
+    setCallDiagnostics((prev) => [...prev.slice(-19), `${stamp} ${message}`])
   }
 
   function describeIceCandidate(candidate: RTCIceCandidate | RTCIceCandidateInit) {
@@ -720,7 +724,11 @@ export function MessengerApp() {
     activeCallIDRef.current = callId
     activeCallPeerIDRef.current = targetUserId
     activeCallRoomIDRef.current = roomID
-    pendingIceCandidatesRef.current = []
+    pendingIceCandidatesRef.current = earlyIceByCallIDRef.current[callId] ?? []
+    delete earlyIceByCallIDRef.current[callId]
+    if (pendingIceCandidatesRef.current.length > 0) {
+      addCallDiagnostic(`ICE restored: ${pendingIceCandidatesRef.current.length}`)
+    }
     peer.onicecandidate = (event) => {
       if (!event.candidate) {
         addCallDiagnostic('ICE gathering complete')
@@ -874,6 +882,7 @@ export function MessengerApp() {
     activeCallPeerIDRef.current = ''
     activeCallRoomIDRef.current = ''
     pendingIceCandidatesRef.current = []
+    earlyIceByCallIDRef.current = {}
     setCallState(keepError ? 'failed' : 'idle')
     setIncomingCall(null)
     if (!keepError) {
@@ -934,7 +943,14 @@ export function MessengerApp() {
       return
     }
     if (event.kind === 'call-ice') {
-      if (event.callId !== activeCallIDRef.current && event.callId !== incomingCall?.callId) return
+      if (event.callId !== activeCallIDRef.current && event.callId !== incomingCall?.callId) {
+        earlyIceByCallIDRef.current[event.callId] = [
+          ...(earlyIceByCallIDRef.current[event.callId] ?? []).slice(-39),
+          event.candidate,
+        ]
+        addCallDiagnostic(`ICE stored early: ${describeIceCandidate(event.candidate)}`)
+        return
+      }
       if (!peerRef.current || !peerRef.current.remoteDescription) {
         pendingIceCandidatesRef.current.push(event.candidate)
         addCallDiagnostic(`ICE queued: ${describeIceCandidate(event.candidate)}`)
