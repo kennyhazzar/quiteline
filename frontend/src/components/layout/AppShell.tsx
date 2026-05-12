@@ -9,7 +9,6 @@ import {
   Card,
   Group,
   Modal,
-  SegmentedControl,
   Stack,
   Text,
 } from '@mantine/core'
@@ -19,11 +18,9 @@ import {
   IconLogout,
   IconLink,
   IconMessageCircle,
-  IconMoon,
   IconPaperclip,
   IconPhone,
   IconSettings,
-  IconSun,
   IconUsers,
 } from '@tabler/icons-react'
 import type { UseQueryResult, UseMutationResult } from '@tanstack/react-query'
@@ -225,9 +222,6 @@ export function AppShellLayout(props: AppShellLayoutProps) {
     session,
     identity,
     locale,
-    setLocale,
-    colorScheme,
-    toggleTheme,
     closeChat,
   } = props
   const [contactsResetKey, setContactsResetKey] = useState(0)
@@ -334,22 +328,6 @@ export function AppShellLayout(props: AppShellLayoutProps) {
               <Badge color={liveBadge.color} variant="light">
                 {liveBadge.label}
               </Badge>
-              {!isMobile && (
-                <>
-                  <SegmentedControl
-                    size="xs"
-                    value={locale}
-                    onChange={(value) => setLocale(value === 'en' ? 'en' : 'ru')}
-                    data={[
-                      { value: 'ru', label: 'RU' },
-                      { value: 'en', label: 'EN' },
-                    ]}
-                  />
-                  <ActionIcon variant="subtle" onClick={toggleTheme} aria-label="Toggle theme">
-                    {colorScheme === 'dark' ? <IconSun size={18} /> : <IconMoon size={18} />}
-                  </ActionIcon>
-                </>
-              )}
             </Group>
           </Group>
         )}

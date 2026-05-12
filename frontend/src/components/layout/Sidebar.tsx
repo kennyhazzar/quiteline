@@ -72,6 +72,9 @@ interface SidebarProps {
   health: UseQueryResult<{ status: string }>
   session: AuthSession
   identity: Identity
+  setLocale: (locale: 'en' | 'ru') => void
+  colorScheme: string
+  toggleTheme: () => void
   ownAvatarSrc: string
   avatarMutation: UseMutationResult<unknown, Error, File>
   presence: Record<string, { displayName: string; status: 'online' | 'offline'; lastSeenAt: string }>
@@ -346,6 +349,9 @@ function ProfilePanel(props: SidebarProps & {
   const {
     session,
     identity,
+    setLocale,
+    colorScheme,
+    toggleTheme,
     liveStatus,
     ownAvatarSrc,
     avatarMutation,
@@ -759,6 +765,31 @@ function ProfilePanel(props: SidebarProps & {
 
       {profileSection === 'overview' && (
         <Stack gap="xs" mt="sm">
+          <Card withBorder radius="md" p="sm">
+            <Stack gap="sm">
+              <div style={{ minWidth: 0 }}>
+                <Text fw={700} size="sm">{locale === 'ru' ? 'Интерфейс' : 'Interface'}</Text>
+                <Text size="xs" c="dimmed">
+                  {locale === 'ru' ? 'Язык и тема приложения' : 'Language and app theme'}
+                </Text>
+              </div>
+              <SegmentedControl
+                size="xs"
+                fullWidth
+                value={locale}
+                onChange={(value) => setLocale(value === 'en' ? 'en' : 'ru')}
+                data={[
+                  { value: 'ru', label: 'RU' },
+                  { value: 'en', label: 'EN' },
+                ]}
+              />
+              <Switch
+                label={locale === 'ru' ? 'Темная тема' : 'Dark theme'}
+                checked={colorScheme === 'dark'}
+                onChange={toggleTheme}
+              />
+            </Stack>
+          </Card>
           <SectionCard
             icon={<IconUser size={18} />}
             title={sectionCopy.account}
