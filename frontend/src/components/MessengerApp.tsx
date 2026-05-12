@@ -653,6 +653,12 @@ export function MessengerApp() {
       const response = await fetchCallIceServers(session.accessToken)
       if (response.iceServers.length > 0) {
         addCallDiagnostic(`ICE servers: ${response.iceServers.length}`)
+        addCallDiagnostic(
+          response.iceServers.some((server) => {
+            const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+            return urls.some((url) => String(url).startsWith('turn:') || String(url).startsWith('turns:'))
+          }) ? 'ICE policy: relay' : 'ICE policy: all',
+        )
         return response.iceServers
       }
     } catch {
@@ -739,7 +745,13 @@ export function MessengerApp() {
   async function ensurePeer(callId: string, targetUserId: string, roomID: string) {
     if (peerRef.current) return peerRef.current
     const iceServers = await loadCallIceServers()
-    const peer = new RTCPeerConnection({ iceServers })
+    const peer = new RTCPeerConnection({
+      iceServers,
+      iceTransportPolicy: iceServers.some((server) => {
+        const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+        return urls.some((url) => String(url).startsWith('turn:') || String(url).startsWith('turns:'))
+      }) ? 'relay' : 'all',
+    })
     activeCallIDRef.current = callId
     activeCallPeerIDRef.current = targetUserId
     activeCallRoomIDRef.current = roomID
