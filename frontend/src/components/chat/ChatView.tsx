@@ -209,6 +209,9 @@ export function ChatView(props: ChatViewProps) {
   const historyPaginationEnabledRef = useRef(false)
   const bottomScrollTimersRef = useRef<number[]>([])
   const historyAnchorRef = useRef<{ id: string; top: number; length: number } | null>(null)
+  const paginationArmedRef = useRef(true)
+  const lastScrollTopRef = useRef(0)
+  const suppressPaginationUntilRef = useRef(0)
 
   function clearBottomScrollTimers() {
     for (const timer of bottomScrollTimersRef.current) window.clearTimeout(timer)
@@ -268,6 +271,9 @@ export function ChatView(props: ChatViewProps) {
     loadingHistoryRef.current = false
     historyPaginationEnabledRef.current = false
     historyAnchorRef.current = null
+    paginationArmedRef.current = true
+    lastScrollTopRef.current = 0
+    suppressPaginationUntilRef.current = 0
     clearBottomScrollTimers()
   }, [activeRoomID])
 
@@ -348,9 +354,12 @@ export function ChatView(props: ChatViewProps) {
     if (node) {
       const nextTop = node.getBoundingClientRect().top
       el.scrollTop += nextTop - anchor.top
+      lastScrollTopRef.current = el.scrollTop
     }
     historyAnchorRef.current = null
     loadingHistoryRef.current = false
+    paginationArmedRef.current = false
+    suppressPaginationUntilRef.current = Date.now() + 450
   }, [hasMoreMessages, isLoadingMoreMessages, visibleMessages.length])
 
   useEffect(() => {
@@ -637,18 +646,33 @@ export function ChatView(props: ChatViewProps) {
                 isNearBottomRef.current = atBottom
                 setShowScrollBtn(!atBottom)
                 if (atBottom) setUnreadCount(0)
+                const previousY = lastScrollTopRef.current
+                const isScrollingUp = y < previousY
+                lastScrollTopRef.current = y
+                if (y > 180 && Date.now() >= suppressPaginationUntilRef.current) {
+                  paginationArmedRef.current = true
+                }
                 if (
                   historyPaginationEnabledRef.current
                   && y < 120
                   && hasMoreMessages
                   && !isLoadingMoreMessages
                   && !loadingHistoryRef.current
+                  && paginationArmedRef.current
+                  && isScrollingUp
+                  && Date.now() >= suppressPaginationUntilRef.current
                 ) {
+                  paginationArmedRef.current = false
                   void handleLoadMoreMessages()
                 }
               }}
             >
-              <Stack className={isMobile ? 'mobile-message-list' : undefined} gap={isMobile ? 8 : 'xs'} pr={isMobile ? 0 : 'sm'}>
+              <Stack
+                className={isMobile ? 'mobile-message-list' : undefined}
+                gap={isMobile ? 8 : 'xs'}
+                pr={isMobile ? 0 : 'sm'}
+                style={{ overflowAnchor: 'none' }}
+              >
                 {isMessagesLoading && visibleMessages.length === 0 && Array.from({ length: 6 }).map((_, index) => (
                   <Card
                     key={index}
