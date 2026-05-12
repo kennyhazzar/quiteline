@@ -710,6 +710,17 @@ export function MessengerApp() {
     }, 45000)
   }
 
+  function armConnectionTimeout(callId: string) {
+    clearCallTimeout()
+    callTimeoutRef.current = setTimeout(() => {
+      if (activeCallIDRef.current !== callId || callState === 'connected') return
+      setCallError(locale === 'ru'
+        ? 'Не удалось установить медиасоединение. Проверьте TURN, сеть или мобильный firewall.'
+        : 'Could not establish media connection. Check TURN, network, or mobile firewall.')
+      cleanupCall(false, true)
+    }, 45000)
+  }
+
   async function flushPendingIce(peer: RTCPeerConnection) {
     if (!peer.remoteDescription) return
     const pending = pendingIceCandidatesRef.current.splice(0)
@@ -800,9 +811,17 @@ export function MessengerApp() {
     }
     peer.oniceconnectionstatechange = () => {
       addCallDiagnostic(`ICE connection: ${peer.iceConnectionState}`)
+      if (peer.iceConnectionState === 'failed') {
+        setCallError(locale === 'ru'
+          ? `ICE-соединение не установлено: peer=${peer.connectionState}, ice=${peer.iceConnectionState}.`
+          : `ICE connection failed: peer=${peer.connectionState}, ice=${peer.iceConnectionState}.`)
+      }
     }
     peer.onicegatheringstatechange = () => {
       addCallDiagnostic(`ICE gathering: ${peer.iceGatheringState}`)
+    }
+    peer.onicecandidateerror = (event) => {
+      addCallDiagnostic(`ICE error ${event.errorCode}: ${event.errorText || event.url || 'candidate failed'}`)
     }
     const audio: MediaTrackConstraints | boolean = selectedAudioInputId
       ? { deviceId: { exact: selectedAudioInputId } }
@@ -880,7 +899,7 @@ export function MessengerApp() {
       setCallState('connecting')
       setCallPeerName(incomingCall.displayName)
       setCallError('')
-      armCallTimeout(incomingCall.callId, incomingCall.fromUserId, incomingCall.roomId)
+      armConnectionTimeout(incomingCall.callId)
       sendRealtimeRaw({
         kind: 'call-answer',
         callId: incomingCall.callId,
@@ -997,10 +1016,12 @@ export function MessengerApp() {
     }
     if (event.callId !== activeCallIDRef.current) return
     if (event.kind === 'call-answer' && peerRef.current) {
+      clearCallTimeout()
       await peerRef.current.setRemoteDescription(event.answer)
       addCallDiagnostic('Remote answer accepted')
       await flushPendingIce(peerRef.current)
       setCallState('connecting')
+      armConnectionTimeout(event.callId)
       setCallStatus(locale === 'ru' ? 'Соединяем...' : 'Connecting...')
       return
     }
