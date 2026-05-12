@@ -54,10 +54,11 @@ services:
     network_mode: host
     command:
       - -n
+      - -v
       - --log-file=stdout
       - --listening-port=3478
       - --listening-ip=0.0.0.0
-      - --relay-ip=0.0.0.0
+      - --relay-ip=${TURN_EXTERNAL_IP}
       - --external-ip=${TURN_EXTERNAL_IP}
       - --realm=${TURN_REALM}
       - --server-name=${TURN_REALM}
