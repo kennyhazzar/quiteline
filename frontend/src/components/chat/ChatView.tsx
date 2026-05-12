@@ -208,10 +208,11 @@ export function ChatView(props: ChatViewProps) {
   const loadingHistoryRef = useRef(false)
   const historyPaginationEnabledRef = useRef(false)
   const bottomScrollTimersRef = useRef<number[]>([])
-  const historyAnchorRef = useRef<{ id: string; top: number; length: number } | null>(null)
+  const historyScrollSnapshotRef = useRef<{ height: number; top: number; length: number } | null>(null)
   const paginationArmedRef = useRef(true)
   const lastScrollTopRef = useRef(0)
   const suppressPaginationUntilRef = useRef(0)
+  const lastHistoryLoadAtRef = useRef(0)
 
   function clearBottomScrollTimers() {
     for (const timer of bottomScrollTimersRef.current) window.clearTimeout(timer)
@@ -270,10 +271,11 @@ export function ChatView(props: ChatViewProps) {
     initializedRoomRef.current = ''
     loadingHistoryRef.current = false
     historyPaginationEnabledRef.current = false
-    historyAnchorRef.current = null
+    historyScrollSnapshotRef.current = null
     paginationArmedRef.current = true
     lastScrollTopRef.current = 0
     suppressPaginationUntilRef.current = 0
+    lastHistoryLoadAtRef.current = 0
     clearBottomScrollTimers()
   }, [activeRoomID])
 
@@ -327,40 +329,45 @@ export function ChatView(props: ChatViewProps) {
 
   async function handleLoadMoreMessages() {
     if (loadingHistoryRef.current || isLoadingMoreMessages || !hasMoreMessages) return
+    const now = Date.now()
+    if (now - lastHistoryLoadAtRef.current < 900) return
+    lastHistoryLoadAtRef.current = now
     const el = messagesViewportRef.current
-    const firstMessage = visibleMessages[0]
-    if (el && firstMessage) {
-      const firstNode = document.getElementById(`message-${firstMessage.id}`)
-      historyAnchorRef.current = firstNode
-        ? { id: firstMessage.id, top: firstNode.getBoundingClientRect().top, length: visibleMessages.length }
-        : null
+    if (el) {
+      historyScrollSnapshotRef.current = {
+        height: el.scrollHeight,
+        top: el.scrollTop,
+        length: visibleMessages.length,
+      }
     } else {
-      historyAnchorRef.current = null
+      historyScrollSnapshotRef.current = null
     }
     loadingHistoryRef.current = true
     try {
       await loadMoreMessages()
     } finally {
-      if (!historyAnchorRef.current) loadingHistoryRef.current = false
+      if (!historyScrollSnapshotRef.current) loadingHistoryRef.current = false
     }
   }
 
   useLayoutEffect(() => {
-    const anchor = historyAnchorRef.current
+    const snapshot = historyScrollSnapshotRef.current
     const el = messagesViewportRef.current
-    if (!anchor || !el || isLoadingMoreMessages) return
-    if (visibleMessages.length <= anchor.length && hasMoreMessages) return
-    const node = document.getElementById(`message-${anchor.id}`)
-    if (node) {
-      const nextTop = node.getBoundingClientRect().top
-      el.scrollTop += nextTop - anchor.top
-      lastScrollTopRef.current = el.scrollTop
-    }
-    historyAnchorRef.current = null
+    if (!snapshot || !el || isLoadingMoreMessages) return
+    if (visibleMessages.length <= snapshot.length && hasMoreMessages) return
+    const nextTop = el.scrollHeight - snapshot.height + snapshot.top
+    el.scrollTop = nextTop
+    lastScrollTopRef.current = nextTop
+    historyScrollSnapshotRef.current = null
     loadingHistoryRef.current = false
     paginationArmedRef.current = false
     suppressPaginationUntilRef.current = Date.now() + 450
   }, [hasMoreMessages, isLoadingMoreMessages, visibleMessages.length])
+
+  useEffect(() => {
+    const el = messagesViewportRef.current
+    if (el) el.style.overflowAnchor = 'none'
+  }, [messagesViewportRef])
 
   useEffect(() => {
     if (!pendingImagePreviewID || !previews[pendingImagePreviewID]) return
@@ -648,8 +655,9 @@ export function ChatView(props: ChatViewProps) {
                 if (atBottom) setUnreadCount(0)
                 const previousY = lastScrollTopRef.current
                 const isScrollingUp = y < previousY
+                const crossedTopThreshold = previousY >= 120 && y < 120
                 lastScrollTopRef.current = y
-                if (y > 180 && Date.now() >= suppressPaginationUntilRef.current) {
+                if (y > 260 && Date.now() >= suppressPaginationUntilRef.current) {
                   paginationArmedRef.current = true
                 }
                 if (
@@ -660,6 +668,7 @@ export function ChatView(props: ChatViewProps) {
                   && !loadingHistoryRef.current
                   && paginationArmedRef.current
                   && isScrollingUp
+                  && crossedTopThreshold
                   && Date.now() >= suppressPaginationUntilRef.current
                 ) {
                   paginationArmedRef.current = false
