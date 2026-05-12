@@ -60,10 +60,7 @@ services:
       - --fingerprint
       - --lt-cred-mech
       - --user=${TURN_USERNAME}:${TURN_CREDENTIAL}
-      - --no-cli
       - --no-multicast-peers
-      - --no-tlsv1
-      - --no-tlsv1_1
       - --min-port=49160
       - --max-port=49200
     ports:

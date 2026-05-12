@@ -45,7 +45,6 @@ services:
       - --fingerprint
       - --lt-cred-mech
       - --user=${TURN_USERNAME:-quietline}:${TURN_CREDENTIAL:-quietline-turn-secret}
-      - --no-cli
       - --no-multicast-peers
       - --min-port=49160
       - --max-port=49200
