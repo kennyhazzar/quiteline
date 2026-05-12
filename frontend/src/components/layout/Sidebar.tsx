@@ -37,6 +37,7 @@ import {
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
 import { notifications } from '@mantine/notifications'
+import jsQR from 'jsqr'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type {
   AccountSession,
@@ -340,7 +341,7 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
     scan: locale === 'ru' ? 'Сканировать QR' : 'Scan QR',
     scannerTitle: locale === 'ru' ? 'Сканер контакта' : 'Contact scanner',
     scannerHint: locale === 'ru' ? 'Наведите камеру на QR-код контакта.' : 'Point the camera at a contact QR code.',
-    scannerUnsupported: locale === 'ru' ? 'Браузер не поддерживает встроенное сканирование QR.' : 'This browser does not support built-in QR scanning.',
+    scannerUnsupported: locale === 'ru' ? 'Не удалось открыть камеру для сканирования QR.' : 'Could not open the camera for QR scanning.',
     scanned: locale === 'ru' ? 'Код контакта считан' : 'Contact code scanned',
   }
   const contactStatusCopy = {
@@ -421,11 +422,6 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
     let cancelled = false
 
     async function startScanner() {
-      const BarcodeDetectorCtor = (window as unknown as { BarcodeDetector?: new (options: { formats: string[] }) => { detect: (source: HTMLVideoElement) => Promise<Array<{ rawValue?: string }>> } }).BarcodeDetector
-      if (!BarcodeDetectorCtor) {
-        setContactScanError(friendCodeCopy.scannerUnsupported)
-        return
-      }
       try {
         setContactScanError('')
         stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false })
@@ -433,13 +429,18 @@ function ProfilePanel(props: SidebarProps & { mode?: 'contacts' | 'settings' }) 
         if (!video || cancelled) return
         video.srcObject = stream
         await video.play()
-        const detector = new BarcodeDetectorCtor({ formats: ['qr_code'] })
+        const canvas = document.createElement('canvas')
+        const ctx = canvas.getContext('2d', { willReadFrequently: true })
+        if (!ctx) throw new Error(friendCodeCopy.scannerUnsupported)
         const tick = async () => {
           if (cancelled) return
           const currentVideo = contactVideoRef.current
-          if (currentVideo && currentVideo.readyState >= 2) {
-            const codes = await detector.detect(currentVideo).catch(() => [])
-            const raw = codes[0]?.rawValue?.trim()
+          if (currentVideo && currentVideo.readyState >= 2 && currentVideo.videoWidth > 0 && currentVideo.videoHeight > 0) {
+            canvas.width = currentVideo.videoWidth
+            canvas.height = currentVideo.videoHeight
+            ctx.drawImage(currentVideo, 0, 0, canvas.width, canvas.height)
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height)
+            const raw = jsQR(imageData.data, imageData.width, imageData.height)?.data.trim()
             if (raw) {
               setFriendUsername(raw)
               setContactScanOpened(false)
