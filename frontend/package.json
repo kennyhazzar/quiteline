@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start"
+    "dev": "node scripts/next-no-telemetry.mjs dev",
+    "build": "node scripts/next-no-telemetry.mjs build",
+    "start": "node scripts/next-no-telemetry.mjs start"
   },
   "dependencies": {
     "@mantine/core": "^7.17.0",
