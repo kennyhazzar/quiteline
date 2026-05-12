@@ -225,6 +225,7 @@ export function MessengerApp() {
   // We need wsRef available for handleAuthExpired, so we declare it early
   const wsRef = useRef<WebSocket | null>(null)
   const wsReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const previousRoomIDRef = useRef('')
 
   function sendRealtimeRaw(event: RealtimeEvent) {
     const topic =
@@ -467,6 +468,13 @@ export function MessengerApp() {
     roomsHook.markRead(activeRoomID, session.accessToken)
   }, [session, activeRoomID, messages.decryptedMessages.length])
 
+  useEffect(() => {
+    if (previousRoomIDRef.current === activeRoomID) return
+    previousRoomIDRef.current = activeRoomID
+    messages.setLiveMessages([])
+    messages.setPendingMessages([])
+  }, [activeRoomID])
+
   // ─── Realtime event handling ──────────────────────────────────────────────
   function handleRealtimeEvent(event: RealtimeEvent) {
     if (!currentUserID) return
@@ -557,8 +565,6 @@ export function MessengerApp() {
     const previousWS = wsRef.current
     wsRef.current = null
     previousWS?.close()
-    messages.setLiveMessages([])
-    messages.setPendingMessages([])
 
     const url = new URL(`${WS_BASE}/ws`)
     const topics = [`user:${userID}`]

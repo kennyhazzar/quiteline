@@ -226,10 +226,14 @@ export function useMessages(opts: {
         byID.set(msg.id, msg)
       }
     }
-    for (const msg of pagedMessages) put(msg)
-    for (const msg of liveMessages) put(msg)
+    for (const msg of pagedMessages) {
+      if (msg.roomId === activeRoomID) put(msg)
+    }
+    for (const msg of liveMessages) {
+      if (msg.roomId === activeRoomID) put(msg)
+    }
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  }, [liveMessages, pagedMessages])
+  }, [activeRoomID, liveMessages, pagedMessages])
 
   const encryptedAttachmentMessages = useMemo(() => {
     const byID = new Map<string, EncryptedMessage>()
@@ -237,10 +241,14 @@ export function useMessages(opts: {
       const current = byID.get(msg.id)
       if (!current || messageVersion(msg) >= messageVersion(current)) byID.set(msg.id, msg)
     }
-    for (const msg of attachmentHistory.data?.messages ?? []) put(msg)
-    for (const msg of liveMessages) put(msg)
+    for (const msg of attachmentHistory.data?.messages ?? []) {
+      if (msg.roomId === activeRoomID) put(msg)
+    }
+    for (const msg of liveMessages) {
+      if (msg.roomId === activeRoomID) put(msg)
+    }
     return [...byID.values()].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-  }, [attachmentHistory.data?.messages, liveMessages])
+  }, [activeRoomID, attachmentHistory.data?.messages, liveMessages])
 
   useEffect(() => {
     let cancelled = false

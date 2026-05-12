@@ -124,6 +124,7 @@ interface SidebarProps {
   downloadAttachment: (msg: DecryptedMessage) => void
   contactsResetKey?: number
   settingsResetKey?: number
+  desktopSidebarWidth?: number
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -158,7 +159,7 @@ export function Sidebar(props: SidebarProps) {
   return (
     <Stack
       className={!isMobile ? 'app-sidebar' : undefined}
-      w={isMobile ? '100%' : isTablet ? 300 : 340}
+      w={isMobile ? '100%' : props.desktopSidebarWidth ?? (isTablet ? 300 : 340)}
       gap={isMobile ? 0 : 'md'}
       style={{
         minHeight: 0,

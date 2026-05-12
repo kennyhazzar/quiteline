@@ -27,7 +27,7 @@ import {
   IconUsers,
 } from '@tabler/icons-react'
 import type { UseQueryResult, UseMutationResult } from '@tanstack/react-query'
-import { useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type PointerEvent, type RefObject } from 'react'
 import type {
   AuthSession,
   AccountSession,
@@ -46,6 +46,20 @@ import type {
 } from '@/types/messenger'
 import { Sidebar } from './Sidebar'
 import { ChatView } from '../chat/ChatView'
+
+const DESKTOP_SIDEBAR_WIDTH_KEY = 'quietline:desktop-sidebar-width'
+const MIN_DESKTOP_SIDEBAR_WIDTH = 280
+const MAX_DESKTOP_SIDEBAR_WIDTH = 520
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max)
+}
+
+function storedNumber(key: string, fallback: number) {
+  if (typeof window === 'undefined') return fallback
+  const parsed = Number(window.localStorage.getItem(key))
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback
+}
 
 interface AppShellLayoutProps {
   // nav
@@ -217,6 +231,13 @@ export function AppShellLayout(props: AppShellLayoutProps) {
   } = props
   const [contactsResetKey, setContactsResetKey] = useState(0)
   const [settingsResetKey, setSettingsResetKey] = useState(0)
+  const [desktopSidebarWidth, setDesktopSidebarWidth] = useState(() =>
+    storedNumber(DESKTOP_SIDEBAR_WIDTH_KEY, isTablet ? 300 : 340),
+  )
+  const resizeStateRef = useRef<{
+    startX: number
+    startSidebarWidth: number
+  } | null>(null)
   const liveBadge = {
     color: liveStatus === 'connected' ? 'green' : liveStatus === 'connecting' ? 'yellow' : 'red',
     label: liveStatus === 'connected'
@@ -239,6 +260,42 @@ export function AppShellLayout(props: AppShellLayoutProps) {
     if (value === 'contacts' && current === 'contacts') setContactsResetKey((key) => key + 1)
     if (value === 'settings' && current === 'settings') setSettingsResetKey((key) => key + 1)
     setMobileView(value)
+  }
+
+  useEffect(() => {
+    if (isMobile) return
+    window.localStorage.setItem(DESKTOP_SIDEBAR_WIDTH_KEY, String(Math.round(desktopSidebarWidth)))
+  }, [desktopSidebarWidth, isMobile])
+
+  function startDesktopResize(event: PointerEvent<HTMLButtonElement>) {
+    if (isMobile) return
+    event.preventDefault()
+    resizeStateRef.current = {
+      startX: event.clientX,
+      startSidebarWidth: desktopSidebarWidth,
+    }
+
+    const handleMove = (moveEvent: globalThis.PointerEvent) => {
+      const state = resizeStateRef.current
+      if (!state) return
+      const delta = moveEvent.clientX - state.startX
+      setDesktopSidebarWidth(clamp(
+        state.startSidebarWidth + delta,
+        MIN_DESKTOP_SIDEBAR_WIDTH,
+        MAX_DESKTOP_SIDEBAR_WIDTH,
+      ))
+    }
+
+    const stopResize = () => {
+      resizeStateRef.current = null
+      window.removeEventListener('pointermove', handleMove)
+      window.removeEventListener('pointerup', stopResize)
+      window.removeEventListener('pointercancel', stopResize)
+    }
+
+    window.addEventListener('pointermove', handleMove)
+    window.addEventListener('pointerup', stopResize)
+    window.addEventListener('pointercancel', stopResize)
   }
 
   return (
@@ -310,8 +367,30 @@ export function AppShellLayout(props: AppShellLayoutProps) {
             minHeight: 0,
           }}
         >
-          <Sidebar {...props} contactsResetKey={contactsResetKey} settingsResetKey={settingsResetKey} />
-          <ChatView {...props} />
+          {!isMobile ? (
+            <>
+              <Sidebar
+                {...props}
+                contactsResetKey={contactsResetKey}
+                settingsResetKey={settingsResetKey}
+                desktopSidebarWidth={desktopSidebarWidth}
+              />
+              <button
+                type="button"
+                className="desktop-resize-handle"
+                aria-label="Resize chat list"
+                onPointerDown={startDesktopResize}
+              />
+              <Box style={{ flex: 1, minWidth: 0, minHeight: 0, display: 'flex' }}>
+                <ChatView {...props} />
+              </Box>
+            </>
+          ) : (
+            <>
+              <Sidebar {...props} contactsResetKey={contactsResetKey} settingsResetKey={settingsResetKey} />
+              <ChatView {...props} />
+            </>
+          )}
         </Group>
 
         {isMobile && mobileView !== 'chat' && (
