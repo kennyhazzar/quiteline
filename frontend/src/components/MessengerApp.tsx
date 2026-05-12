@@ -1374,7 +1374,11 @@ export function MessengerApp() {
       mobilePeerStatus={mobilePeerStatus}
       // messages
       visibleMessages={messages.visibleMessages}
-      isMessagesLoading={messages.history.isLoading}
+      isMessagesLoading={
+        messages.history.isLoading
+        || messages.isDecryptingMessages
+        || (messages.encryptedMessageCount > 0 && messages.displayMessages.length === 0)
+      }
       displayMessages={messages.displayMessages}
       attachmentMessages={messages.attachmentMessages}
       attachmentsOpened={attachmentsOpened}

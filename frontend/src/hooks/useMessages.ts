@@ -79,6 +79,7 @@ export function useMessages(opts: {
   const [olderMessages, setOlderMessages] = useState<EncryptedMessage[]>([])
   const [hasMoreMessages, setHasMoreMessages] = useState(false)
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false)
+  const [isDecryptingMessages, setIsDecryptingMessages] = useState(false)
 
   const messageInputRef = useRef<HTMLInputElement | null>(null)
   const messageTextRef = useRef('')
@@ -252,6 +253,7 @@ export function useMessages(opts: {
 
   useEffect(() => {
     let cancelled = false
+    setIsDecryptingMessages(encryptedMessages.length > 0)
     async function run() {
       const next = await Promise.all(
         encryptedMessages.map(async (msg) => {
@@ -297,9 +299,17 @@ export function useMessages(opts: {
           }
         }),
       )
-      if (!cancelled) setDecryptedMessages(next)
+      if (!cancelled) {
+        setDecryptedMessages(next)
+        setIsDecryptingMessages(false)
+      }
     }
-    run()
+    if (encryptedMessages.length === 0) {
+      setDecryptedMessages([])
+      setIsDecryptingMessages(false)
+    } else {
+      run()
+    }
     return () => {
       cancelled = true
     }
@@ -351,7 +361,7 @@ export function useMessages(opts: {
       if (msg.roomId === activeRoomID && !localDeletedMessageIDs[msg.id]) byID.set(msg.id, msg)
     }
     for (const msg of decryptedMessages) {
-      if (!localDeletedMessageIDs[msg.id]) byID.set(msg.id, msg)
+      if (msg.roomId === activeRoomID && !localDeletedMessageIDs[msg.id]) byID.set(msg.id, msg)
     }
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   }, [activeRoomID, decryptedMessages, localDeletedMessageIDs, pendingMessages])
@@ -690,6 +700,8 @@ export function useMessages(opts: {
     messageSearch,
     setMessageSearch,
     decryptedMessages,
+    isDecryptingMessages,
+    encryptedMessageCount: encryptedMessages.length,
     displayMessages,
     visibleMessages,
     attachmentMessages,

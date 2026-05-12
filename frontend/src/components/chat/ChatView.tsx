@@ -43,7 +43,7 @@ import {
   IconX,
 } from '@tabler/icons-react'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
-import React, { useEffect, useRef, useState, type RefObject } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { absoluteAvatarUrl, type AuthSession, type Friend, type Identity, type Room } from '@/lib/api'
 import type { PlainMessage } from '@/lib/crypto'
 import { useI18n } from '@/lib/i18n'
@@ -208,6 +208,7 @@ export function ChatView(props: ChatViewProps) {
   const loadingHistoryRef = useRef(false)
   const historyPaginationEnabledRef = useRef(false)
   const bottomScrollTimersRef = useRef<number[]>([])
+  const historyAnchorRef = useRef<{ id: string; top: number } | null>(null)
 
   function clearBottomScrollTimers() {
     for (const timer of bottomScrollTimersRef.current) window.clearTimeout(timer)
@@ -266,6 +267,7 @@ export function ChatView(props: ChatViewProps) {
     initializedRoomRef.current = ''
     loadingHistoryRef.current = false
     historyPaginationEnabledRef.current = false
+    historyAnchorRef.current = null
     clearBottomScrollTimers()
   }, [activeRoomID])
 
@@ -320,21 +322,33 @@ export function ChatView(props: ChatViewProps) {
   async function handleLoadMoreMessages() {
     if (loadingHistoryRef.current || isLoadingMoreMessages || !hasMoreMessages) return
     const el = messagesViewportRef.current
-    const previousHeight = el?.scrollHeight ?? 0
-    const previousTop = el?.scrollTop ?? 0
+    const firstMessage = visibleMessages[0]
+    if (el && firstMessage) {
+      const firstNode = document.getElementById(`message-${firstMessage.id}`)
+      historyAnchorRef.current = firstNode ? { id: firstMessage.id, top: firstNode.getBoundingClientRect().top } : null
+    } else {
+      historyAnchorRef.current = null
+    }
     loadingHistoryRef.current = true
     try {
       await loadMoreMessages()
     } finally {
-      window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => {
-          const nextEl = messagesViewportRef.current
-          if (nextEl) nextEl.scrollTop = nextEl.scrollHeight - previousHeight + previousTop
-          loadingHistoryRef.current = false
-        })
-      })
+      if (!historyAnchorRef.current) loadingHistoryRef.current = false
     }
   }
+
+  useLayoutEffect(() => {
+    const anchor = historyAnchorRef.current
+    const el = messagesViewportRef.current
+    if (!anchor || !el || isLoadingMoreMessages) return
+    const node = document.getElementById(`message-${anchor.id}`)
+    if (node) {
+      const nextTop = node.getBoundingClientRect().top
+      el.scrollTop += nextTop - anchor.top
+    }
+    historyAnchorRef.current = null
+    loadingHistoryRef.current = false
+  }, [isLoadingMoreMessages, visibleMessages.length])
 
   useEffect(() => {
     if (!pendingImagePreviewID || !previews[pendingImagePreviewID]) return

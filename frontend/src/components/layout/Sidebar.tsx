@@ -444,6 +444,8 @@ function ProfilePanel(props: SidebarProps & {
   const currentPushSubscription = pushSubscriptions[0] ?? null
   const pushPermission = typeof window !== 'undefined' && 'Notification' in window ? Notification.permission : 'unsupported'
   const isPushInitialLoading = pushLoading && !pushInfo && pushSubscriptions.length === 0
+  const friendList = friends.data?.friends ?? []
+  const isContactsInitialLoading = profileSection === 'friends' && friends.isLoading && friendList.length === 0
   const isIOSStandalone = typeof window !== 'undefined'
     && 'standalone' in navigator
     && (navigator as Navigator & { standalone?: boolean }).standalone === true
@@ -868,7 +870,19 @@ function ProfilePanel(props: SidebarProps & {
       </Group>
       <ScrollArea.Autosize mah={260} type="auto" offsetScrollbars>
         <Stack gap="xs" pr="xs">
-          {(friends.data?.friends ?? []).map((friend) => (
+          {isContactsInitialLoading && Array.from({ length: 4 }).map((_, index) => (
+            <Card key={index} withBorder radius="md" p="sm">
+              <Group gap="sm" wrap="nowrap">
+                <Skeleton circle height={34} width={34} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <Skeleton height={13} width="58%" mb={8} />
+                  <Skeleton height={10} width="38%" />
+                </div>
+                <Skeleton height={28} width={82} radius="md" />
+              </Group>
+            </Card>
+          ))}
+          {!isContactsInitialLoading && friendList.map((friend) => (
             <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
               <Text size="sm" fw={friend.status === 'accepted' ? 700 : 500} truncate>
@@ -912,7 +926,7 @@ function ProfilePanel(props: SidebarProps & {
             ) : null}
             </Group>
           ))}
-          {(friends.data?.friends ?? []).length === 0 && <Text size="xs" c="dimmed">{contactStatusCopy.empty}</Text>}
+          {!isContactsInitialLoading && friendList.length === 0 && <Text size="xs" c="dimmed">{contactStatusCopy.empty}</Text>}
         </Stack>
       </ScrollArea.Autosize>
       </>
