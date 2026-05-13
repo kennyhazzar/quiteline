@@ -188,7 +188,6 @@ function isSameDay(a: Date, b: Date) {
 interface MessageRenderMeta {
   msg: DecryptedMessage
   dateDivider: string | null
-  isGrouped: boolean
 }
 
 function buildMessageMeta(
@@ -218,16 +217,7 @@ function buildMessageMeta(
         year: currDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
       })
     }
-    const isGrouped = !!(
-      prevDate &&
-      !msg.body?.system &&
-      !prev!.body?.system &&
-      msg.senderId === prev!.senderId &&
-      isSameDay(prevDate, currDate) &&
-      currDate.getTime() - prevDate.getTime() < 5 * 60 * 1000 &&
-      !dateDivider
-    )
-    return { msg, dateDivider, isGrouped }
+    return { msg, dateDivider }
   })
 }
 
@@ -783,7 +773,7 @@ export function ChatView(props: ChatViewProps) {
                     <Skeleton height={12} width="64%" />
                   </Card>
                 ))}
-                {buildMessageMeta(visibleMessages, t('today'), t('yesterday'), locale, hasMoreMessages).map(({ msg, dateDivider, isGrouped }) => (
+                {buildMessageMeta(visibleMessages, t('today'), t('yesterday'), locale, hasMoreMessages).map(({ msg, dateDivider }) => (
                   <React.Fragment key={msg.id}>
                     {dateDivider && (
                       <Group gap="xs" my={4} style={{ userSelect: 'none' }}>
@@ -818,26 +808,24 @@ export function ChatView(props: ChatViewProps) {
                         <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
                       ) : (
                         <>
-                          <Group justify={isGrouped ? 'flex-end' : 'space-between'} align="flex-start" mb={4} wrap="nowrap" style={{ minHeight: 30 }}>
-                            {!isGrouped && (
-                              <Group
-                                gap="xs"
-                                wrap="nowrap"
-                                style={{ minWidth: 0, cursor: identitiesByID.has(msg.senderId) ? 'pointer' : undefined }}
-                                onClick={() => {
-                                  const nextProfile = identitiesByID.get(msg.senderId)
-                                  if (nextProfile) setProfileUser(nextProfile)
-                                }}
-                              >
-                                <Avatar
-                                  src={msg.senderId === identity.userId ? ownAvatarSrc : absoluteAvatarUrl(msg.body?.senderAvatarUrl)}
-                                  name={msg.body?.senderName ?? msg.senderId}
-                                  radius="xl"
-                                  size={30}
-                                />
-                                <Text size="sm" fw={700} truncate>{msg.body?.senderName ?? msg.senderId}</Text>
-                              </Group>
-                            )}
+                          <Group justify="space-between" align="flex-start" mb={4} wrap="nowrap">
+                            <Group
+                              gap="xs"
+                              wrap="nowrap"
+                              style={{ minWidth: 0, cursor: identitiesByID.has(msg.senderId) ? 'pointer' : undefined }}
+                              onClick={() => {
+                                const nextProfile = identitiesByID.get(msg.senderId)
+                                if (nextProfile) setProfileUser(nextProfile)
+                              }}
+                            >
+                              <Avatar
+                                src={msg.senderId === identity.userId ? ownAvatarSrc : absoluteAvatarUrl(msg.body?.senderAvatarUrl)}
+                                name={msg.body?.senderName ?? msg.senderId}
+                                radius="xl"
+                                size={30}
+                              />
+                              <Text size="sm" fw={700} truncate>{msg.body?.senderName ?? msg.senderId}</Text>
+                            </Group>
                             <Group gap={4} wrap="nowrap" c="dimmed">
                               <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleTimeString()}</Text>
                               {msg.editedAt && !msg.deletedAt && <Text size="xs" c="dimmed">edited</Text>}
