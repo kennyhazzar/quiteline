@@ -133,8 +133,54 @@ interface ChatViewProps {
   inviteFriendMutation: UseMutationResult<unknown, Error, Friend>
 }
 
+function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
+}
+
+interface MessageRenderMeta {
+  msg: DecryptedMessage
+  dateDivider: string | null
+  isGrouped: boolean
+}
+
+function buildMessageMeta(
+  messages: DecryptedMessage[],
+  todayLabel: string,
+  yesterdayLabel: string,
+  locale: string,
+): MessageRenderMeta[] {
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  return messages.map((msg, i) => {
+    const prev = i > 0 ? messages[i - 1] : null
+    const currDate = new Date(msg.createdAt)
+    const prevDate = prev ? new Date(prev.createdAt) : null
+    let dateDivider: string | null = null
+    if (!prevDate || !isSameDay(prevDate, currDate)) {
+      if (isSameDay(currDate, today)) dateDivider = todayLabel
+      else if (isSameDay(currDate, yesterday)) dateDivider = yesterdayLabel
+      else dateDivider = currDate.toLocaleDateString(locale === 'ru' ? 'ru-RU' : 'en-US', {
+        day: 'numeric',
+        month: 'long',
+        year: currDate.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
+      })
+    }
+    const isGrouped = !!(
+      prevDate &&
+      !msg.body?.system &&
+      !prev!.body?.system &&
+      msg.senderId === prev!.senderId &&
+      isSameDay(prevDate, currDate) &&
+      currDate.getTime() - prevDate.getTime() < 5 * 60 * 1000 &&
+      !dateDivider
+    )
+    return { msg, dateDivider, isGrouped }
+  })
+}
+
 export function ChatView(props: ChatViewProps) {
-  const { t } = useI18n()
+  const { t, locale } = useI18n()
   const {
     isMobile,
     mobileView,
@@ -683,185 +729,195 @@ export function ChatView(props: ChatViewProps) {
                     <Skeleton height={12} width="64%" />
                   </Card>
                 ))}
-                {visibleMessages.map((msg) => (
-                  <Card
-                    key={msg.id}
-                    id={`message-${msg.id}`}
-                    data-message-id={msg.id}
-                    withBorder={!isMobile}
-                    className={!msg.body?.system ? 'message-bubble' : undefined}
-                    radius={!msg.body?.system ? 'lg' : 'sm'}
-                    p={isMobile ? 'sm' : 'sm'}
-                    style={{
-                      ...(!msg.body?.system
-                        ? {
-                            alignSelf: msg.senderId === identity.userId ? 'flex-end' : 'flex-start',
-                            maxWidth: isMobile ? '88%' : '76%',
-                            background:
-                              msg.senderId === identity.userId
-                                ? 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.18))'
-                                : 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
-                          }
-                        : {}),
-                      outline: highlightedMessageID === msg.id ? '2px solid var(--mantine-color-blue-5)' : undefined,
-                      outlineOffset: highlightedMessageID === msg.id ? 2 : undefined,
-                    }}
-                  >
-                    {msg.body?.system ? (
-                      <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
-                    ) : (
-                      <>
-                        <Group justify="space-between" align="flex-start" mb={4} wrap="nowrap">
-                          <Group
-                            gap="xs"
-                            wrap="nowrap"
-                            style={{ minWidth: 0, cursor: identitiesByID.has(msg.senderId) ? 'pointer' : undefined }}
-                            onClick={() => {
-                              const nextProfile = identitiesByID.get(msg.senderId)
-                              if (nextProfile) setProfileUser(nextProfile)
-                            }}
-                          >
-                            <Avatar
-                              src={msg.senderId === identity.userId ? ownAvatarSrc : absoluteAvatarUrl(msg.body?.senderAvatarUrl)}
-                              name={msg.body?.senderName ?? msg.senderId}
-                              radius="xl"
-                              size={30}
-                            />
-                            <Text size="sm" fw={700} truncate>{msg.body?.senderName ?? msg.senderId}</Text>
-                          </Group>
-                          <Group gap={4} wrap="nowrap" c="dimmed">
-                            <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleTimeString()}</Text>
-                            {msg.editedAt && !msg.deletedAt && <Text size="xs" c="dimmed">edited</Text>}
-                            {renderMessageStatus(msg)}
-                            <Menu shadow="md" width={210} position="bottom-end">
-                              <Menu.Target>
-                                <ActionIcon variant="subtle" size="sm" aria-label="Message actions">
-                                  <IconDotsVertical size={16} />
-                                </ActionIcon>
-                              </Menu.Target>
-                              <Menu.Dropdown>
-                                {!msg.deletedAt && (
-                                  <>
-                                    {QUICK_REACTIONS.map((emoji) => (
-                                      <Menu.Item
-                                        key={emoji}
-                                        onClick={() => (reactionMutation as UseMutationResult<unknown, Error, { message: DecryptedMessage; emoji: string }>).mutate({ message: msg, emoji })}
-                                      >
-                                        {emoji}
-                                      </Menu.Item>
-                                    ))}
-                                    <Menu.Divider />
-                                    <Menu.Item leftSection={<IconMessageCircle size={15} />} onClick={() => replyToMessage(msg)}>
-                                      Reply
-                                    </Menu.Item>
-                                    <Menu.Item leftSection={<IconCopy size={15} />} onClick={() => copyMessageText(msg)}>
-                                      Copy
-                                    </Menu.Item>
-                                    {isPersistedMessageID(msg.id) && (
-                                      <Menu.Item
-                                        leftSection={<IconLink size={15} />}
-                                        onClick={() => copyAppURL({ view: 'chat', roomId: msg.roomId, messageId: msg.id })}
-                                      >
-                                        {t('copyMessageLink')}
-                                      </Menu.Item>
-                                    )}
-                                  </>
-                                )}
-                                {identity?.userId === msg.senderId && !msg.deletedAt && isPersistedMessageID(msg.id) && (
-                                  <Menu.Item leftSection={<IconEdit size={15} />} onClick={() => openEditMessage(msg)}>
-                                    Edit
-                                  </Menu.Item>
-                                )}
-                                <Menu.Item leftSection={<IconInfoCircle size={15} />} onClick={() => setMessageInfo(msg)}>
-                                  Info
-                                </Menu.Item>
-                                <Menu.Divider />
-                                <Menu.Item color="red" leftSection={<IconTrash size={15} />} onClick={() => openDeleteMessage(msg)}>
-                                  Delete
-                                </Menu.Item>
-                              </Menu.Dropdown>
-                            </Menu>
-                          </Group>
-                        </Group>
-
-                        {msg.deletedAt ? (
-                          <Text fs="italic" c="dimmed">Message deleted</Text>
-                        ) : msg.failed ? (
-                          <code style={{ display: 'block', padding: '4px 8px', borderRadius: 12, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>
-                            {t('unableToDecrypt')}
-                          </code>
-                        ) : (
-                          <Stack gap="xs">
-                            {msg.body?.replyTo && (
-                              <Card withBorder radius="md" p="xs" style={{ borderLeft: '3px solid var(--mantine-color-blue-5)' }}>
-                                <Text size="xs" fw={700}>{msg.body.replyTo.senderName}</Text>
-                                <Text size="xs" c="dimmed" lineClamp={2}>{msg.body.replyTo.text}</Text>
-                              </Card>
-                            )}
-                            {msg.body?.text && <Text>{msg.body.text}</Text>}
-                            {Boolean(msg.reactions?.length) && (
-                              <Group gap={4}>
-                                {msg.reactions?.map((reaction) => (
-                                  <Button
-                                    key={reaction.emoji}
-                                    size="compact-xs"
-                                    variant="light"
-                                    onClick={() => (reactionMutation as UseMutationResult<unknown, Error, { message: DecryptedMessage; emoji: string }>).mutate({ message: msg, emoji: reaction.emoji })}
-                                  >
-                                    {reaction.emoji} {reaction.count}
-                                  </Button>
-                                ))}
+                {buildMessageMeta(visibleMessages, t('today'), t('yesterday'), locale).map(({ msg, dateDivider, isGrouped }) => (
+                  <React.Fragment key={msg.id}>
+                    {dateDivider && (
+                      <Group gap="xs" my={4} style={{ userSelect: 'none' }}>
+                        <Box style={{ flex: 1, height: 1, background: 'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))' }} />
+                        <Text size="xs" c="dimmed">{dateDivider}</Text>
+                        <Box style={{ flex: 1, height: 1, background: 'light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4))' }} />
+                      </Group>
+                    )}
+                    <Card
+                      id={`message-${msg.id}`}
+                      data-message-id={msg.id}
+                      withBorder={!isMobile}
+                      className={!msg.body?.system ? 'message-bubble' : undefined}
+                      radius={!msg.body?.system ? 'lg' : 'sm'}
+                      p={isMobile ? 'sm' : 'sm'}
+                      style={{
+                        ...(!msg.body?.system
+                          ? {
+                              alignSelf: msg.senderId === identity.userId ? 'flex-end' : 'flex-start',
+                              maxWidth: isMobile ? '88%' : '76%',
+                              background:
+                                msg.senderId === identity.userId
+                                  ? 'light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.18))'
+                                  : 'light-dark(var(--mantine-color-white), var(--mantine-color-dark-6))',
+                            }
+                          : {}),
+                        outline: highlightedMessageID === msg.id ? '2px solid var(--mantine-color-blue-5)' : undefined,
+                        outlineOffset: highlightedMessageID === msg.id ? 2 : undefined,
+                      }}
+                    >
+                      {msg.body?.system ? (
+                        <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
+                      ) : (
+                        <>
+                          <Group justify={isGrouped ? 'flex-end' : 'space-between'} align="flex-start" mb={4} wrap="nowrap">
+                            {!isGrouped && (
+                              <Group
+                                gap="xs"
+                                wrap="nowrap"
+                                style={{ minWidth: 0, cursor: identitiesByID.has(msg.senderId) ? 'pointer' : undefined }}
+                                onClick={() => {
+                                  const nextProfile = identitiesByID.get(msg.senderId)
+                                  if (nextProfile) setProfileUser(nextProfile)
+                                }}
+                              >
+                                <Avatar
+                                  src={msg.senderId === identity.userId ? ownAvatarSrc : absoluteAvatarUrl(msg.body?.senderAvatarUrl)}
+                                  name={msg.body?.senderName ?? msg.senderId}
+                                  radius="xl"
+                                  size={30}
+                                />
+                                <Text size="sm" fw={700} truncate>{msg.body?.senderName ?? msg.senderId}</Text>
                               </Group>
                             )}
-                            {msg.body?.attachment && (
-                              <Card withBorder radius="md" p="xs">
-                                <Group justify="space-between" align="center">
-                                  <div>
-                                    <Text size="sm" fw={600}>{msg.body.attachment.name}</Text>
-                                    <Text size="xs" c="dimmed">
-                                      {msg.body.attachment.type || 'file'} · {formatBytes(msg.body.attachment.size)}
-                                    </Text>
-                                  </div>
-                                  <Group gap="xs">
-                                    <Button size="xs" variant="light" onClick={() => openAttachmentPreview(msg)}>
-                                      {t('preview')}
+                            <Group gap={4} wrap="nowrap" c="dimmed">
+                              <Text size="xs" c="dimmed">{new Date(msg.createdAt).toLocaleTimeString()}</Text>
+                              {msg.editedAt && !msg.deletedAt && <Text size="xs" c="dimmed">edited</Text>}
+                              {renderMessageStatus(msg)}
+                              <Menu shadow="md" width={210} position="bottom-end">
+                                <Menu.Target>
+                                  <ActionIcon variant="subtle" size="sm" aria-label="Message actions">
+                                    <IconDotsVertical size={16} />
+                                  </ActionIcon>
+                                </Menu.Target>
+                                <Menu.Dropdown>
+                                  {!msg.deletedAt && (
+                                    <>
+                                      {QUICK_REACTIONS.map((emoji) => (
+                                        <Menu.Item
+                                          key={emoji}
+                                          onClick={() => (reactionMutation as UseMutationResult<unknown, Error, { message: DecryptedMessage; emoji: string }>).mutate({ message: msg, emoji })}
+                                        >
+                                          {emoji}
+                                        </Menu.Item>
+                                      ))}
+                                      <Menu.Divider />
+                                      <Menu.Item leftSection={<IconMessageCircle size={15} />} onClick={() => replyToMessage(msg)}>
+                                        Reply
+                                      </Menu.Item>
+                                      <Menu.Item leftSection={<IconCopy size={15} />} onClick={() => copyMessageText(msg)}>
+                                        Copy
+                                      </Menu.Item>
+                                      {isPersistedMessageID(msg.id) && (
+                                        <Menu.Item
+                                          leftSection={<IconLink size={15} />}
+                                          onClick={() => copyAppURL({ view: 'chat', roomId: msg.roomId, messageId: msg.id })}
+                                        >
+                                          {t('copyMessageLink')}
+                                        </Menu.Item>
+                                      )}
+                                    </>
+                                  )}
+                                  {identity?.userId === msg.senderId && !msg.deletedAt && isPersistedMessageID(msg.id) && (
+                                    <Menu.Item leftSection={<IconEdit size={15} />} onClick={() => openEditMessage(msg)}>
+                                      Edit
+                                    </Menu.Item>
+                                  )}
+                                  <Menu.Item leftSection={<IconInfoCircle size={15} />} onClick={() => setMessageInfo(msg)}>
+                                    Info
+                                  </Menu.Item>
+                                  <Menu.Divider />
+                                  <Menu.Item color="red" leftSection={<IconTrash size={15} />} onClick={() => openDeleteMessage(msg)}>
+                                    Delete
+                                  </Menu.Item>
+                                </Menu.Dropdown>
+                              </Menu>
+                            </Group>
+                          </Group>
+
+                          {msg.deletedAt ? (
+                            <Text fs="italic" c="dimmed">Message deleted</Text>
+                          ) : msg.failed ? (
+                            <code style={{ display: 'block', padding: '4px 8px', borderRadius: 12, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>
+                              {t('unableToDecrypt')}
+                            </code>
+                          ) : (
+                            <Stack gap="xs">
+                              {msg.body?.replyTo && (
+                                <Card withBorder radius="md" p="xs" style={{ borderLeft: '3px solid var(--mantine-color-blue-5)' }}>
+                                  <Text size="xs" fw={700}>{msg.body.replyTo.senderName}</Text>
+                                  <Text size="xs" c="dimmed" lineClamp={2}>{msg.body.replyTo.text}</Text>
+                                </Card>
+                              )}
+                              {msg.body?.text && <Text>{msg.body.text}</Text>}
+                              {Boolean(msg.reactions?.length) && (
+                                <Group gap={4}>
+                                  {msg.reactions?.map((reaction) => (
+                                    <Button
+                                      key={reaction.emoji}
+                                      size="compact-xs"
+                                      variant="light"
+                                      onClick={() => (reactionMutation as UseMutationResult<unknown, Error, { message: DecryptedMessage; emoji: string }>).mutate({ message: msg, emoji: reaction.emoji })}
+                                    >
+                                      {reaction.emoji} {reaction.count}
                                     </Button>
-                                    <ActionIcon variant="light" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
-                                      <IconDownload size={16} />
-                                    </ActionIcon>
-                                  </Group>
+                                  ))}
                                 </Group>
-                                {previews[msg.id] && msg.body.attachment.type.startsWith('image/') && (
-                                  <Image
-                                    src={previews[msg.id]}
-                                    alt={msg.body.attachment.name}
-                                    mt="sm"
-                                    mah={260}
-                                    fit="contain"
-                                    radius="md"
-                                    style={{ cursor: 'zoom-in' }}
-                                    onClick={() => setImageViewer({ src: previews[msg.id], name: msg.body?.attachment?.name || t('preview') })}
-                                  />
-                                )}
-                                {previews[msg.id] && !msg.body.attachment.type.startsWith('image/') && (
-                                  <Button
-                                    component="a"
-                                    href={previews[msg.id]}
-                                    download={msg.body.attachment.name}
-                                    mt="sm"
-                                    variant="default"
-                                    size="xs"
-                                  >
-                                    {t('decryptedDownload')}
-                                  </Button>
-                                )}
-                              </Card>
-                            )}
-                          </Stack>
-                        )}
-                      </>
-                    )}
-                  </Card>
+                              )}
+                              {msg.body?.attachment && (
+                                <Card withBorder radius="md" p="xs">
+                                  <Group justify="space-between" align="center">
+                                    <div>
+                                      <Text size="sm" fw={600}>{msg.body.attachment.name}</Text>
+                                      <Text size="xs" c="dimmed">
+                                        {msg.body.attachment.type || 'file'} · {formatBytes(msg.body.attachment.size)}
+                                      </Text>
+                                    </div>
+                                    <Group gap="xs">
+                                      <Button size="xs" variant="light" onClick={() => openAttachmentPreview(msg)}>
+                                        {t('preview')}
+                                      </Button>
+                                      <ActionIcon variant="light" onClick={() => downloadAttachment(msg)} aria-label={t('download')}>
+                                        <IconDownload size={16} />
+                                      </ActionIcon>
+                                    </Group>
+                                  </Group>
+                                  {previews[msg.id] && msg.body.attachment.type.startsWith('image/') && (
+                                    <Image
+                                      src={previews[msg.id]}
+                                      alt={msg.body.attachment.name}
+                                      mt="sm"
+                                      mah={260}
+                                      fit="contain"
+                                      radius="md"
+                                      style={{ cursor: 'zoom-in' }}
+                                      onClick={() => setImageViewer({ src: previews[msg.id], name: msg.body?.attachment?.name || t('preview') })}
+                                    />
+                                  )}
+                                  {previews[msg.id] && !msg.body.attachment.type.startsWith('image/') && (
+                                    <Button
+                                      component="a"
+                                      href={previews[msg.id]}
+                                      download={msg.body.attachment.name}
+                                      mt="sm"
+                                      variant="default"
+                                      size="xs"
+                                    >
+                                      {t('decryptedDownload')}
+                                    </Button>
+                                  )}
+                                </Card>
+                              )}
+                            </Stack>
+                          )}
+                        </>
+                      )}
+                    </Card>
+                  </React.Fragment>
                 ))}
                 {!isMessagesLoading && visibleMessages.length === 0 && (
                   <Text c="dimmed" ta="center" mt="xl">{t('noMessages')}</Text>
