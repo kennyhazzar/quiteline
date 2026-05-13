@@ -133,6 +133,54 @@ interface ChatViewProps {
   inviteFriendMutation: UseMutationResult<unknown, Error, Friend>
 }
 
+// Inline markdown + linkify renderer. Handles: URLs, **bold**, *italic*, `code`, ~~strike~~, newlines.
+const INLINE_PATTERN = /(https?:\/\/[^\s<>"{}|\\^`[\]]+)|\*\*(.+?)\*\*|\*(.+?)\*|`([^`]+)`|~~(.+?)~~/g
+
+function parseInlineMarkdown(text: string): React.ReactNode[] {
+  const nodes: React.ReactNode[] = []
+  const pattern = new RegExp(INLINE_PATTERN.source, 'g')
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push(...splitNewlines(text.slice(lastIndex, match.index), nodes.length))
+    }
+    const key = `${match.index}`
+    if (match[1]) {
+      nodes.push(
+        <a key={key} href={match[1]} target="_blank" rel="noopener noreferrer"
+          style={{ color: 'var(--mantine-color-blue-4)', wordBreak: 'break-all' }}>
+          {match[1]}
+        </a>
+      )
+    } else if (match[2]) {
+      nodes.push(<strong key={key}>{match[2]}</strong>)
+    } else if (match[3]) {
+      nodes.push(<em key={key}>{match[3]}</em>)
+    } else if (match[4]) {
+      nodes.push(
+        <code key={key} style={{
+          background: 'light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-5))',
+          padding: '1px 5px', borderRadius: 4, fontSize: '0.88em', fontFamily: 'monospace',
+        }}>
+          {match[4]}
+        </code>
+      )
+    } else if (match[5]) {
+      nodes.push(<s key={key}>{match[5]}</s>)
+    }
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < text.length) nodes.push(...splitNewlines(text.slice(lastIndex), nodes.length))
+  return nodes
+}
+
+function splitNewlines(text: string, keyOffset: number): React.ReactNode[] {
+  return text.split('\n').flatMap((line, i) =>
+    i === 0 ? [line] : [<br key={`br-${keyOffset}-${i}`} />, line]
+  )
+}
+
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
@@ -853,7 +901,11 @@ export function ChatView(props: ChatViewProps) {
                                   <Text size="xs" c="dimmed" lineClamp={2}>{msg.body.replyTo.text}</Text>
                                 </Card>
                               )}
-                              {msg.body?.text && <Text>{msg.body.text}</Text>}
+                              {msg.body?.text && (
+                                <Text style={{ wordBreak: 'break-word', overflowWrap: 'break-word', whiteSpace: 'pre-wrap' }}>
+                                  {parseInlineMarkdown(msg.body.text)}
+                                </Text>
+                              )}
                               {Boolean(msg.reactions?.length) && (
                                 <Group gap={4}>
                                   {msg.reactions?.map((reaction) => (
