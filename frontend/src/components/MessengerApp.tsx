@@ -218,12 +218,12 @@ export function MessengerApp() {
   function handleAuthExpired() {
     if (authExpiredNotifiedRef.current) return
     authExpiredNotifiedRef.current = true
-    setSession(null)
-    clearAccountLocalState()
+    queryClient.clear()
     const previousWS = wsRef.current
     wsRef.current = null
     previousWS?.close()
-    queryClient.clear()
+    clearAccountLocalState()
+    setSession(null)
     notifications.show({ title: t('sessionExpired'), message: t('sessionExpiredMessage'), color: 'yellow' })
   }
 
@@ -1399,24 +1399,22 @@ export function MessengerApp() {
   }
 
   function logoutLocal(options: { remote?: boolean } = {}) {
-    if (identity) {
-      if (activeRoomID) {
-        sendRealtimeRaw({
-          kind: 'presence',
-          userId: identity.userId,
-          displayName: identity.displayName,
-          status: 'offline',
-          lastSeenAt: new Date().toISOString(),
-        })
-      }
+    if (identity && activeRoomID) {
+      sendRealtimeRaw({
+        kind: 'presence',
+        userId: identity.userId,
+        displayName: identity.displayName,
+        status: 'offline',
+        lastSeenAt: new Date().toISOString(),
+      })
     }
     if (options.remote !== false) {
       void logoutSession().catch(() => undefined)
     }
-    setSession(null)
-    clearAccountLocalState()
-    wsRef.current?.close()
     queryClient.clear()
+    wsRef.current?.close()
+    clearAccountLocalState()
+    setSession(null)
   }
 
   function logout() {
