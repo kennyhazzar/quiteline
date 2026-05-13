@@ -19,7 +19,6 @@ import {
   Switch,
   Text,
   TextInput,
-  Title,
 } from '@mantine/core'
 import {
   IconBell,
@@ -33,6 +32,7 @@ import {
   IconPhoneIncoming,
   IconPlus,
   IconQrcode,
+  IconSearch,
   IconShieldLock,
   IconUser,
   IconUserPlus,
@@ -138,6 +138,24 @@ interface SidebarProps {
   contactsResetKey?: number
   settingsResetKey?: number
   desktopSidebarWidth?: number
+}
+
+function formatRoomTime(dateStr: string, locale: string) {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const isYesterday = date.toDateString() === yesterday.toDateString()
+  if (isToday) return date.toLocaleTimeString(locale === 'ru' ? 'ru-RU' : 'en-US', { hour: '2-digit', minute: '2-digit' })
+  if (isYesterday) return locale === 'ru' ? 'вчера' : 'yesterday'
+  return date.toLocaleDateString(locale === 'ru' ? 'ru-RU' : 'en-US', { month: 'short', day: 'numeric' })
+}
+
+function isRecentlyOnline(presence: { status: string; lastSeenAt: string } | undefined): boolean {
+  if (!presence) return false
+  if (presence.status === 'online') return true
+  return Date.now() - Date.parse(presence.lastSeenAt) < 30000
 }
 
 export function Sidebar(props: SidebarProps) {
@@ -259,6 +277,7 @@ export function Sidebar(props: SidebarProps) {
           rooms={props.rooms}
           selectRoom={props.selectRoom}
           locale={locale}
+          isMobile={isMobile}
         />
       )}
 
@@ -275,23 +294,22 @@ export function Sidebar(props: SidebarProps) {
           flexDirection: 'column',
         }}
       >
-        <Group justify="space-between" mb="sm">
-          <Title order={4}>{locale === 'ru' ? 'Чаты' : 'Chats'}</Title>
-          <Group gap={6} wrap="nowrap">
-            <ActionIcon variant="light" onClick={() => setMobileCreateRoomOpened(true)} aria-label={t('createRoom')}>
-              <IconPlus size={16} />
-            </ActionIcon>
-            <ActionIcon variant="light" onClick={() => setMobileImportInviteOpened(true)} aria-label={t('importInvite')}>
-              <IconKey size={16} />
-            </ActionIcon>
-          </Group>
+        <Group gap="xs" mb="sm" wrap="nowrap">
+          <TextInput
+            style={{ flex: 1, minWidth: 0 }}
+            size="sm"
+            placeholder={locale === 'ru' ? 'Поиск чатов' : 'Search chats'}
+            leftSection={<IconSearch size={14} />}
+            value={roomSearch}
+            onChange={(event) => setRoomSearch(event.currentTarget.value)}
+          />
+          <ActionIcon variant="light" onClick={() => setMobileCreateRoomOpened(true)} aria-label={t('createRoom')}>
+            <IconPlus size={16} />
+          </ActionIcon>
+          <ActionIcon variant="light" onClick={() => setMobileImportInviteOpened(true)} aria-label={t('importInvite')}>
+            <IconKey size={16} />
+          </ActionIcon>
         </Group>
-        <TextInput
-          mb="sm"
-          placeholder={locale === 'ru' ? 'Поиск чатов' : 'Search chats'}
-          value={roomSearch}
-          onChange={(event) => setRoomSearch(event.currentTarget.value)}
-        />
         <ScrollArea type="auto" offsetScrollbars style={{ flex: 1, minHeight: 0 }}>
           <Stack gap="sm" pr="xs">
             {rooms.isLoading && filteredRooms.length === 0 && Array.from({ length: 7 }).map((_, index) => (
@@ -317,29 +335,26 @@ export function Sidebar(props: SidebarProps) {
                   aria-label={title}
                   className="chat-list-card"
                   data-active={isActive ? 'true' : 'false'}
-                    onClick={() => selectRoom(room)}
+                  onClick={() => selectRoom(room)}
                 >
                   <Group gap="sm" wrap="nowrap">
-                    <Avatar src={avatarUrl} name={title} radius="xl" size={44} color={isActive ? 'blue' : 'gray'}>
-                      <IconMessageCircle size={20} />
+                    <Avatar src={avatarUrl} name={title} radius="xl" size={40} color={isActive ? 'blue' : 'gray'}>
+                      <IconMessageCircle size={18} />
                     </Avatar>
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <Group justify="space-between" gap="xs" wrap="nowrap">
-                        <Text fw={800} size="sm" truncate>{title}</Text>
+                        <Text fw={700} size="sm" truncate>{title}</Text>
                         <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-                          {new Date(lastActivity).toLocaleDateString(locale, { month: 'short', day: 'numeric' })}
+                          {formatRoomTime(lastActivity, locale)}
                         </Text>
                       </Group>
-                      <Group justify="space-between" gap="xs" wrap="nowrap" mt={2}>
-                        <Text size="xs" c="dimmed" truncate>
-                          {locale === 'ru' ? 'Открыть чат' : 'Open chat'}
-                        </Text>
                       {Boolean(room.unreadCount) && (
-                        <Badge size="sm" color="red" variant="filled" style={{ flexShrink: 0 }}>
-                          {room.unreadCount}
-                        </Badge>
+                        <Group justify="flex-end" mt={2}>
+                          <Badge size="sm" color="red" variant="filled">
+                            {room.unreadCount}
+                          </Badge>
+                        </Group>
                       )}
-                      </Group>
                     </div>
                   </Group>
                 </button>
@@ -372,25 +387,26 @@ function CallsView({
   rooms,
   selectRoom,
   locale,
+  isMobile,
 }: {
   callLogs: UseQueryResult<{ calls: CallLog[] }>
   identity: { userId: string }
   rooms: UseQueryResult<{ rooms: Room[] }>
   selectRoom: (room: Room) => void
   locale: string
+  isMobile: boolean
 }) {
   const logs = callLogs.data?.calls ?? []
   const roomsMap = new Map((rooms.data?.rooms ?? []).map((r) => [r.roomId, r]))
 
   return (
     <Card
-      withBorder
-      className="desktop-surface"
-      radius="md"
-      p="md"
+      withBorder={!isMobile}
+      className={!isMobile ? 'desktop-surface' : undefined}
+      radius={isMobile ? 'lg' : 'md'}
+      p={isMobile ? 'sm' : 'md'}
       style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
     >
-      <Text fw={800} mb="sm">{locale === 'ru' ? 'Звонки' : 'Calls'}</Text>
       <ScrollArea type="auto" offsetScrollbars style={{ flex: 1, minHeight: 0 }}>
         {callLogs.isLoading && (
           <Stack gap="xs" pr="xs">
@@ -873,33 +889,33 @@ function ProfilePanel(props: SidebarProps & {
         overflowY: 'auto',
       }}
     >
-      <Group justify="space-between" align="flex-start" mb="xs" wrap="nowrap">
-        <Group gap="sm" wrap="nowrap" style={{ minWidth: 0 }}>
+      <Group justify="space-between" align="center" mb="xs" wrap="nowrap">
+        <Group gap="xs" wrap="nowrap" style={{ minWidth: 0 }}>
           {ownAvatarSrc ? (
             <Image
               src={ownAvatarSrc}
               alt="avatar"
-              w={52}
-              h={52}
+              w={40}
+              h={40}
               radius="xl"
-              style={{ cursor: 'pointer' }}
+              style={{ cursor: 'pointer', flexShrink: 0 }}
               onClick={() => setAvatarViewerOpened(true)}
             />
           ) : (
             <div
               onClick={() => setAvatarViewerOpened(true)}
-              style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--mantine-color-blue-6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 20, cursor: 'pointer' }}
+              style={{ width: 40, height: 40, borderRadius: '50%', background: 'var(--mantine-color-blue-6)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 700, fontSize: 16, cursor: 'pointer', flexShrink: 0 }}
             >
               {(session.principal.displayName || identity.displayName).slice(0, 1).toUpperCase()}
             </div>
           )}
           <div style={{ minWidth: 0 }}>
-            <Text fw={700} truncate>{session.principal.displayName || identity.displayName}</Text>
+            <Text fw={700} size="sm" truncate>{session.principal.displayName || identity.displayName}</Text>
             <Text size="xs" c="dimmed" truncate>{props.mode === 'contacts' ? sectionCopy.friends : (locale === 'ru' ? 'Настройки' : 'Settings')}</Text>
           </div>
         </Group>
         {props.mode === 'contacts' && (
-          <Badge color={liveBadge.color} style={{ flexShrink: 0 }}>
+          <Badge color={liveBadge.color} style={{ flexShrink: 0 }} size="sm">
             {liveBadge.label}
           </Badge>
         )}
@@ -1088,7 +1104,8 @@ function ProfilePanel(props: SidebarProps & {
         <Stack gap="xs" pr="xs">
           {friendList.map((friend) => {
             const friendPresence = presence[friend.userId]
-            const lastSeenText = friendPresence?.lastSeenAt
+            const online = isRecentlyOnline(friendPresence)
+            const lastSeenText = !online && friendPresence?.lastSeenAt
               ? formatLastSeen(friendPresence.lastSeenAt)
               : null
             return (
@@ -1097,9 +1114,11 @@ function ProfilePanel(props: SidebarProps & {
               <Text size="sm" fw={friend.status === 'accepted' ? 700 : 500} truncate>
                 {friend.displayName || t('unknownUser')}
               </Text>
-              <Text size="xs" c="dimmed" truncate>
+              <Text size="xs" c={friend.status === 'accepted' && online ? 'green' : 'dimmed'} truncate>
                 {friend.status === 'accepted'
-                  ? (lastSeenText ?? contactStatusCopy.accepted)
+                  ? online
+                    ? (locale === 'ru' ? 'в сети' : 'online')
+                    : (lastSeenText ?? contactStatusCopy.accepted)
                   : friend.direction === 'incoming'
                     ? contactStatusCopy.incoming
                     : contactStatusCopy.outgoing}
