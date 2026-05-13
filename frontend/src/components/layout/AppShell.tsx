@@ -370,7 +370,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
             height: isMobile
               ? mobileView === 'chat'
                 ? '100dvh'
-                : 'calc(100dvh - 58px)'
+                : 'calc(100dvh - env(safe-area-inset-top) - 58px)'
               : 'calc(100dvh - 96px)',
             minHeight: 0,
           }}
@@ -404,10 +404,10 @@ export function AppShellLayout(props: AppShellLayoutProps) {
         {isMobile && mobileView !== 'chat' && (
           <Group className="mobile-bottom-nav" gap={4} wrap="nowrap">
             {([
-              { value: 'contacts', label: navCopy.contacts, icon: <IconUsers size={18} /> },
-              { value: 'rooms', label: navCopy.chats, icon: <IconMessageCircle size={18} /> },
-              { value: 'calls', label: navCopy.calls, icon: <IconPhone size={18} /> },
-              { value: 'settings', label: navCopy.settings, icon: <IconSettings size={18} /> },
+              { value: 'contacts', label: navCopy.contacts, icon: <IconUsers size={20} /> },
+              { value: 'rooms', label: navCopy.chats, icon: <IconMessageCircle size={20} /> },
+              { value: 'calls', label: navCopy.calls, icon: <IconPhone size={20} /> },
+              { value: 'settings', label: navCopy.settings, icon: <IconSettings size={20} /> },
             ] as const).map((item) => (
               <button
                 key={item.value}
@@ -415,10 +415,8 @@ export function AppShellLayout(props: AppShellLayoutProps) {
                 className={`mobile-nav-item${mobileView === item.value ? ' mobile-nav-item-active' : ''}`}
                 onClick={() => openMobileTab(item.value)}
               >
-                <Stack gap={1} align="center">
-                  {item.icon}
-                  <Text size="xs" fw={700}>{item.label}</Text>
-                </Stack>
+                {item.icon}
+                <Text size="xs" fw={600} style={{ lineHeight: 1 }}>{item.label}</Text>
               </button>
             ))}
           </Group>

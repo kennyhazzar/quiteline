@@ -215,7 +215,7 @@ export function Sidebar(props: SidebarProps) {
         display: isMobile && props.mobileView === 'chat' ? 'none' : 'flex',
         height: isMobile ? '100%' : undefined,
         overflowY: isMobile ? 'auto' : undefined,
-        padding: isMobile ? '12px 12px 66px' : 12,
+        padding: isMobile ? '12px 12px calc(72px + env(safe-area-inset-bottom))' : 12,
       }}
     >
       {!isMobile && (

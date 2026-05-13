@@ -365,11 +365,11 @@ body {
   }
 
   .mobile-top-bar {
-    height: 58px;
-    padding: env(safe-area-inset-top) 16px 0;
+    height: calc(env(safe-area-inset-top) + 58px);
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 10px;
     border-bottom: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5));
-    background: light-dark(rgba(255, 255, 255, 0.86), rgba(20, 21, 23, 0.86));
-    backdrop-filter: blur(18px);
+    background: light-dark(rgba(255, 255, 255, 0.88), rgba(20, 21, 23, 0.9));
+    backdrop-filter: blur(20px);
   }
 
   .app-workspace {
@@ -446,27 +446,44 @@ body {
     right: 12px;
     bottom: calc(env(safe-area-inset-bottom) + 12px);
     z-index: 40;
-    height: 54px;
+    height: 62px;
     padding: 6px;
     border: 1px solid light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-4));
-    border-radius: 18px;
-    background: light-dark(rgba(255, 255, 255, 0.92), rgba(20, 21, 23, 0.92));
-    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.22);
-    backdrop-filter: blur(18px);
+    border-radius: 20px;
+    background: light-dark(rgba(255, 255, 255, 0.94), rgba(20, 21, 23, 0.94));
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18), 0 2px 8px rgba(0, 0, 0, 0.08);
+    backdrop-filter: blur(22px);
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
   }
 
   .mobile-nav-item {
     flex: 1;
     height: 100%;
     border: 0;
-    border-radius: 14px;
-    color: var(--mantine-color-dimmed);
+    border-radius: 15px;
+    color: light-dark(var(--mantine-color-gray-6), var(--mantine-color-dark-2));
     background: transparent;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0 4px;
+    transition: color 140ms ease, background 140ms ease, transform 100ms ease;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .mobile-nav-item:active {
+    transform: scale(0.93);
+    opacity: 0.8;
   }
 
   .mobile-nav-item-active {
-    color: light-dark(var(--mantine-color-blue-7), var(--mantine-color-blue-3));
-    background: light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.16));
+    color: light-dark(var(--mantine-color-blue-6), var(--mantine-color-blue-4));
+    background: light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.14));
   }
 
   /* ── Mobile auth page ──────────────────────────────────────────────────── */
