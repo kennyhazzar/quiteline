@@ -146,6 +146,7 @@ export function MessengerApp() {
   const [audioOutputDevices, setAudioOutputDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioInputId, setSelectedAudioInputId] = useState('')
   const [selectedAudioOutputId, setSelectedAudioOutputId] = useState('')
+  const myUserIDRef = useRef('')
   const localStreamRef = useRef<MediaStream | null>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const mediaSourceRef = useRef<MediaSource | null>(null)
@@ -161,6 +162,7 @@ export function MessengerApp() {
 
   // ─── Derived ───────────────────────────────────────────────────────────────
   const currentUserID = identity?.userId || session?.principal.userId || ''
+  myUserIDRef.current = currentUserID
   const currentDisplayName =
     identity?.displayName || session?.principal.displayName || session?.principal.username || ''
   const leftView = isMobile ? mobileView : sidebarView
@@ -736,7 +738,7 @@ export function MessengerApp() {
 
   function startAudioStreaming() {
     const stream = localStreamRef.current
-    if (!stream || !identity) return
+    if (!stream || !myUserIDRef.current) return
     const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
@@ -744,7 +746,7 @@ export function MessengerApp() {
     const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 16000 })
     let seq = 0
     recorder.ondataavailable = async (e) => {
-      if (e.data.size === 0 || !activeCallIDRef.current || !identity) return
+      if (e.data.size === 0 || !activeCallIDRef.current) return
       try {
         const buffer = await e.data.arrayBuffer()
         const bytes = new Uint8Array(buffer)
@@ -757,7 +759,7 @@ export function MessengerApp() {
           kind: 'call-audio',
           callId: activeCallIDRef.current,
           roomId: activeCallRoomIDRef.current,
-          fromUserId: identity.userId,
+          fromUserId: myUserIDRef.current,
           toUserId: activeCallPeerIDRef.current,
           chunk: btoa(binary),
           seq: seq++,
@@ -936,15 +938,16 @@ export function MessengerApp() {
   }
 
   async function handleCallEvent(event: RealtimeEvent) {
-    if (!identity || !('fromUserId' in event) || event.fromUserId === identity.userId) return
-    if ('toUserId' in event && event.toUserId !== identity.userId) return
+    const myID = myUserIDRef.current
+    if (!myID || !('fromUserId' in event) || event.fromUserId === myID) return
+    if ('toUserId' in event && event.toUserId !== myID) return
     if (event.kind === 'call-offer') {
       if (callState !== 'idle') {
         sendRealtimeRaw({
           kind: 'call-decline',
           callId: event.callId,
           roomId: event.roomId,
-          fromUserId: identity.userId,
+          fromUserId: myID,
           toUserId: event.fromUserId,
           reason: 'busy',
         })
