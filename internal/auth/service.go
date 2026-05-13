@@ -94,6 +94,7 @@ type UserStore interface {
 	UpdateUserAvatar(ctx context.Context, userID string, avatarFileID string, mimeType string, size int64) (User, error)
 	UpdateUserTheme(ctx context.Context, userID string, theme string) (User, error)
 	UpdateUserTOTP(ctx context.Context, userID string, secret string, enabled bool) (User, error)
+	UpdateUserDisplayName(ctx context.Context, userID string, displayName string) (User, error)
 }
 
 type TOTPSetup struct {
@@ -215,6 +216,20 @@ func (s *Service) UpdateTheme(ctx context.Context, principal Principal, theme st
 		return Principal{}, ErrInvalidCredentials
 	}
 	user, err := s.users.UpdateUserTheme(ctx, principal.UserID, theme)
+	if err != nil {
+		return Principal{}, err
+	}
+	next := userPrincipal(user, principal.Expires)
+	next.SessionID = principal.SessionID
+	return next, nil
+}
+
+func (s *Service) UpdateDisplayName(ctx context.Context, principal Principal, displayName string) (Principal, error) {
+	displayName = strings.TrimSpace(displayName)
+	if principal.UserID == "" || displayName == "" {
+		return Principal{}, ErrInvalidCredentials
+	}
+	user, err := s.users.UpdateUserDisplayName(ctx, principal.UserID, displayName)
 	if err != nil {
 		return Principal{}, err
 	}

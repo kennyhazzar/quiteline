@@ -36,6 +36,7 @@ import {
   IconUserPlus,
   IconUsers,
 } from '@tabler/icons-react'
+import { useMutation } from '@tanstack/react-query'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
 import jsQR from 'jsqr'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
@@ -52,7 +53,9 @@ import {
   fetchPushPublicKey,
   fetchPushSubscriptions,
   savePushSubscription,
+  updateDisplayName,
   updatePushSubscription,
+  upsertIdentity,
   type PushPreferences,
   type PushPublicKey,
   type PushSubscriptionRecord,
@@ -104,6 +107,7 @@ interface SidebarProps {
   respondFriendMutation: UseMutationResult<unknown, Error, { friend: Friend; accept: boolean }>
   acceptedFriends: Friend[]
   inviteFriendMutation: UseMutationResult<unknown, Error, Friend>
+  openDirectChat: (friend: Friend) => void
   // rooms
   rooms: UseQueryResult<{ rooms: Room[] }>
   filteredRooms: Room[]
@@ -361,6 +365,8 @@ function ProfilePanel(props: SidebarProps & {
     requestFriendMutation,
     respondFriendMutation,
     inviteFriendMutation,
+    openDirectChat,
+    presence,
     activeRoomID,
     activeRoom,
     totpSetup,
@@ -821,17 +827,15 @@ function ProfilePanel(props: SidebarProps & {
       )}
 
       {profileSection === 'account' && (
-      <FileInput
-        label={t('avatar')}
-        placeholder={t('avatarUpload')}
-        accept="image/png,image/jpeg,image/webp"
-        onChange={(file) => {
-          if (file) (avatarMutation as UseMutationResult<unknown, Error, File>).mutate(file)
-        }}
-        disabled={(avatarMutation as UseMutationResult<unknown, Error, File>).isPending}
-        clearable
-        mb="sm"
-      />
+        <AccountSection
+          session={session}
+          identity={identity}
+          ownAvatarSrc={ownAvatarSrc}
+          avatarMutation={avatarMutation}
+          updateSessionPrincipal={props.updateSessionPrincipal}
+          setAvatarViewerOpened={setAvatarViewerOpened}
+          locale={locale}
+        />
       )}
 
       {profileSection === 'friends' && (
@@ -942,7 +946,12 @@ function ProfilePanel(props: SidebarProps & {
       </Group>
       <ScrollArea.Autosize mah={260} type="auto" offsetScrollbars>
         <Stack gap="xs" pr="xs">
-          {friendList.map((friend) => (
+          {friendList.map((friend) => {
+            const friendPresence = presence[friend.userId]
+            const lastSeenText = friendPresence?.lastSeenAt
+              ? formatLastSeen(friendPresence.lastSeenAt)
+              : null
+            return (
             <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
               <Text size="sm" fw={friend.status === 'accepted' ? 700 : 500} truncate>
@@ -950,7 +959,7 @@ function ProfilePanel(props: SidebarProps & {
               </Text>
               <Text size="xs" c="dimmed" truncate>
                 {friend.status === 'accepted'
-                  ? contactStatusCopy.accepted
+                  ? (lastSeenText ?? contactStatusCopy.accepted)
                   : friend.direction === 'incoming'
                     ? contactStatusCopy.incoming
                     : contactStatusCopy.outgoing}
@@ -974,18 +983,31 @@ function ProfilePanel(props: SidebarProps & {
                   {t('decline')}
                 </Button>
               </Group>
-            ) : friend.status === 'accepted' && activeRoomID && !activeRoom?.members.includes(friend.userId) ? (
-              <Button
-                size="xs"
-                variant="light"
-                onClick={() => (inviteFriendMutation as UseMutationResult<unknown, Error, Friend>).mutate(friend)}
-                loading={(inviteFriendMutation as UseMutationResult<unknown, Error, Friend>).isPending}
-              >
-                {t('invite')}
-              </Button>
+            ) : friend.status === 'accepted' ? (
+              <Group gap={4} wrap="nowrap">
+                <Button
+                  size="xs"
+                  variant="light"
+                  leftSection={<IconMessageCircle size={14} />}
+                  onClick={() => openDirectChat(friend)}
+                >
+                  {locale === 'ru' ? 'Чат' : 'Chat'}
+                </Button>
+                {activeRoomID && !activeRoom?.members.includes(friend.userId) && (
+                  <Button
+                    size="xs"
+                    variant="subtle"
+                    onClick={() => (inviteFriendMutation as UseMutationResult<unknown, Error, Friend>).mutate(friend)}
+                    loading={(inviteFriendMutation as UseMutationResult<unknown, Error, Friend>).isPending}
+                  >
+                    {t('invite')}
+                  </Button>
+                )}
+              </Group>
             ) : null}
             </Group>
-          ))}
+            )
+          })}
           {friendList.length === 0 && <Text size="xs" c="dimmed">{contactStatusCopy.empty}</Text>}
         </Stack>
       </ScrollArea.Autosize>
@@ -1260,6 +1282,104 @@ function ProfilePanel(props: SidebarProps & {
       )}
     </Card>
     </>
+  )
+}
+
+interface AccountSectionProps {
+  session: AuthSession
+  identity: Identity
+  ownAvatarSrc: string
+  avatarMutation: UseMutationResult<unknown, Error, File>
+  updateSessionPrincipal: (principal: AuthSession['principal']) => void
+  setAvatarViewerOpened: (opened: boolean) => void
+  locale: 'en' | 'ru'
+}
+
+function AccountSection({
+  session,
+  identity,
+  ownAvatarSrc,
+  avatarMutation,
+  updateSessionPrincipal,
+  setAvatarViewerOpened,
+  locale,
+}: AccountSectionProps) {
+  const [displayName, setDisplayName] = useState(session.principal.displayName)
+
+  const displayNameMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const principal = await updateDisplayName({ token: session.accessToken, displayName: name })
+      await upsertIdentity({
+        userId: identity.userId,
+        displayName: name,
+        identityPublicKey: identity.identityPublicKey,
+        token: session.accessToken,
+      })
+      return principal
+    },
+    onSuccess: (principal) => {
+      updateSessionPrincipal(principal)
+    },
+  })
+
+  const hasChanged = displayName.trim() !== session.principal.displayName
+
+  return (
+    <Stack gap="md">
+      <Card withBorder radius="md" p="sm">
+        <Group align="center" gap="sm">
+          <Avatar
+            src={ownAvatarSrc || null}
+            size={72}
+            radius={14}
+            style={{ cursor: ownAvatarSrc ? 'pointer' : 'default', flexShrink: 0 }}
+            onClick={() => ownAvatarSrc && setAvatarViewerOpened(true)}
+          >
+            {session.principal.displayName.slice(0, 2).toUpperCase()}
+          </Avatar>
+          <Stack gap={4} style={{ flex: 1, minWidth: 0 }}>
+            <Text fw={600} size="sm" style={{ wordBreak: 'break-word' }}>
+              {session.principal.displayName}
+            </Text>
+            <Text size="xs" c="dimmed">@{session.principal.username}</Text>
+            <FileInput
+              size="xs"
+              accept="image/*"
+              placeholder={locale === 'ru' ? 'Сменить фото' : 'Change photo'}
+              onChange={(file) => file && avatarMutation.mutate(file)}
+              disabled={avatarMutation.isPending}
+              clearable={false}
+              mt={4}
+            />
+          </Stack>
+        </Group>
+      </Card>
+
+      <Card withBorder radius="md" p="sm">
+        <Stack gap="xs">
+          <Text fw={600} size="sm">{locale === 'ru' ? 'Отображаемое имя' : 'Display name'}</Text>
+          <TextInput
+            value={displayName}
+            onChange={(e) => setDisplayName(e.currentTarget.value)}
+            placeholder={locale === 'ru' ? 'Введите имя' : 'Enter name'}
+            maxLength={64}
+          />
+          <Button
+            size="xs"
+            disabled={!hasChanged || !displayName.trim()}
+            loading={displayNameMutation.isPending}
+            onClick={() => displayNameMutation.mutate(displayName.trim())}
+          >
+            {locale === 'ru' ? 'Сохранить' : 'Save'}
+          </Button>
+          {displayNameMutation.isError && (
+            <Text size="xs" c="red">
+              {locale === 'ru' ? 'Не удалось сохранить имя' : 'Failed to save name'}
+            </Text>
+          )}
+        </Stack>
+      </Card>
+    </Stack>
   )
 }
 

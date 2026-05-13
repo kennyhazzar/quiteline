@@ -80,6 +80,9 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("PUT /v1/me/theme", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleUpdateTheme(w, r, deps)
 	}))
+	mux.HandleFunc("PUT /v1/me/display-name", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleUpdateDisplayName(w, r, deps)
+	}))
 	mux.HandleFunc("PUT /v1/me/avatar", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleUploadAvatar(w, r, deps)
 	}))
@@ -519,6 +522,23 @@ func handleUpdateTheme(w http.ResponseWriter, r *http.Request, deps Dependencies
 	principal, err := deps.Auth.UpdateTheme(r.Context(), principalFromContext(r.Context()), req.Theme)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_theme")
+		return
+	}
+	writeJSON(w, http.StatusOK, principal)
+}
+
+func handleUpdateDisplayName(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	r.Body = http.MaxBytesReader(w, r.Body, 64*1024)
+	var req struct {
+		DisplayName string `json:"displayName"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	principal, err := deps.Auth.UpdateDisplayName(r.Context(), principalFromContext(r.Context()), req.DisplayName)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_display_name")
 		return
 	}
 	writeJSON(w, http.StatusOK, principal)

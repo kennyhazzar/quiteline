@@ -117,6 +117,7 @@ interface AppShellLayoutProps {
   respondFriendMutation: UseMutationResult<unknown, Error, { friend: Friend; accept: boolean }>
   acceptedFriends: Friend[]
   inviteFriendMutation: UseMutationResult<unknown, Error, Friend>
+  openDirectChat: (friend: Friend) => void
   // rooms
   rooms: UseQueryResult<{ rooms: Room[] }>
   filteredRooms: Room[]

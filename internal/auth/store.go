@@ -106,6 +106,24 @@ func (s *MemoryUserStore) UpdateUserTOTP(_ context.Context, userID string, secre
 	return User{}, ErrUserNotFound
 }
 
+func (s *MemoryUserStore) UpdateUserDisplayName(_ context.Context, userID string, displayName string) (User, error) {
+	userID = strings.TrimSpace(userID)
+	displayName = strings.TrimSpace(displayName)
+	if userID == "" || displayName == "" {
+		return User{}, ErrInvalidCredentials
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for username, user := range s.byName {
+		if user.UserID == userID {
+			user.DisplayName = displayName
+			s.byName[username] = user
+			return user, nil
+		}
+	}
+	return User{}, ErrUserNotFound
+}
+
 func (s *MemoryUserStore) GetUserByUsername(_ context.Context, username string) (User, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

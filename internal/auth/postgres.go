@@ -202,6 +202,25 @@ func (s *PostgresUserStore) UpdateUserAvatar(ctx context.Context, userID string,
 	return result, err
 }
 
+func (s *PostgresUserStore) UpdateUserDisplayName(ctx context.Context, userID string, displayName string) (User, error) {
+	userID = strings.TrimSpace(userID)
+	displayName = strings.TrimSpace(displayName)
+	if userID == "" || displayName == "" {
+		return User{}, ErrInvalidCredentials
+	}
+	var result User
+	err := s.pool.QueryRow(ctx, `
+		UPDATE users SET display_name = $2
+		WHERE user_id = $1
+		RETURNING user_id, username, display_name, theme, avatar_file_id, avatar_mime_type, avatar_size, password_hash, totp_secret, totp_enabled, created_at
+	`, userID, displayName).
+		Scan(&result.UserID, &result.Username, &result.DisplayName, &result.Theme, &result.AvatarFileID, &result.AvatarMimeType, &result.AvatarSize, &result.PasswordHash, &result.TOTPSecret, &result.TOTPEnabled, &result.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return User{}, ErrUserNotFound
+	}
+	return result, err
+}
+
 func (s *PostgresUserStore) UpdateUserTOTP(ctx context.Context, userID string, secret string, enabled bool) (User, error) {
 	userID = strings.TrimSpace(userID)
 	secret = strings.TrimSpace(secret)

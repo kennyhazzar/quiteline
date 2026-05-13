@@ -10,6 +10,7 @@ import {
   AuthError,
   beginTOTPSetup,
   confirmTOTP,
+  createRoom,
   disableTOTP,
   fetchAccountSessions,
   fetchCurrentIdentity,
@@ -31,12 +32,13 @@ import {
   type AccountSession,
   type AuthSession,
   type EncryptedMessage,
+  type Friend,
   type Identity,
   type MessageEnvelope,
   type Room,
 } from '@/lib/api'
 import { compressAvatar } from '@/lib/avatar'
-import { encodePlainMessage } from '@/lib/crypto'
+import { createRoomSecret, encodePlainMessage } from '@/lib/crypto'
 import { useI18n } from '@/lib/i18n'
 import {
   type AppView,
@@ -1471,6 +1473,32 @@ export function MessengerApp() {
     else setSidebarView('rooms')
   }
 
+  async function openDirectChat(friend: Friend) {
+    if (!identity || !session) return
+    const directRoomId = `direct-${[identity.userId, friend.userId].sort().join('-')}`
+    const existing = rooms.data?.rooms.find((r) => r.roomId === directRoomId)
+    if (existing) {
+      selectRoom(existing)
+      return
+    }
+    try {
+      const secret = createRoomSecret()
+      const room = await createRoom({
+        roomId: directRoomId,
+        name: friend.displayName || 'Direct',
+        members: [identity.userId, friend.userId],
+        roomSecret: secret,
+        token: session.accessToken,
+      })
+      const actualSecret = room.roomSecret || secret
+      persistRoomSecrets({ ...roomSecrets, [room.roomId]: actualSecret })
+      queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
+      selectRoom(room)
+    } catch (err) {
+      handleRequestError(err as Error, t('roomError'))
+    }
+  }
+
   function closeChat() {
     setMobileChatActionsOpened(false)
     setActiveRoomID('')
@@ -1622,6 +1650,7 @@ export function MessengerApp() {
       respondFriendMutation={respondFriendMutation}
       acceptedFriends={acceptedFriends}
       inviteFriendMutation={roomsHook.inviteFriendMutation}
+      openDirectChat={openDirectChat}
       // rooms
       rooms={rooms}
       filteredRooms={filteredRooms}

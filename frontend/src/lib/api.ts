@@ -206,6 +206,18 @@ export function isTwoFactorChallenge(value: AuthSession | TwoFactorChallenge): v
   return 'twoFactorRequired' in value && value.twoFactorRequired
 }
 
+export async function updateDisplayName(input: {
+  token: string
+  displayName: string
+}): Promise<Principal> {
+  const res = await fetch(`${BASE}/v1/me/display-name`, {
+    method: 'PUT',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ displayName: input.displayName }),
+  })
+  return readJSON(res)
+}
+
 export async function updateTheme(input: {
   token: string
   theme: 'light' | 'dark'
