@@ -48,29 +48,6 @@ services:
       timeout: 5s
       retries: 10
 
-  coturn:
-    image: coturn/coturn:4
-    restart: unless-stopped
-    network_mode: host
-    command:
-      - -n
-      - -v
-      - --log-file=stdout
-      - --listening-port=3478
-      - --listening-ip=0.0.0.0
-      - --relay-ip=${TURN_EXTERNAL_IP}
-      - --external-ip=${TURN_EXTERNAL_IP}
-      - --realm=${TURN_REALM}
-      - --server-name=${TURN_REALM}
-      - --fingerprint
-      - --lt-cred-mech
-      - --user=${TURN_USERNAME}:${TURN_CREDENTIAL}
-      - --no-multicast-peers
-      - --no-tls
-      - --no-dtls
-      - --min-port=49152
-      - --max-port=65535
-
   backend:
     build:
       context: .
