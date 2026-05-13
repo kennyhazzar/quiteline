@@ -11,6 +11,7 @@ import {
   beginTOTPSetup,
   confirmTOTP,
   createRoom,
+  inviteFriendToRoom,
   disableTOTP,
   fetchAccountSessions,
   fetchCurrentIdentity,
@@ -1486,12 +1487,13 @@ export function MessengerApp() {
       const room = await createRoom({
         roomId: directRoomId,
         name: friend.displayName || 'Direct',
-        members: [identity.userId, friend.userId],
+        members: [identity.userId],
         roomSecret: secret,
         token: session.accessToken,
       })
       const actualSecret = room.roomSecret || secret
       persistRoomSecrets({ ...roomSecrets, [room.roomId]: actualSecret })
+      await inviteFriendToRoom({ token: session.accessToken, roomId: room.roomId, userId: friend.userId })
       queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       selectRoom(room)
     } catch (err) {
