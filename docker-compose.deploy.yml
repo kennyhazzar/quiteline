@@ -66,11 +66,10 @@ services:
       - --lt-cred-mech
       - --user=${TURN_USERNAME}:${TURN_CREDENTIAL}
       - --no-multicast-peers
-      - --no-tcp
       - --no-tls
       - --no-dtls
-      - --min-port=49160
-      - --max-port=49200
+      - --min-port=49152
+      - --max-port=65535
 
   backend:
     build:

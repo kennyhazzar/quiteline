@@ -803,7 +803,14 @@ export function MessengerApp() {
       const handleChange = () => {
         if (peer.iceGatheringState !== 'complete') return
         collectLocalDescriptionCandidates(peer)
-        if (!requireRelay || localIceTypesRef.current.has('relay')) finish()
+        if (!requireRelay || localIceTypesRef.current.has('relay')) {
+          finish()
+        } else {
+          // TURN is configured but gathering ended with 0 relay candidates.
+          // The relay port range is likely blocked at the provider firewall level.
+          addCallDiagnostic('TURN relay failed: gathering complete, 0 relay candidates (check provider firewall for relay ports)')
+          finish()
+        }
       }
       const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
         if (!requireRelay) {
@@ -933,6 +940,7 @@ export function MessengerApp() {
       setCallError('')
       setCallStatus(locale === 'ru' ? 'Ожидаем ответ...' : 'Waiting for answer...')
       setCallState('calling')
+      addCallDiagnostic(`Offer candidates: ${localIceCandidatesRef.current.length}`)
       addCallDiagnostic('Offer sent')
       armCallTimeout(callId, target.userId, activeRoomID)
       sendRealtimeRaw({
@@ -983,6 +991,7 @@ export function MessengerApp() {
         answer: peer.localDescription?.toJSON() ?? answer,
         candidates: localIceCandidatesRef.current,
       })
+      addCallDiagnostic(`Answer candidates: ${localIceCandidatesRef.current.length}`)
       addCallDiagnostic('Answer sent')
       setIncomingCall(null)
     } catch (err) {
@@ -1070,6 +1079,7 @@ export function MessengerApp() {
       setCallError('')
       setCallStatus(locale === 'ru' ? 'Входящий звонок' : 'Incoming call')
       addCallDiagnostic('Incoming offer received')
+      addCallDiagnostic(`Offer received candidates: ${event.candidates?.length ?? 0}`)
       armCallTimeout(event.callId, event.fromUserId, event.roomId)
       return
     }
@@ -1096,6 +1106,7 @@ export function MessengerApp() {
       clearCallTimeout()
       await peerRef.current.setRemoteDescription(event.answer)
       addCallDiagnostic('Remote answer accepted')
+      addCallDiagnostic(`Answer received candidates: ${event.candidates?.length ?? 0}`)
       await addRemoteCandidates(peerRef.current, event.candidates)
       await flushPendingIce(peerRef.current)
       setCallState('connecting')
