@@ -690,7 +690,6 @@ export function MessengerApp() {
     }
     ws.onerror = () => {
       if (wsRef.current === ws) setLiveStatus('disconnected')
-      notifications.show({ title: t('wsError'), message: t('liveDisconnected'), color: 'red' })
     }
     ws.onclose = () => {
       if (wsRef.current === ws) setLiveStatus('disconnected')

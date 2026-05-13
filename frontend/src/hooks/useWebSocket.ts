@@ -72,7 +72,7 @@ export function useWebSocket(opts: {
         // ignore malformed frames
       }
     }
-    ws.onerror = () => notifications.show({ title: t('wsError'), message: t('liveDisconnected'), color: 'red' })
+    ws.onerror = () => { /* connection errors are shown via the status badge, not notifications */ }
     ws.onclose = () => {
       if (!session?.accessToken || wsRef.current !== ws) return
       wsReconnectTimerRef.current = setTimeout(() => connectWS(roomID), 1500)
