@@ -218,6 +218,7 @@ export function MessengerApp() {
   function handleAuthExpired() {
     if (authExpiredNotifiedRef.current) return
     authExpiredNotifiedRef.current = true
+    void queryClient.resetQueries()
     queryClient.clear()
     const previousWS = wsRef.current
     wsRef.current = null
@@ -281,7 +282,6 @@ export function MessengerApp() {
     refetchOnMount: 'always',
     refetchOnWindowFocus: false,
     refetchOnReconnect: true,
-    placeholderData: (previous) => previous,
     staleTime: 30000,
   })
   const accountSessions = useQuery({
@@ -1411,6 +1411,7 @@ export function MessengerApp() {
     if (options.remote !== false) {
       void logoutSession().catch(() => undefined)
     }
+    void queryClient.resetQueries()
     queryClient.clear()
     wsRef.current?.close()
     clearAccountLocalState()
