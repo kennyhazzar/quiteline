@@ -693,6 +693,38 @@ export function MessengerApp() {
     return raw?.match(/\btyp\s+(\w+)/)?.[1] ?? ''
   }
 
+  function mergeIceCandidate(candidate: RTCIceCandidateInit) {
+    if (!candidate.candidate) return
+    if (localIceCandidatesRef.current.some((item) => item.candidate === candidate.candidate)) return
+    const type = iceCandidateType(candidate)
+    if (type) localIceTypesRef.current.add(type)
+    localIceCandidatesRef.current.push(candidate)
+  }
+
+  function collectLocalDescriptionCandidates(peer: RTCPeerConnection) {
+    const description = peer.localDescription
+    if (!description?.sdp) return
+    let currentMid = ''
+    let currentMLineIndex = -1
+    for (const rawLine of description.sdp.split(/\r?\n/)) {
+      const line = rawLine.trim()
+      if (line.startsWith('m=')) {
+        currentMLineIndex += 1
+        continue
+      }
+      if (line.startsWith('a=mid:')) {
+        currentMid = line.slice('a=mid:'.length)
+        continue
+      }
+      if (!line.startsWith('a=candidate:')) continue
+      mergeIceCandidate({
+        candidate: line.slice(2),
+        sdpMid: currentMid || undefined,
+        sdpMLineIndex: currentMLineIndex >= 0 ? currentMLineIndex : undefined,
+      })
+    }
+  }
+
   function hasTurnIceServer(iceServers: RTCIceServer[]) {
     return iceServers.some((server) => {
       const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
@@ -769,7 +801,9 @@ export function MessengerApp() {
         resolve()
       }
       const handleChange = () => {
-        if (peer.iceGatheringState === 'complete') finish()
+        if (peer.iceGatheringState !== 'complete') return
+        collectLocalDescriptionCandidates(peer)
+        if (!requireRelay || localIceTypesRef.current.has('relay')) finish()
       }
       const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
         if (!requireRelay) {
@@ -781,6 +815,7 @@ export function MessengerApp() {
       const timer = window.setTimeout(finish, timeoutMs)
       peer.addEventListener('icegatheringstatechange', handleChange)
       peer.addEventListener('icecandidate', handleCandidate)
+      handleChange()
     })
   }
 
@@ -808,9 +843,7 @@ export function MessengerApp() {
         addCallDiagnostic('ICE gathering complete')
         return
       }
-      const type = iceCandidateType(event.candidate)
-      if (type) localIceTypesRef.current.add(type)
-      localIceCandidatesRef.current.push(event.candidate.toJSON())
+      mergeIceCandidate(event.candidate.toJSON())
       addCallDiagnostic(`ICE local: ${describeIceCandidate(event.candidate)}`)
       if (!identity || !activeCallRoomIDRef.current || !activeCallPeerIDRef.current) return
       sendRealtimeRaw({
@@ -893,6 +926,7 @@ export function MessengerApp() {
       await peer.setLocalDescription(offer)
       addCallDiagnostic('Waiting for local ICE')
       await waitForInitialIce(peer, peer.getConfiguration().iceTransportPolicy === 'relay')
+      collectLocalDescriptionCandidates(peer)
       addCallDiagnostic(`Initial ICE ready: ${Array.from(localIceTypesRef.current).join(', ') || 'none'}`)
       setCallPeerID(target.userId)
       setCallPeerName(target.displayName)
@@ -933,6 +967,7 @@ export function MessengerApp() {
       await peer.setLocalDescription(answer)
       addCallDiagnostic('Waiting for local ICE')
       await waitForInitialIce(peer, peer.getConfiguration().iceTransportPolicy === 'relay')
+      collectLocalDescriptionCandidates(peer)
       addCallDiagnostic(`Initial ICE ready: ${Array.from(localIceTypesRef.current).join(', ') || 'none'}`)
       setCallPeerID(incomingCall.fromUserId)
       setCallState('connecting')
