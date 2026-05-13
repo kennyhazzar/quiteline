@@ -698,13 +698,17 @@ export function MessengerApp() {
   }
 
   function setupAudioPlayback() {
-    if (!remoteAudioRef.current) return
+    if (!remoteAudioRef.current) {
+      addCallDiagnostic('Audio playback: no audio element')
+      return
+    }
     const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus' : 'audio/webm'
     if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(mimeType)) {
-      addCallDiagnostic('Audio playback: codec not supported in this browser')
+      addCallDiagnostic(`Audio playback: MediaSource not supported (${mimeType})`)
       return
     }
+    addCallDiagnostic(`Audio playback setup (${mimeType})`)
     const mediaSource = new MediaSource()
     mediaSourceRef.current = mediaSource
     const url = URL.createObjectURL(mediaSource)
@@ -715,6 +719,7 @@ export function MessengerApp() {
         const sourceBuffer = mediaSource.addSourceBuffer(mimeType)
         sourceBuffer.mode = 'sequence'
         audioSourceBufferRef.current = sourceBuffer
+        addCallDiagnostic('Audio source ready')
         const flush = () => {
           const queue = audioChunkQueueRef.current
           if (queue.length > 0 && !sourceBuffer.updating) {
@@ -738,15 +743,20 @@ export function MessengerApp() {
 
   function startAudioStreaming() {
     const stream = localStreamRef.current
-    if (!stream || !myUserIDRef.current) return
-    const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    if (!stream) { addCallDiagnostic('Audio streaming: no mic stream'); return }
+    if (!myUserIDRef.current) { addCallDiagnostic('Audio streaming: no user id'); return }
+    if (!activeCallPeerIDRef.current) { addCallDiagnostic('Audio streaming: no peer id'); return }
+    if (typeof MediaRecorder === 'undefined') { addCallDiagnostic('Audio streaming: MediaRecorder not supported'); return }
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
-      : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
-    if (!mimeType) { addCallDiagnostic('Audio recording: no supported codec'); return }
+      : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
+    if (!mimeType) { addCallDiagnostic('Audio streaming: no supported codec'); return }
+    addCallDiagnostic(`Audio streaming setup (${mimeType})`)
     const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 16000 })
     let seq = 0
     recorder.ondataavailable = async (e) => {
       if (e.data.size === 0 || !activeCallIDRef.current) return
+      if (seq === 0) addCallDiagnostic(`First chunk: ${e.data.size}b, ws=${wsRef.current?.readyState}`)
       try {
         const buffer = await e.data.arrayBuffer()
         const bytes = new Uint8Array(buffer)
@@ -766,12 +776,13 @@ export function MessengerApp() {
         })
       } catch { /* ignore */ }
     }
+    recorder.onerror = (e) => addCallDiagnostic(`Recorder error: ${(e as Event & { error?: { message?: string } }).error?.message ?? 'unknown'}`)
     mediaRecorderRef.current = recorder
     recorder.start(100)
     addCallDiagnostic('Audio streaming started')
   }
 
-  function appendRemoteAudioChunk(base64: string) {
+  function appendRemoteAudioChunk(base64: string, seq?: number) {
     try {
       const binary = atob(base64)
       const bytes = new Uint8Array(binary.length)
@@ -779,6 +790,7 @@ export function MessengerApp() {
       const buffer = bytes.buffer
       const sourceBuffer = audioSourceBufferRef.current
       const ms = mediaSourceRef.current
+      if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, ms=${ms?.readyState ?? 'null'}`)
       if (!sourceBuffer || !ms || ms.readyState !== 'open') {
         audioChunkQueueRef.current.push(buffer)
         return
@@ -983,7 +995,7 @@ export function MessengerApp() {
         setCallStartedAt(new Date().toISOString())
         addCallDiagnostic('Audio connected')
       }
-      appendRemoteAudioChunk(event.chunk)
+      appendRemoteAudioChunk(event.chunk, event.seq)
       return
     }
     if (event.kind === 'call-hangup') {
