@@ -186,7 +186,6 @@ ufw allow OpenSSH
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw allow 443/udp
-ufw allow 3478/tcp
 ufw allow 3478/udp
 ufw allow 49160:49200/udp
 ufw enable
@@ -248,7 +247,7 @@ Check:
 - DNS points to the VPS
 - ports `80` and `443` are free
 - no external firewall blocks ports `80` and `443`
-- no external firewall blocks TURN ports `3478/tcp`, `3478/udp`, and `49160-49200/udp`
+- no external firewall blocks TURN ports `3478/udp` and `49160-49200/udp`
 
 ### Frontend calls localhost
 
