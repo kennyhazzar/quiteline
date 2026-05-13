@@ -298,7 +298,7 @@ export function ChatView(props: ChatViewProps) {
   const loadingHistoryRef = useRef(false)
   const historyPaginationEnabledRef = useRef(false)
   const bottomScrollTimersRef = useRef<number[]>([])
-  const historyScrollSnapshotRef = useRef<{ height: number; top: number; length: number; anchorId: string; anchorHeight: number } | null>(null)
+  const historyScrollSnapshotRef = useRef<{ height: number; top: number; length: number } | null>(null)
   const paginationArmedRef = useRef(true)
   const lastScrollTopRef = useRef(0)
   const suppressPaginationUntilRef = useRef(0)
@@ -424,18 +424,10 @@ export function ChatView(props: ChatViewProps) {
     lastHistoryLoadAtRef.current = now
     const el = messagesViewportRef.current
     if (el) {
-      // Record the boundary message's height so we can correct the restore formula
-      // if grouping changes cause its height to shrink after history loads.
-      const anchorId = visibleMessages[0]?.id ?? ''
-      const anchorEl = anchorId
-        ? (el.querySelector(`[data-message-id="${anchorId}"]`) as HTMLElement | null)
-        : null
       historyScrollSnapshotRef.current = {
         height: el.scrollHeight,
         top: el.scrollTop,
         length: visibleMessages.length,
-        anchorId,
-        anchorHeight: anchorEl?.offsetHeight ?? 0,
       }
     } else {
       historyScrollSnapshotRef.current = null
@@ -454,13 +446,7 @@ export function ChatView(props: ChatViewProps) {
     if (!snapshot || !el || isLoadingMoreMessages) return
     if (visibleMessages.length <= snapshot.length && hasMoreMessages) return
 
-    // Base height-delta restore, corrected for any height change of the boundary message
-    // (e.g. it becoming grouped after new messages are prepended above it).
-    const anchorEl = snapshot.anchorId
-      ? (el.querySelector(`[data-message-id="${snapshot.anchorId}"]`) as HTMLElement | null)
-      : null
-    const anchorHeightDelta = anchorEl ? snapshot.anchorHeight - anchorEl.offsetHeight : 0
-    const nextTop = el.scrollHeight - snapshot.height + snapshot.top + anchorHeightDelta
+    const nextTop = el.scrollHeight - snapshot.height + snapshot.top
 
     el.scrollTop = nextTop
     lastScrollTopRef.current = nextTop
@@ -832,7 +818,7 @@ export function ChatView(props: ChatViewProps) {
                         <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
                       ) : (
                         <>
-                          <Group justify={isGrouped ? 'flex-end' : 'space-between'} align="flex-start" mb={4} wrap="nowrap">
+                          <Group justify={isGrouped ? 'flex-end' : 'space-between'} align="flex-start" mb={4} wrap="nowrap" style={{ minHeight: 30 }}>
                             {!isGrouped && (
                               <Group
                                 gap="xs"
