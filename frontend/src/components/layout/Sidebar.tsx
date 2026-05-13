@@ -332,11 +332,12 @@ export function Sidebar(props: SidebarProps) {
               const peerPresence = peer ? props.presence[peer.userId] : undefined
               const peerOnline = isRecentlyOnline(peerPresence)
               const isDM = room.members.length === 2
+              const peerLastSeen = peerPresence?.lastSeenAt || peer?.lastSeenAt
               const subtitle = isDM
                 ? peerOnline
                   ? (locale === 'ru' ? 'в сети' : 'online')
-                  : peerPresence?.lastSeenAt
-                    ? formatLastSeen(peerPresence.lastSeenAt)
+                  : peerLastSeen
+                    ? formatLastSeen(peerLastSeen)
                     : (locale === 'ru' ? 'не в сети' : 'offline')
                 : (locale === 'ru' ? `${room.members.length} участника` : `${room.members.length} members`)
               return (
@@ -1115,9 +1116,11 @@ function ProfilePanel(props: SidebarProps & {
           {friendList.map((friend) => {
             const friendPresence = presence[friend.userId]
             const online = isRecentlyOnline(friendPresence)
-            const lastSeenText = !online && friendPresence?.lastSeenAt
-              ? formatLastSeen(friendPresence.lastSeenAt)
-              : null
+            const peerIdentity = props.rooms.data?.rooms
+              .flatMap((r) => r.memberProfiles ?? [])
+              .find((m) => m.userId === friend.userId)
+            const knownLastSeen = friendPresence?.lastSeenAt || peerIdentity?.lastSeenAt
+            const lastSeenText = !online && knownLastSeen ? formatLastSeen(knownLastSeen) : null
             return (
             <Group key={friend.userId} justify="space-between" gap="xs" wrap="nowrap">
             <div style={{ minWidth: 0 }}>
