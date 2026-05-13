@@ -201,11 +201,26 @@ export function Sidebar(props: SidebarProps) {
           fullWidth
           value={sidebarView}
           onChange={(value) => setSidebarView(value as AppView)}
-          data={[
-            { value: 'contacts', label: locale === 'ru' ? 'Контакты' : 'Contacts' },
-            { value: 'rooms', label: locale === 'ru' ? 'Чаты' : 'Chats' },
-            { value: 'settings', label: locale === 'ru' ? 'Настройки' : 'Settings' },
-          ]}
+          data={(() => {
+            const totalUnread = (props.rooms.data?.rooms ?? []).reduce((sum, r) => sum + (r.unreadCount ?? 0), 0)
+            return [
+              { value: 'contacts', label: locale === 'ru' ? 'Контакты' : 'Contacts' },
+              {
+                value: 'rooms',
+                label: (
+                  <Group gap={4} justify="center" wrap="nowrap">
+                    <span>{locale === 'ru' ? 'Чаты' : 'Chats'}</span>
+                    {totalUnread > 0 && (
+                      <Badge size="xs" color="red" circle style={{ minWidth: 16, flexShrink: 0 }}>
+                        {totalUnread > 99 ? '99+' : totalUnread}
+                      </Badge>
+                    )}
+                  </Group>
+                ),
+              },
+              { value: 'settings', label: locale === 'ru' ? 'Настройки' : 'Settings' },
+            ]
+          })()}
         />
       )}
 

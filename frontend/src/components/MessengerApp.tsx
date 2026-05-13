@@ -554,7 +554,6 @@ export function MessengerApp() {
           lastSeenAt: new Date().toISOString(),
         })
       }
-      if (event.status === 'offline') notifyChat(t('userLeft'), event.displayName)
       return
     }
     if (event.kind === 'profile.updated') {
@@ -622,7 +621,6 @@ export function MessengerApp() {
       return
     }
     const msg = data as EncryptedMessage
-    if (msg.senderId !== currentUserID) notifyChat(t('newMessage'), activeRoomData?.name)
     messages.setLiveMessages((prev) => [...prev, msg].slice(-200))
     patchRoomActivity(msg.roomId, {
       at: msg.createdAt,
