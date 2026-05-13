@@ -152,7 +152,7 @@ export function MessengerApp() {
   const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null)
   const audioSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
   const gainNodeRef = useRef<GainNode | null>(null)
-  const nextPlayTimeRef = useRef(0)
+  const callAudioEpochRef = useRef<{ startTime: number; chunkDuration: number; senderRate: number } | null>(null)
   const activeCallIDRef = useRef('')
   const activeCallPeerIDRef = useRef('')
   const activeCallRoomIDRef = useRef('')
@@ -706,7 +706,7 @@ export function MessengerApp() {
       gain.gain.value = peerVolume
       gain.connect(ctx.destination)
       gainNodeRef.current = gain
-      nextPlayTimeRef.current = 0
+      callAudioEpochRef.current = null
       addCallDiagnostic(`Audio playback setup (${ctx.sampleRate}Hz)`)
     } catch (err) {
       addCallDiagnostic(`Audio playback error: ${err instanceof Error ? err.message : String(err)}`)
@@ -772,25 +772,46 @@ export function MessengerApp() {
       const int16 = new Int16Array(bytes.buffer, 4)
       const float32 = new Float32Array(int16.length)
       for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768
+
+      // Tiny fade-in/out to prevent clicks at chunk boundaries
+      const fadeLen = Math.min(64, Math.floor(float32.length / 8))
+      for (let i = 0; i < fadeLen; i++) {
+        float32[i] *= i / fadeLen
+        float32[float32.length - 1 - i] *= i / fadeLen
+      }
+
       const ctx = audioContextRef.current
       if (!ctx) {
         if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, ctx=null`)
         return
       }
       if (ctx.state === 'suspended') ctx.resume().catch(() => undefined)
-      if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, senderSR=${senderRate}, localSR=${ctx.sampleRate}`)
+
+      const safeSeq = seq ?? 0
+      const now = ctx.currentTime
       const buf = ctx.createBuffer(1, float32.length, senderRate)
       buf.copyToChannel(float32, 0)
+
+      let epoch = callAudioEpochRef.current
+      if (!epoch || epoch.senderRate !== senderRate) {
+        // Anchor: chunk safeSeq plays 250ms from now regardless of how late it arrived
+        epoch = { startTime: now + 0.25 - safeSeq * buf.duration, chunkDuration: buf.duration, senderRate }
+        callAudioEpochRef.current = epoch
+        addCallDiagnostic(`First remote chunk: ${bytes.length}b, senderSR=${senderRate}, localSR=${ctx.sampleRate}`)
+      }
+
+      let scheduleTime = epoch.startTime + safeSeq * epoch.chunkDuration
+      if (scheduleTime < now - 0.5) {
+        // More than 500ms stale — re-anchor so burst chunks don't all play simultaneously
+        epoch.startTime = now + 0.25 - safeSeq * epoch.chunkDuration
+        scheduleTime = epoch.startTime + safeSeq * epoch.chunkDuration
+        addCallDiagnostic(`Audio epoch reset at seq=${safeSeq}`)
+      }
+
       const src = ctx.createBufferSource()
       src.buffer = buf
       src.connect(gainNodeRef.current ?? ctx.destination)
-      const now = ctx.currentTime
-      if (nextPlayTimeRef.current < now - 0.3) {
-        // Only reset when we're badly behind — avoids clicks from over-eager resets on jitter
-        nextPlayTimeRef.current = now + 0.15
-      }
-      src.start(nextPlayTimeRef.current)
-      nextPlayTimeRef.current += buf.duration
+      src.start(Math.max(scheduleTime, now))
     } catch { /* ignore */ }
   }
 
@@ -910,7 +931,7 @@ export function MessengerApp() {
     gainNodeRef.current = null
     audioContextRef.current?.close().catch(() => undefined)
     audioContextRef.current = null
-    nextPlayTimeRef.current = 0
+    callAudioEpochRef.current = null
     audioConnectedRef.current = false
     localStreamRef.current?.getTracks().forEach((track) => track.stop())
     localStreamRef.current = null
