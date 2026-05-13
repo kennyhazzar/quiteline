@@ -721,7 +721,7 @@ export function MessengerApp() {
     if (!ctx) { addCallDiagnostic('Audio streaming: no AudioContext'); return }
     try {
       const source = ctx.createMediaStreamSource(stream)
-      const processor = ctx.createScriptProcessor(4096, 1, 1)
+      const processor = ctx.createScriptProcessor(2048, 1, 1)
       let seq = 0
       processor.onaudioprocess = (e) => {
         if (!activeCallIDRef.current) return
@@ -777,6 +777,7 @@ export function MessengerApp() {
         if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, ctx=null`)
         return
       }
+      if (ctx.state === 'suspended') ctx.resume().catch(() => undefined)
       if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, senderSR=${senderRate}, localSR=${ctx.sampleRate}`)
       const buf = ctx.createBuffer(1, float32.length, senderRate)
       buf.copyToChannel(float32, 0)
@@ -784,7 +785,10 @@ export function MessengerApp() {
       src.buffer = buf
       src.connect(gainNodeRef.current ?? ctx.destination)
       const now = ctx.currentTime
-      if (nextPlayTimeRef.current < now + 0.05) nextPlayTimeRef.current = now + 0.05
+      if (nextPlayTimeRef.current < now - 0.3) {
+        // Only reset when we're badly behind — avoids clicks from over-eager resets on jitter
+        nextPlayTimeRef.current = now + 0.15
+      }
       src.start(nextPlayTimeRef.current)
       nextPlayTimeRef.current += buf.duration
     } catch { /* ignore */ }
