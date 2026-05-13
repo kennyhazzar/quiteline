@@ -694,21 +694,31 @@ export function ChatView(props: ChatViewProps) {
                   </ActionIcon>
                 </Group>
               ) : (
-                <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+                <button
+                  type="button"
+                  aria-label={locale === 'ru' ? 'Переименовать' : 'Rename'}
+                  onClick={() => { setRenameText(activeRoom.name); setRenaming(true) }}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 5,
+                    color: 'inherit',
+                    textAlign: 'left',
+                  }}
+                >
                   {isMobile ? (
-                    <Text fw={800} size="lg" truncate style={{ flex: 1, minWidth: 0 }}>{activeRoom.name}</Text>
+                    <Text fw={800} size="lg" truncate style={{ minWidth: 0 }}>{activeRoom.name}</Text>
                   ) : (
-                    <Title order={3} style={{ flex: 1, minWidth: 0 }} lineClamp={1}>{activeRoom.name}</Title>
+                    <Title order={3} lineClamp={1} style={{ minWidth: 0 }}>{activeRoom.name}</Title>
                   )}
-                  <ActionIcon
-                    variant="subtle"
-                    size="sm"
-                    aria-label={locale === 'ru' ? 'Переименовать' : 'Rename'}
-                    onClick={() => { setRenameText(activeRoom.name); setRenaming(true) }}
-                  >
-                    <IconPencil size={14} />
-                  </ActionIcon>
-                </Group>
+                  <IconPencil size={13} style={{ color: 'var(--mantine-color-dimmed)', flexShrink: 0, opacity: 0.5 }} />
+                </button>
               )}
               {isMobile ? (
                 <Box style={{ minHeight: 18, display: 'flex', alignItems: 'center', minWidth: 0 }}>

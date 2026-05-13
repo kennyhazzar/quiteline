@@ -444,7 +444,7 @@ body {
     position: fixed;
     left: 12px;
     right: 12px;
-    bottom: calc(env(safe-area-inset-bottom) + 12px);
+    bottom: calc(env(safe-area-inset-bottom) + 20px);
     z-index: 40;
     height: 62px;
     padding: 6px;

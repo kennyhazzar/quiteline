@@ -215,7 +215,7 @@ export function Sidebar(props: SidebarProps) {
         display: isMobile && props.mobileView === 'chat' ? 'none' : 'flex',
         height: isMobile ? '100%' : undefined,
         overflowY: isMobile ? 'auto' : undefined,
-        padding: isMobile ? '12px 12px calc(72px + env(safe-area-inset-bottom))' : 12,
+        padding: isMobile ? '12px 12px calc(82px + env(safe-area-inset-bottom))' : 12,
       }}
     >
       {!isMobile && (
@@ -328,6 +328,17 @@ export function Sidebar(props: SidebarProps) {
               const lastActivity = room.lastMessageAt || room.createdAt
               const title = roomDisplayName(room)
               const avatarUrl = roomAvatarUrl(room)
+              const peer = roomPeer(room)
+              const peerPresence = peer ? props.presence[peer.userId] : undefined
+              const peerOnline = isRecentlyOnline(peerPresence)
+              const isDM = room.members.length === 2
+              const subtitle = isDM
+                ? peerOnline
+                  ? (locale === 'ru' ? 'в сети' : 'online')
+                  : peerPresence?.lastSeenAt
+                    ? formatLastSeen(peerPresence.lastSeenAt)
+                    : (locale === 'ru' ? 'не в сети' : 'offline')
+                : (locale === 'ru' ? `${room.members.length} участника` : `${room.members.length} members`)
               return (
                 <button
                   key={room.roomId}
@@ -337,25 +348,24 @@ export function Sidebar(props: SidebarProps) {
                   data-active={isActive ? 'true' : 'false'}
                   onClick={() => selectRoom(room)}
                 >
-                  <Group gap="sm" wrap="nowrap">
+                  <Group gap="sm" wrap="nowrap" align="flex-start">
                     <Avatar src={avatarUrl} name={title} radius="xl" size={40} color={isActive ? 'blue' : 'gray'}>
                       <IconMessageCircle size={18} />
                     </Avatar>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <Group justify="space-between" gap="xs" wrap="nowrap">
+                    <Group justify="space-between" gap="xs" wrap="nowrap" align="flex-start" style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ minWidth: 0, flex: 1 }}>
                         <Text fw={700} size="sm" truncate>{title}</Text>
-                        <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-                          {formatRoomTime(lastActivity, locale)}
+                        <Text size="xs" c={isDM && peerOnline ? 'green' : 'dimmed'} truncate mt={1}>
+                          {subtitle}
                         </Text>
-                      </Group>
-                      {Boolean(room.unreadCount) && (
-                        <Group justify="flex-end" mt={2}>
-                          <Badge size="sm" color="red" variant="filled">
-                            {room.unreadCount}
-                          </Badge>
-                        </Group>
-                      )}
-                    </div>
+                      </div>
+                      <Stack gap={2} align="flex-end" style={{ flexShrink: 0 }}>
+                        <Text size="xs" c="dimmed">{formatRoomTime(lastActivity, locale)}</Text>
+                        {Boolean(room.unreadCount) && (
+                          <Badge size="sm" color="red" variant="filled">{room.unreadCount}</Badge>
+                        )}
+                      </Stack>
+                    </Group>
                   </Group>
                 </button>
               )
@@ -1118,7 +1128,7 @@ function ProfilePanel(props: SidebarProps & {
                 {friend.status === 'accepted'
                   ? online
                     ? (locale === 'ru' ? 'в сети' : 'online')
-                    : (lastSeenText ?? contactStatusCopy.accepted)
+                    : (lastSeenText ?? (locale === 'ru' ? 'не в сети' : 'offline'))
                   : friend.direction === 'incoming'
                     ? contactStatusCopy.incoming
                     : contactStatusCopy.outgoing}
