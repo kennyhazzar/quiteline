@@ -7,12 +7,14 @@ import {
   Box,
   Button,
   Card,
+  Checkbox,
   Group,
   Modal,
   Select,
   Slider,
   Stack,
   Text,
+  TextInput,
 } from '@mantine/core'
 import {
   IconCopy,
@@ -538,18 +540,15 @@ function DeleteMessageModal({
   }
 
   return (
-    <Modal opened={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title="Delete message" centered>
+    <Modal opened={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title={t('deleteMessage')} centered>
       <Stack gap="sm">
-        <Text size="sm">Delete this message?</Text>
+        <Text size="sm">{t('deleteMessageConfirm')}</Text>
         {identity?.userId === deleteTarget?.senderId && deleteTarget && isPersistedMessageID(deleteTarget.id) && (
-          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={deleteForEveryone}
-              onChange={(e) => setDeleteForEveryone(e.currentTarget.checked)}
-            />
-            <Text size="sm">Delete for everyone</Text>
-          </label>
+          <Checkbox
+            label={t('deleteForEveryone')}
+            checked={deleteForEveryone}
+            onChange={(e) => setDeleteForEveryone(e.currentTarget.checked)}
+          />
         )}
         <Group justify="flex-end">
           <Button variant="subtle" onClick={() => setDeleteTarget(null)}>{t('cancel')}</Button>
@@ -558,7 +557,7 @@ function DeleteMessageModal({
             onClick={() => (deleteMessageMutation as UseMutationResult<unknown, Error, void>).mutate()}
             loading={(deleteMessageMutation as UseMutationResult<unknown, Error, void>).isPending}
           >
-            Delete
+            {t('deleteMessage')}
           </Button>
         </Group>
       </Stack>
@@ -809,11 +808,10 @@ function ChatActionsModal(props: AppShellLayoutProps) {
           </div>
           <Card withBorder radius="lg" p="sm">
             <Stack gap="xs">
-              <input
-                placeholder="Search messages"
+              <TextInput
+                placeholder={t('searchMessages')}
                 value={messageSearch}
                 onChange={(e) => setMessageSearch(e.currentTarget.value)}
-                style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
               />
               <Button
                 variant="light"
@@ -968,14 +966,11 @@ function CreateRoomModal({
       centered
     >
       <Stack gap="sm">
-        <label>
-          <Text size="sm" mb={4}>{t('roomName')}</Text>
-          <input
-            value={roomName}
-            onChange={(e) => setRoomName(e.currentTarget.value)}
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14 }}
-          />
-        </label>
+        <TextInput
+          label={t('roomName')}
+          value={roomName}
+          onChange={(e) => setRoomName(e.currentTarget.value)}
+        />
         <Button
           onClick={() => (createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).mutate({ roomName, newRoomSecret: '' })}
           loading={(createRoomMutation as UseMutationResult<unknown, Error, { roomName: string; newRoomSecret: string }>).isPending}
@@ -1004,23 +999,20 @@ function ImportInviteModal({
       centered
     >
       <Stack gap="sm">
-        <label>
-          <Text size="sm" mb={4}>{t('invite')}</Text>
-          <input
-            type="text"
-            name="quietline-invite-token"
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-            spellCheck={false}
-            data-lpignore="true"
-            data-1p-ignore="true"
-            placeholder={t('invitePlaceholder')}
-            value={inviteText}
-            onChange={(e) => setInviteText(e.currentTarget.value)}
-            style={{ width: '100%', padding: '10px 12px', borderRadius: 14, border: '1px solid var(--mantine-color-gray-4)', fontSize: 14, fontFamily: 'var(--font-geist-mono), monospace' }}
-          />
-        </label>
+        <TextInput
+          label={t('invite')}
+          name="quietline-invite-token"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-lpignore="true"
+          data-1p-ignore="true"
+          placeholder={t('invitePlaceholder')}
+          value={inviteText}
+          onChange={(e) => setInviteText(e.currentTarget.value)}
+          styles={{ input: { fontFamily: 'var(--font-geist-mono), monospace' } }}
+        />
         <Button
           variant="light"
           onClick={() => (importInviteMutation as UseMutationResult<unknown, Error, string>).mutate(inviteText)}

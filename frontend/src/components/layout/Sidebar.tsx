@@ -253,9 +253,6 @@ export function Sidebar(props: SidebarProps) {
             <ActionIcon variant="light" onClick={() => setMobileImportInviteOpened(true)} aria-label={t('importInvite')}>
               <IconKey size={16} />
             </ActionIcon>
-            <ActionIcon variant="subtle" onClick={() => rooms.refetch()} loading={rooms.isFetching}>
-              <IconRefresh size={16} />
-            </ActionIcon>
           </Group>
         </Group>
         <TextInput
@@ -1017,30 +1014,29 @@ function ProfilePanel(props: SidebarProps & {
 
       {profileSection === 'security' && (
       <>
-      {/* 2FA */}
-      <Text fw={700} size="sm" mb="xs">Two-factor authentication</Text>
+      <Text fw={700} size="sm" mb="xs">{t('twoFactorTitle')}</Text>
       <Stack gap="xs">
         <Badge color={session.principal.totpEnabled ? 'green' : 'gray'} variant="light" w="fit-content">
-          {session.principal.totpEnabled ? 'Enabled' : 'Disabled'}
+          {session.principal.totpEnabled ? t('twoFactorEnabled') : t('twoFactorDisabled')}
         </Badge>
         {!session.principal.totpEnabled ? (
           <>
             <Button variant="light" onClick={() => (beginTOTPMutation as UseMutationResult<unknown, Error, void>).mutate()} loading={(beginTOTPMutation as UseMutationResult<unknown, Error, void>).isPending}>
-              Set up 2FA
+              {t('twoFactorSetup')}
             </Button>
             {totpSetup && (
               <Stack gap="xs">
-                <Text size="xs" c="dimmed">Add this key in your authenticator app, then enter the 6-digit code.</Text>
+                <Text size="xs" c="dimmed">{t('twoFactorSetupHint')}</Text>
                 {totpQRCode ? (
                   <Box p="xs" bg="white" style={{ borderRadius: 8, border: '1px solid var(--mantine-color-gray-3)', width: 'fit-content' }}>
                     <Image src={totpQRCode} alt="2FA QR code" w={184} h={184} fit="contain" />
                   </Box>
                 ) : (
-                  <Text size="xs" c="dimmed">QR code is being generated...</Text>
+                  <Text size="xs" c="dimmed">{t('twoFactorQRGenerating')}</Text>
                 )}
                 <code style={{ display: 'block', padding: '8px', borderRadius: 12, background: 'var(--mantine-color-gray-0)', fontSize: 12 }}>{totpSetup.secret}</code>
                 <TextInput
-                  label="Code"
+                  label={t('twoFactorCode')}
                   value={totpConfirmCode}
                   onChange={(e) => setTotpConfirmCode(e.currentTarget.value)}
                 />
@@ -1049,7 +1045,7 @@ function ProfilePanel(props: SidebarProps & {
                   loading={(confirmTOTPMutation as UseMutationResult<unknown, Error, void>).isPending}
                   disabled={totpConfirmCode.trim().length < 6}
                 >
-                  Enable 2FA
+                  {t('twoFactorEnable')}
                 </Button>
               </Stack>
             )}
@@ -1062,7 +1058,7 @@ function ProfilePanel(props: SidebarProps & {
               onChange={(e) => setTotpDisablePassword(e.currentTarget.value)}
             />
             <TextInput
-              label="2FA code"
+              label={t('twoFactorCode')}
               value={totpDisableCode}
               onChange={(e) => setTotpDisableCode(e.currentTarget.value)}
             />
@@ -1073,7 +1069,7 @@ function ProfilePanel(props: SidebarProps & {
               loading={(disableTOTPMutation as UseMutationResult<unknown, Error, void>).isPending}
               disabled={totpDisablePassword.length < 8 || totpDisableCode.trim().length < 6}
             >
-              Disable 2FA
+              {t('twoFactorDisable')}
             </Button>
           </Stack>
         )}
