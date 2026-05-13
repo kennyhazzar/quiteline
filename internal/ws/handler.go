@@ -200,7 +200,7 @@ func (h *Handler) authorizePublishTopic(ctx context.Context, principal auth.Prin
 		return false
 	}
 	switch signal.Kind {
-	case "call-offer", "call-answer", "call-ice", "call-hangup", "call-decline":
+	case "call-offer", "call-answer", "call-ice", "call-hangup", "call-decline", "call-audio":
 	default:
 		return false
 	}

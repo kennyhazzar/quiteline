@@ -12,7 +12,6 @@ import {
   confirmTOTP,
   disableTOTP,
   fetchAccountSessions,
-  fetchCallIceServers,
   fetchCurrentIdentity,
   fetchCurrentPrincipal,
   fetchHealth,
@@ -147,16 +146,16 @@ export function MessengerApp() {
   const [audioOutputDevices, setAudioOutputDevices] = useState<MediaDeviceInfo[]>([])
   const [selectedAudioInputId, setSelectedAudioInputId] = useState('')
   const [selectedAudioOutputId, setSelectedAudioOutputId] = useState('')
-  const peerRef = useRef<RTCPeerConnection | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const mediaSourceRef = useRef<MediaSource | null>(null)
+  const audioSourceBufferRef = useRef<SourceBuffer | null>(null)
+  const audioChunkQueueRef = useRef<ArrayBuffer[]>([])
   const activeCallIDRef = useRef('')
   const activeCallPeerIDRef = useRef('')
   const activeCallRoomIDRef = useRef('')
-  const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([])
-  const earlyIceByCallIDRef = useRef<Record<string, RTCIceCandidateInit[]>>({})
-  const localIceCandidatesRef = useRef<RTCIceCandidateInit[]>([])
-  const localIceTypesRef = useRef<Set<string>>(new Set())
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const audioConnectedRef = useRef(false)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
   const urlStateReadyRef = useRef(false)
 
@@ -649,26 +648,6 @@ export function MessengerApp() {
   }, [activeRoomID, session?.principal.userId])
 
   // ─── Call logic ───────────────────────────────────────────────────────────
-  async function loadCallIceServers(): Promise<RTCIceServer[]> {
-    if (!session) return [{ urls: 'stun:stun.l.google.com:19302' }]
-    try {
-      const response = await fetchCallIceServers(session.accessToken)
-      if (response.iceServers.length > 0) {
-        addCallDiagnostic(`ICE servers: ${response.iceServers.length}`)
-        addCallDiagnostic(
-          response.iceServers.some((server) => {
-            const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
-            return urls.some((url) => String(url).startsWith('turn:') || String(url).startsWith('turns:'))
-          }) ? 'ICE policy: relay' : 'ICE policy: all',
-        )
-        return response.iceServers
-      }
-    } catch {
-      // Keep calls usable in local development if the backend endpoint is unavailable.
-    }
-    return [{ urls: 'stun:stun.l.google.com:19302' }]
-  }
-
   async function refreshCallDevices() {
     if (!navigator.mediaDevices?.enumerateDevices) return
     const devices = await navigator.mediaDevices.enumerateDevices()
@@ -679,57 +658,6 @@ export function MessengerApp() {
   function addCallDiagnostic(message: string) {
     const stamp = new Date().toLocaleTimeString()
     setCallDiagnostics((prev) => [...prev.slice(-19), `${stamp} ${message}`])
-  }
-
-  function describeIceCandidate(candidate: RTCIceCandidate | RTCIceCandidateInit) {
-    const raw = 'candidate' in candidate ? candidate.candidate : ''
-    const type = raw?.match(/\btyp\s+(\w+)/)?.[1]
-    const protocol = raw?.match(/\b(udp|tcp)\b/i)?.[1]
-    return [type ? `typ ${type}` : 'candidate', protocol?.toUpperCase()].filter(Boolean).join(' ')
-  }
-
-  function iceCandidateType(candidate: RTCIceCandidate | RTCIceCandidateInit) {
-    const raw = 'candidate' in candidate ? candidate.candidate : ''
-    return raw?.match(/\btyp\s+(\w+)/)?.[1] ?? ''
-  }
-
-  function mergeIceCandidate(candidate: RTCIceCandidateInit) {
-    if (!candidate.candidate) return
-    if (localIceCandidatesRef.current.some((item) => item.candidate === candidate.candidate)) return
-    const type = iceCandidateType(candidate)
-    if (type) localIceTypesRef.current.add(type)
-    localIceCandidatesRef.current.push(candidate)
-  }
-
-  function collectLocalDescriptionCandidates(peer: RTCPeerConnection) {
-    const description = peer.localDescription
-    if (!description?.sdp) return
-    let currentMid = ''
-    let currentMLineIndex = -1
-    for (const rawLine of description.sdp.split(/\r?\n/)) {
-      const line = rawLine.trim()
-      if (line.startsWith('m=')) {
-        currentMLineIndex += 1
-        continue
-      }
-      if (line.startsWith('a=mid:')) {
-        currentMid = line.slice('a=mid:'.length)
-        continue
-      }
-      if (!line.startsWith('a=candidate:')) continue
-      mergeIceCandidate({
-        candidate: line.slice(2),
-        sdpMid: currentMid || undefined,
-        sdpMLineIndex: currentMLineIndex >= 0 ? currentMLineIndex : undefined,
-      })
-    }
-  }
-
-  function hasTurnIceServer(iceServers: RTCIceServer[]) {
-    return iceServers.some((server) => {
-      const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
-      return urls.some((url) => String(url).startsWith('turn:') || String(url).startsWith('turns:'))
-    })
   }
 
   function clearCallTimeout() {
@@ -767,147 +695,99 @@ export function MessengerApp() {
     }, 45000)
   }
 
-  async function flushPendingIce(peer: RTCPeerConnection) {
-    if (!peer.remoteDescription) return
-    const pending = pendingIceCandidatesRef.current.splice(0)
-    for (const candidate of pending) {
+  function setupAudioPlayback() {
+    if (!remoteAudioRef.current) return
+    const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus' : 'audio/webm'
+    if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(mimeType)) {
+      addCallDiagnostic('Audio playback: codec not supported in this browser')
+      return
+    }
+    const mediaSource = new MediaSource()
+    mediaSourceRef.current = mediaSource
+    const url = URL.createObjectURL(mediaSource)
+    remoteAudioRef.current.src = url
+    audioChunkQueueRef.current = []
+    mediaSource.addEventListener('sourceopen', () => {
       try {
-        await peer.addIceCandidate(candidate)
-        addCallDiagnostic(`ICE added: ${describeIceCandidate(candidate)}`)
-      } catch {
-        // ICE can race with browser state changes; the connection state will surface real failures.
-      }
-    }
-  }
-
-  async function addRemoteCandidates(peer: RTCPeerConnection, candidates?: RTCIceCandidateInit[]) {
-    if (!candidates?.length) return
-    pendingIceCandidatesRef.current.push(...candidates)
-    addCallDiagnostic(`ICE bundled: ${candidates.length}`)
-    await flushPendingIce(peer)
-  }
-
-  function waitForInitialIce(peer: RTCPeerConnection, requireRelay: boolean, timeoutMs = 8000) {
-    if (!requireRelay && peer.iceGatheringState === 'complete') return Promise.resolve()
-    if (requireRelay && localIceTypesRef.current.has('relay')) return Promise.resolve()
-    return new Promise<void>((resolve) => {
-      let done = false
-      const finish = () => {
-        if (done) return
-        done = true
-        window.clearTimeout(timer)
-        peer.removeEventListener('icegatheringstatechange', handleChange)
-        peer.removeEventListener('icecandidate', handleCandidate)
-        resolve()
-      }
-      const handleChange = () => {
-        if (peer.iceGatheringState !== 'complete') return
-        collectLocalDescriptionCandidates(peer)
-        if (!requireRelay || localIceTypesRef.current.has('relay')) {
-          finish()
-        } else {
-          // TURN is configured but gathering ended with 0 relay candidates.
-          // The relay port range is likely blocked at the provider firewall level.
-          addCallDiagnostic('TURN relay failed: gathering complete, 0 relay candidates (check provider firewall for relay ports)')
-          finish()
+        const sourceBuffer = mediaSource.addSourceBuffer(mimeType)
+        sourceBuffer.mode = 'sequence'
+        audioSourceBufferRef.current = sourceBuffer
+        const flush = () => {
+          const queue = audioChunkQueueRef.current
+          if (queue.length > 0 && !sourceBuffer.updating) {
+            try {
+              sourceBuffer.appendBuffer(queue.shift()!)
+            } catch {
+              if (sourceBuffer.buffered.length > 0) {
+                try { sourceBuffer.remove(0, Math.max(0, sourceBuffer.buffered.end(0) - 10)) } catch {}
+              }
+            }
+          }
         }
+        sourceBuffer.addEventListener('updateend', flush)
+        flush()
+      } catch (err) {
+        addCallDiagnostic(`Audio playback error: ${err instanceof Error ? err.message : String(err)}`)
       }
-      const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
-        if (!requireRelay) {
-          if (event.candidate) finish()
-          return
-        }
-        if (event.candidate && iceCandidateType(event.candidate) === 'relay') finish()
-      }
-      const timer = window.setTimeout(finish, timeoutMs)
-      peer.addEventListener('icegatheringstatechange', handleChange)
-      peer.addEventListener('icecandidate', handleCandidate)
-      handleChange()
     })
+    remoteAudioRef.current.play().catch(() => undefined)
   }
 
-  async function ensurePeer(callId: string, targetUserId: string, roomID: string) {
-    if (peerRef.current) return peerRef.current
-    const iceServers = await loadCallIceServers()
-    const usesTurn = hasTurnIceServer(iceServers)
-    const peer = new RTCPeerConnection({
-      iceServers,
-      iceTransportPolicy: usesTurn ? 'relay' : 'all',
-    })
-    addCallDiagnostic(`ICE policy: ${usesTurn ? 'relay' : 'all'}`)
-    activeCallIDRef.current = callId
-    activeCallPeerIDRef.current = targetUserId
-    activeCallRoomIDRef.current = roomID
-    localIceCandidatesRef.current = []
-    localIceTypesRef.current = new Set()
-    pendingIceCandidatesRef.current = earlyIceByCallIDRef.current[callId] ?? []
-    delete earlyIceByCallIDRef.current[callId]
-    if (pendingIceCandidatesRef.current.length > 0) {
-      addCallDiagnostic(`ICE restored: ${pendingIceCandidatesRef.current.length}`)
+  function startAudioStreaming() {
+    const stream = localStreamRef.current
+    if (!stream || !identity) return
+    const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
+    if (!mimeType) { addCallDiagnostic('Audio recording: no supported codec'); return }
+    const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 16000 })
+    let seq = 0
+    recorder.ondataavailable = async (e) => {
+      if (e.data.size === 0 || !activeCallIDRef.current || !identity) return
+      try {
+        const buffer = await e.data.arrayBuffer()
+        const bytes = new Uint8Array(buffer)
+        let binary = ''
+        const chunkSize = 8192
+        for (let i = 0; i < bytes.byteLength; i += chunkSize) {
+          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+        }
+        sendRealtimeRaw({
+          kind: 'call-audio',
+          callId: activeCallIDRef.current,
+          roomId: activeCallRoomIDRef.current,
+          fromUserId: identity.userId,
+          toUserId: activeCallPeerIDRef.current,
+          chunk: btoa(binary),
+          seq: seq++,
+        })
+      } catch { /* ignore */ }
     }
-    peer.onicecandidate = (event) => {
-      if (!event.candidate) {
-        addCallDiagnostic('ICE gathering complete')
+    mediaRecorderRef.current = recorder
+    recorder.start(100)
+    addCallDiagnostic('Audio streaming started')
+  }
+
+  function appendRemoteAudioChunk(base64: string) {
+    try {
+      const binary = atob(base64)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      const buffer = bytes.buffer
+      const sourceBuffer = audioSourceBufferRef.current
+      const ms = mediaSourceRef.current
+      if (!sourceBuffer || !ms || ms.readyState !== 'open') {
+        audioChunkQueueRef.current.push(buffer)
         return
       }
-      mergeIceCandidate(event.candidate.toJSON())
-      addCallDiagnostic(`ICE local: ${describeIceCandidate(event.candidate)}`)
-      if (!identity || !activeCallRoomIDRef.current || !activeCallPeerIDRef.current) return
-      sendRealtimeRaw({
-        kind: 'call-ice',
-        callId,
-        roomId: activeCallRoomIDRef.current,
-        fromUserId: identity.userId,
-        toUserId: activeCallPeerIDRef.current,
-        candidate: event.candidate.toJSON(),
-      })
-    }
-    peer.ontrack = (event) => {
-      addCallDiagnostic('Remote audio track received')
-      if (remoteAudioRef.current) {
-        remoteAudioRef.current.srcObject = event.streams[0]
-        remoteAudioRef.current.volume = peerVolume
+      if (sourceBuffer.updating) {
+        audioChunkQueueRef.current.push(buffer)
+      } else {
+        try { sourceBuffer.appendBuffer(buffer) } catch { audioChunkQueueRef.current.push(buffer) }
       }
-    }
-    peer.onconnectionstatechange = () => {
-      if (!activeCallIDRef.current) return
-      const state = peer.connectionState
-      addCallDiagnostic(`Peer connection: ${state}`)
-      setCallStatus(state)
-      if (state === 'connected') {
-        clearCallTimeout()
-        setCallState('connected')
-        if (!callStartedAt) setCallStartedAt(new Date().toISOString())
-      }
-      if (state === 'failed' || state === 'closed') {
-        setCallError(locale === 'ru' ? 'Соединение звонка прервано.' : 'Call connection failed.')
-        cleanupCall(false, state === 'failed')
-      }
-    }
-    peer.oniceconnectionstatechange = () => {
-      addCallDiagnostic(`ICE connection: ${peer.iceConnectionState}`)
-      if (peer.iceConnectionState === 'failed') {
-        setCallError(locale === 'ru'
-          ? `ICE-соединение не установлено: peer=${peer.connectionState}, ice=${peer.iceConnectionState}.`
-          : `ICE connection failed: peer=${peer.connectionState}, ice=${peer.iceConnectionState}.`)
-      }
-    }
-    peer.onicegatheringstatechange = () => {
-      addCallDiagnostic(`ICE gathering: ${peer.iceGatheringState}`)
-    }
-    peer.onicecandidateerror = (event) => {
-      addCallDiagnostic(`ICE error ${event.errorCode}: ${event.errorText || event.url || 'candidate failed'}`)
-    }
-    const audio: MediaTrackConstraints | boolean = selectedAudioInputId
-      ? { deviceId: { exact: selectedAudioInputId } }
-      : true
-    const stream = await navigator.mediaDevices.getUserMedia({ audio, video: false })
-    localStreamRef.current = stream
-    stream.getAudioTracks().forEach((track) => { track.enabled = !isCallMuted })
-    stream.getTracks().forEach((track) => peer.addTrack(track, stream))
-    void refreshCallDevices()
-    peerRef.current = peer
-    return peer
+      if (remoteAudioRef.current?.paused) remoteAudioRef.current.play().catch(() => undefined)
+    } catch { /* ignore */ }
   }
 
   async function startCall(targetUserId = preferredCallPeer?.userId ?? '') {
@@ -916,10 +796,7 @@ export function MessengerApp() {
     if (!target) {
       notifications.show({
         title: t('callFailed'),
-        message:
-          locale === 'ru'
-            ? 'В этой комнате нет собеседника для звонка.'
-            : 'There is nobody to call in this room.',
+        message: locale === 'ru' ? 'В этой комнате нет собеседника для звонка.' : 'There is nobody to call in this room.',
         color: 'yellow',
       })
       return
@@ -927,21 +804,23 @@ export function MessengerApp() {
     try {
       const callId = crypto.randomUUID()
       setCallDiagnostics([])
-      addCallDiagnostic('Creating peer connection')
-      const peer = await ensurePeer(callId, target.userId, activeRoomID)
-      const offer = await peer.createOffer()
-      await peer.setLocalDescription(offer)
-      addCallDiagnostic('Waiting for local ICE')
-      await waitForInitialIce(peer, peer.getConfiguration().iceTransportPolicy === 'relay')
-      collectLocalDescriptionCandidates(peer)
-      addCallDiagnostic(`Initial ICE ready: ${Array.from(localIceTypesRef.current).join(', ') || 'none'}`)
+      addCallDiagnostic('Starting call')
+      const audio: MediaTrackConstraints = {
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+        ...(selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : {}),
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio, video: false })
+      localStreamRef.current = stream
+      stream.getAudioTracks().forEach((track) => { track.enabled = !isCallMuted })
+      void refreshCallDevices()
+      activeCallIDRef.current = callId
+      activeCallPeerIDRef.current = target.userId
+      activeCallRoomIDRef.current = activeRoomID
       setCallPeerID(target.userId)
       setCallPeerName(target.displayName)
       setCallError('')
-      setCallStatus(locale === 'ru' ? 'Ожидаем ответ...' : 'Waiting for answer...')
       setCallState('calling')
-      addCallDiagnostic(`Offer candidates: ${localIceCandidatesRef.current.length}`)
-      addCallDiagnostic('Offer sent')
+      setCallStatus(locale === 'ru' ? 'Ожидаем ответ...' : 'Waiting for answer...')
       armCallTimeout(callId, target.userId, activeRoomID)
       sendRealtimeRaw({
         kind: 'call-offer',
@@ -950,9 +829,8 @@ export function MessengerApp() {
         fromUserId: identity.userId,
         toUserId: target.userId,
         displayName: identity.displayName,
-        offer: peer.localDescription?.toJSON() ?? offer,
-        candidates: localIceCandidatesRef.current,
       })
+      addCallDiagnostic('Offer sent')
     } catch (err) {
       setCallError(err instanceof Error ? err.message : 'call_failed')
       notifications.show({ title: t('callFailed'), message: err instanceof Error ? err.message : 'call_failed', color: 'red' })
@@ -965,33 +843,30 @@ export function MessengerApp() {
     try {
       setCallState('connecting')
       addCallDiagnostic('Answering call')
-      setCallStatus(locale === 'ru' ? 'Соединяем...' : 'Connecting...')
-      const peer = await ensurePeer(incomingCall.callId, incomingCall.fromUserId, incomingCall.roomId)
-      await peer.setRemoteDescription(incomingCall.offer)
-      addCallDiagnostic('Remote offer accepted')
-      await addRemoteCandidates(peer, incomingCall.candidates)
-      await flushPendingIce(peer)
-      const answer = await peer.createAnswer()
-      await peer.setLocalDescription(answer)
-      addCallDiagnostic('Waiting for local ICE')
-      await waitForInitialIce(peer, peer.getConfiguration().iceTransportPolicy === 'relay')
-      collectLocalDescriptionCandidates(peer)
-      addCallDiagnostic(`Initial ICE ready: ${Array.from(localIceTypesRef.current).join(', ') || 'none'}`)
+      const audio: MediaTrackConstraints = {
+        echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+        ...(selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : {}),
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio, video: false })
+      localStreamRef.current = stream
+      stream.getAudioTracks().forEach((track) => { track.enabled = !isCallMuted })
+      void refreshCallDevices()
+      activeCallIDRef.current = incomingCall.callId
+      activeCallPeerIDRef.current = incomingCall.fromUserId
+      activeCallRoomIDRef.current = incomingCall.roomId
       setCallPeerID(incomingCall.fromUserId)
-      setCallState('connecting')
       setCallPeerName(incomingCall.displayName)
       setCallError('')
       armConnectionTimeout(incomingCall.callId)
+      setupAudioPlayback()
+      startAudioStreaming()
       sendRealtimeRaw({
         kind: 'call-answer',
         callId: incomingCall.callId,
         roomId: incomingCall.roomId,
         fromUserId: identity.userId,
         toUserId: incomingCall.fromUserId,
-        answer: peer.localDescription?.toJSON() ?? answer,
-        candidates: localIceCandidatesRef.current,
       })
-      addCallDiagnostic(`Answer candidates: ${localIceCandidatesRef.current.length}`)
       addCallDiagnostic('Answer sent')
       setIncomingCall(null)
     } catch (err) {
@@ -1012,17 +887,22 @@ export function MessengerApp() {
       })
     }
     clearCallTimeout()
-    const peerToClose = peerRef.current
-    peerRef.current = null
+    if (mediaRecorderRef.current) {
+      try { mediaRecorderRef.current.stop() } catch {}
+      mediaRecorderRef.current = null
+    }
+    if (mediaSourceRef.current) {
+      try { mediaSourceRef.current.endOfStream() } catch {}
+      mediaSourceRef.current = null
+    }
+    audioSourceBufferRef.current = null
+    audioChunkQueueRef.current = []
+    audioConnectedRef.current = false
     localStreamRef.current?.getTracks().forEach((track) => track.stop())
     localStreamRef.current = null
     activeCallIDRef.current = ''
     activeCallPeerIDRef.current = ''
     activeCallRoomIDRef.current = ''
-    pendingIceCandidatesRef.current = []
-    earlyIceByCallIDRef.current = {}
-    localIceCandidatesRef.current = []
-    localIceTypesRef.current = new Set()
     setCallState(keepError ? 'failed' : 'idle')
     setIncomingCall(null)
     if (!keepError) {
@@ -1034,8 +914,7 @@ export function MessengerApp() {
     setCallStatus('')
     if (!keepError) setCallError('')
     if (!keepError) setCallDiagnostics([])
-    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null
-    peerToClose?.close()
+    if (remoteAudioRef.current) { remoteAudioRef.current.src = ''; remoteAudioRef.current.srcObject = null }
   }
 
   function endCall(notifyPeer = true) {
@@ -1079,39 +958,29 @@ export function MessengerApp() {
       setCallError('')
       setCallStatus(locale === 'ru' ? 'Входящий звонок' : 'Incoming call')
       addCallDiagnostic('Incoming offer received')
-      addCallDiagnostic(`Offer received candidates: ${event.candidates?.length ?? 0}`)
       armCallTimeout(event.callId, event.fromUserId, event.roomId)
       return
     }
-    if (event.kind === 'call-ice') {
-      if (event.callId !== activeCallIDRef.current && event.callId !== incomingCall?.callId) {
-        earlyIceByCallIDRef.current[event.callId] = [
-          ...(earlyIceByCallIDRef.current[event.callId] ?? []).slice(-39),
-          event.candidate,
-        ]
-        addCallDiagnostic(`ICE stored early: ${describeIceCandidate(event.candidate)}`)
-        return
-      }
-      if (!peerRef.current || !peerRef.current.remoteDescription) {
-        pendingIceCandidatesRef.current.push(event.candidate)
-        addCallDiagnostic(`ICE queued: ${describeIceCandidate(event.candidate)}`)
-        return
-      }
-      await peerRef.current.addIceCandidate(event.candidate)
-      addCallDiagnostic(`ICE added: ${describeIceCandidate(event.candidate)}`)
-      return
-    }
     if (event.callId !== activeCallIDRef.current) return
-    if (event.kind === 'call-answer' && peerRef.current) {
+    if (event.kind === 'call-answer') {
       clearCallTimeout()
-      await peerRef.current.setRemoteDescription(event.answer)
-      addCallDiagnostic('Remote answer accepted')
-      addCallDiagnostic(`Answer received candidates: ${event.candidates?.length ?? 0}`)
-      await addRemoteCandidates(peerRef.current, event.candidates)
-      await flushPendingIce(peerRef.current)
       setCallState('connecting')
       armConnectionTimeout(event.callId)
       setCallStatus(locale === 'ru' ? 'Соединяем...' : 'Connecting...')
+      addCallDiagnostic('Answer received, starting audio')
+      setupAudioPlayback()
+      startAudioStreaming()
+      return
+    }
+    if (event.kind === 'call-audio') {
+      if (!audioConnectedRef.current) {
+        audioConnectedRef.current = true
+        clearCallTimeout()
+        setCallState('connected')
+        setCallStartedAt(new Date().toISOString())
+        addCallDiagnostic('Audio connected')
+      }
+      appendRemoteAudioChunk(event.chunk)
       return
     }
     if (event.kind === 'call-hangup') {
@@ -1158,25 +1027,26 @@ export function MessengerApp() {
   }, [selectedAudioOutputId])
 
   useEffect(() => {
-    if (callState === 'idle' || !peerRef.current || !localStreamRef.current) return
+    if (callState === 'idle' || !localStreamRef.current) return
     const currentCallId = activeCallIDRef.current
-    const currentPeer = peerRef.current
-    const audio: MediaTrackConstraints | boolean = selectedAudioInputId
-      ? { deviceId: { exact: selectedAudioInputId } }
-      : true
+    const audio: MediaTrackConstraints = {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true,
+      ...(selectedAudioInputId ? { deviceId: { exact: selectedAudioInputId } } : {}),
+    }
     navigator.mediaDevices.getUserMedia({ audio, video: false })
       .then((stream) => {
-        if (activeCallIDRef.current !== currentCallId || !peerRef.current) {
+        if (activeCallIDRef.current !== currentCallId) {
           stream.getTracks().forEach((track) => track.stop())
           return
         }
-        const nextTrack = stream.getAudioTracks()[0]
-        if (!nextTrack) return
-        nextTrack.enabled = !isCallMuted
-        const sender = currentPeer.getSenders().find((item) => item.track?.kind === 'audio')
-        void sender?.replaceTrack(nextTrack)
+        stream.getAudioTracks().forEach((track) => { track.enabled = !isCallMuted })
+        if (mediaRecorderRef.current) {
+          try { mediaRecorderRef.current.stop() } catch {}
+          mediaRecorderRef.current = null
+        }
         localStreamRef.current?.getTracks().forEach((track) => track.stop())
         localStreamRef.current = stream
+        startAudioStreaming()
       })
       .catch((err) => setCallError(err instanceof Error ? err.message : 'microphone_failed'))
   // eslint-disable-next-line react-hooks/exhaustive-deps
