@@ -148,10 +148,11 @@ export function MessengerApp() {
   const [selectedAudioOutputId, setSelectedAudioOutputId] = useState('')
   const myUserIDRef = useRef('')
   const localStreamRef = useRef<MediaStream | null>(null)
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const mediaSourceRef = useRef<MediaSource | null>(null)
-  const audioSourceBufferRef = useRef<SourceBuffer | null>(null)
-  const audioChunkQueueRef = useRef<ArrayBuffer[]>([])
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null)
+  const audioSourceNodeRef = useRef<MediaStreamAudioSourceNode | null>(null)
+  const gainNodeRef = useRef<GainNode | null>(null)
+  const nextPlayTimeRef = useRef(0)
   const activeCallIDRef = useRef('')
   const activeCallPeerIDRef = useRef('')
   const activeCallRoomIDRef = useRef('')
@@ -698,77 +699,49 @@ export function MessengerApp() {
   }
 
   function setupAudioPlayback() {
-    if (!remoteAudioRef.current) {
-      addCallDiagnostic('Audio playback: no audio element')
-      return
+    const ctx = audioContextRef.current
+    if (!ctx) { addCallDiagnostic('Audio playback: no AudioContext'); return }
+    try {
+      const gain = ctx.createGain()
+      gain.gain.value = peerVolume
+      gain.connect(ctx.destination)
+      gainNodeRef.current = gain
+      nextPlayTimeRef.current = 0
+      addCallDiagnostic(`Audio playback setup (${ctx.sampleRate}Hz)`)
+    } catch (err) {
+      addCallDiagnostic(`Audio playback error: ${err instanceof Error ? err.message : String(err)}`)
     }
-    if (typeof MediaSource === 'undefined') {
-      addCallDiagnostic('Audio playback: MediaSource not available')
-      return
-    }
-    const candidates = ['audio/webm;codecs=opus', 'video/webm;codecs=opus', 'audio/webm', 'video/webm']
-    const mseMime = candidates.find((m) => MediaSource.isTypeSupported(m)) ?? ''
-    if (!mseMime) {
-      addCallDiagnostic(`Audio playback: no MSE codec (${candidates.map((m) => `${m}=${MediaSource.isTypeSupported(m)}`).join(', ')})`)
-      return
-    }
-    addCallDiagnostic(`Audio playback setup (${mseMime})`)
-    const mediaSource = new MediaSource()
-    mediaSourceRef.current = mediaSource
-    const url = URL.createObjectURL(mediaSource)
-    remoteAudioRef.current.src = url
-    audioChunkQueueRef.current = []
-    mediaSource.addEventListener('sourceopen', () => {
-      try {
-        const sourceBuffer = mediaSource.addSourceBuffer(mseMime)
-        sourceBuffer.mode = 'sequence'
-        audioSourceBufferRef.current = sourceBuffer
-        addCallDiagnostic('Audio source ready')
-        const flush = () => {
-          const queue = audioChunkQueueRef.current
-          if (queue.length > 0 && !sourceBuffer.updating) {
-            try {
-              sourceBuffer.appendBuffer(queue.shift()!)
-            } catch {
-              if (sourceBuffer.buffered.length > 0) {
-                try { sourceBuffer.remove(0, Math.max(0, sourceBuffer.buffered.end(0) - 10)) } catch {}
-              }
-            }
-          }
-        }
-        sourceBuffer.addEventListener('updateend', flush)
-        flush()
-      } catch (err) {
-        addCallDiagnostic(`Audio playback error: ${err instanceof Error ? err.message : String(err)}`)
-      }
-    })
-    remoteAudioRef.current.play().catch(() => undefined)
   }
 
   function startAudioStreaming() {
     const stream = localStreamRef.current
     if (!stream) { addCallDiagnostic('Audio streaming: no mic stream'); return }
-    if (!myUserIDRef.current) { addCallDiagnostic('Audio streaming: no user id'); return }
-    if (!activeCallPeerIDRef.current) { addCallDiagnostic('Audio streaming: no peer id'); return }
-    if (typeof MediaRecorder === 'undefined') { addCallDiagnostic('Audio streaming: MediaRecorder not supported'); return }
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
-    if (!mimeType) { addCallDiagnostic('Audio streaming: no supported codec'); return }
-    addCallDiagnostic(`Audio streaming setup (${mimeType})`)
-    const recorder = new MediaRecorder(stream, { mimeType, audioBitsPerSecond: 16000 })
-    let seq = 0
-    recorder.ondataavailable = async (e) => {
-      if (e.data.size === 0 || !activeCallIDRef.current) return
-      if (seq === 0) addCallDiagnostic(`First chunk: ${e.data.size}b, ws=${wsRef.current?.readyState}`)
-      try {
-        const buffer = await e.data.arrayBuffer()
-        const bytes = new Uint8Array(buffer)
-        let binary = ''
-        const chunkSize = 8192
-        for (let i = 0; i < bytes.byteLength; i += chunkSize) {
-          binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+    if (!myUserIDRef.current || !activeCallPeerIDRef.current) { addCallDiagnostic('Audio streaming: missing ids'); return }
+    const ctx = audioContextRef.current
+    if (!ctx) { addCallDiagnostic('Audio streaming: no AudioContext'); return }
+    try {
+      const source = ctx.createMediaStreamSource(stream)
+      const processor = ctx.createScriptProcessor(4096, 1, 1)
+      let seq = 0
+      processor.onaudioprocess = (e) => {
+        if (!activeCallIDRef.current) return
+        const input = e.inputBuffer.getChannelData(0)
+        const int16 = new Int16Array(input.length)
+        for (let i = 0; i < input.length; i++) {
+          int16[i] = Math.max(-32768, Math.min(32767, Math.round(input[i] * 32768)))
         }
+        // 4-byte LE uint32 sample-rate header + int16 PCM
+        const header = new Uint8Array(4)
+        new DataView(header.buffer).setUint32(0, ctx.sampleRate, true)
+        const pcm = new Uint8Array(int16.buffer)
+        const full = new Uint8Array(4 + pcm.byteLength)
+        full.set(header, 0); full.set(pcm, 4)
+        let binary = ''
+        const step = 8192
+        for (let i = 0; i < full.byteLength; i += step) {
+          binary += String.fromCharCode(...full.subarray(i, i + step))
+        }
+        if (seq === 0) addCallDiagnostic(`First chunk: ${full.byteLength}b, ws=${wsRef.current?.readyState}, sr=${ctx.sampleRate}`)
         sendRealtimeRaw({
           kind: 'call-audio',
           callId: activeCallIDRef.current,
@@ -778,12 +751,15 @@ export function MessengerApp() {
           chunk: btoa(binary),
           seq: seq++,
         })
-      } catch { /* ignore */ }
+      }
+      source.connect(processor)
+      processor.connect(ctx.destination) // outputBuffer stays silent (zeros)
+      audioSourceNodeRef.current = source
+      scriptProcessorRef.current = processor
+      addCallDiagnostic('Audio streaming started (PCM)')
+    } catch (err) {
+      addCallDiagnostic(`Audio streaming error: ${err instanceof Error ? err.message : String(err)}`)
     }
-    recorder.onerror = (e) => addCallDiagnostic(`Recorder error: ${(e as Event & { error?: { message?: string } }).error?.message ?? 'unknown'}`)
-    mediaRecorderRef.current = recorder
-    recorder.start(100)
-    addCallDiagnostic('Audio streaming started')
   }
 
   function appendRemoteAudioChunk(base64: string, seq?: number) {
@@ -791,20 +767,26 @@ export function MessengerApp() {
       const binary = atob(base64)
       const bytes = new Uint8Array(binary.length)
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-      const buffer = bytes.buffer
-      const sourceBuffer = audioSourceBufferRef.current
-      const ms = mediaSourceRef.current
-      if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, ms=${ms?.readyState ?? 'null'}`)
-      if (!sourceBuffer || !ms || ms.readyState !== 'open') {
-        audioChunkQueueRef.current.push(buffer)
+      if (bytes.byteLength < 5) return
+      const senderRate = new DataView(bytes.buffer).getUint32(0, true)
+      const int16 = new Int16Array(bytes.buffer, 4)
+      const float32 = new Float32Array(int16.length)
+      for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768
+      const ctx = audioContextRef.current
+      if (!ctx) {
+        if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, ctx=null`)
         return
       }
-      if (sourceBuffer.updating) {
-        audioChunkQueueRef.current.push(buffer)
-      } else {
-        try { sourceBuffer.appendBuffer(buffer) } catch { audioChunkQueueRef.current.push(buffer) }
-      }
-      if (remoteAudioRef.current?.paused) remoteAudioRef.current.play().catch(() => undefined)
+      if (seq === 0) addCallDiagnostic(`First remote chunk: ${bytes.length}b, senderSR=${senderRate}, localSR=${ctx.sampleRate}`)
+      const buf = ctx.createBuffer(1, float32.length, senderRate)
+      buf.copyToChannel(float32, 0)
+      const src = ctx.createBufferSource()
+      src.buffer = buf
+      src.connect(gainNodeRef.current ?? ctx.destination)
+      const now = ctx.currentTime
+      if (nextPlayTimeRef.current < now + 0.05) nextPlayTimeRef.current = now + 0.05
+      src.start(nextPlayTimeRef.current)
+      nextPlayTimeRef.current += buf.duration
     } catch { /* ignore */ }
   }
 
@@ -831,6 +813,12 @@ export function MessengerApp() {
       localStreamRef.current = stream
       stream.getAudioTracks().forEach((track) => { track.enabled = !isCallMuted })
       void refreshCallDevices()
+      const AC = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (AC) {
+        const ctx = new AC()
+        audioContextRef.current = ctx
+        ctx.resume().catch(() => undefined)
+      }
       activeCallIDRef.current = callId
       activeCallPeerIDRef.current = target.userId
       activeCallRoomIDRef.current = activeRoomID
@@ -869,6 +857,12 @@ export function MessengerApp() {
       localStreamRef.current = stream
       stream.getAudioTracks().forEach((track) => { track.enabled = !isCallMuted })
       void refreshCallDevices()
+      const AC = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+      if (AC) {
+        const ctx = new AC()
+        audioContextRef.current = ctx
+        ctx.resume().catch(() => undefined)
+      }
       activeCallIDRef.current = incomingCall.callId
       activeCallPeerIDRef.current = incomingCall.fromUserId
       activeCallRoomIDRef.current = incomingCall.roomId
@@ -905,16 +899,14 @@ export function MessengerApp() {
       })
     }
     clearCallTimeout()
-    if (mediaRecorderRef.current) {
-      try { mediaRecorderRef.current.stop() } catch {}
-      mediaRecorderRef.current = null
-    }
-    if (mediaSourceRef.current) {
-      try { mediaSourceRef.current.endOfStream() } catch {}
-      mediaSourceRef.current = null
-    }
-    audioSourceBufferRef.current = null
-    audioChunkQueueRef.current = []
+    audioSourceNodeRef.current?.disconnect()
+    audioSourceNodeRef.current = null
+    scriptProcessorRef.current?.disconnect()
+    scriptProcessorRef.current = null
+    gainNodeRef.current = null
+    audioContextRef.current?.close().catch(() => undefined)
+    audioContextRef.current = null
+    nextPlayTimeRef.current = 0
     audioConnectedRef.current = false
     localStreamRef.current?.getTracks().forEach((track) => track.stop())
     localStreamRef.current = null
@@ -932,7 +924,6 @@ export function MessengerApp() {
     setCallStatus('')
     if (!keepError) setCallError('')
     if (!keepError) setCallDiagnostics([])
-    if (remoteAudioRef.current) { remoteAudioRef.current.src = ''; remoteAudioRef.current.srcObject = null }
   }
 
   function endCall(notifyPeer = true) {
@@ -1036,14 +1027,8 @@ export function MessengerApp() {
   }, [isCallMuted])
 
   useEffect(() => {
-    if (remoteAudioRef.current) remoteAudioRef.current.volume = peerVolume
+    if (gainNodeRef.current) gainNodeRef.current.gain.value = peerVolume
   }, [peerVolume])
-
-  useEffect(() => {
-    const audio = remoteAudioRef.current as (HTMLAudioElement & { setSinkId?: (sinkId: string) => Promise<void> }) | null
-    if (!audio?.setSinkId || !selectedAudioOutputId) return
-    audio.setSinkId(selectedAudioOutputId).catch(() => undefined)
-  }, [selectedAudioOutputId])
 
   useEffect(() => {
     if (callState === 'idle' || !localStreamRef.current) return
@@ -1059,10 +1044,10 @@ export function MessengerApp() {
           return
         }
         stream.getAudioTracks().forEach((track) => { track.enabled = !isCallMuted })
-        if (mediaRecorderRef.current) {
-          try { mediaRecorderRef.current.stop() } catch {}
-          mediaRecorderRef.current = null
-        }
+        audioSourceNodeRef.current?.disconnect()
+        audioSourceNodeRef.current = null
+        scriptProcessorRef.current?.disconnect()
+        scriptProcessorRef.current = null
         localStreamRef.current?.getTracks().forEach((track) => track.stop())
         localStreamRef.current = stream
         startAudioStreaming()
