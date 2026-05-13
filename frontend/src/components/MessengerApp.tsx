@@ -7,6 +7,7 @@ import { notifications } from '@mantine/notifications'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   absoluteAvatarUrl,
+  appendCallLog,
   AuthError,
   beginTOTPSetup,
   confirmTOTP,
@@ -20,6 +21,7 @@ import {
   fetchRooms,
   isTwoFactorChallenge,
   leaveRoom,
+  listCallLogs,
   loginUser,
   logoutSession,
   refreshSession,
@@ -32,6 +34,7 @@ import {
   WS_BASE,
   type AccountSession,
   type AuthSession,
+  type CallLog,
   type EncryptedMessage,
   type Friend,
   type Identity,
@@ -159,6 +162,7 @@ export function MessengerApp() {
   const activeCallIDRef = useRef('')
   const activeCallPeerIDRef = useRef('')
   const activeCallRoomIDRef = useRef('')
+  const callCallerIDRef = useRef('')
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const audioConnectedRef = useRef(false)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -283,6 +287,14 @@ export function MessengerApp() {
   const accountSessions = useQuery({
     queryKey: ['account-sessions', session?.accessToken],
     queryFn: () => fetchAccountSessions(session?.accessToken ?? ''),
+    enabled: Boolean(session),
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+    staleTime: 30000,
+  })
+  const callLogs = useQuery({
+    queryKey: ['call-logs', session?.accessToken],
+    queryFn: () => listCallLogs(session?.accessToken ?? ''),
     enabled: Boolean(session),
     refetchOnMount: 'always',
     refetchOnWindowFocus: false,
@@ -898,6 +910,7 @@ export function MessengerApp() {
       activeCallIDRef.current = callId
       activeCallPeerIDRef.current = target.userId
       activeCallRoomIDRef.current = activeRoomID
+      callCallerIDRef.current = identity.userId
       setCallPeerID(target.userId)
       setCallPeerName(target.displayName)
       setCallError('')
@@ -942,6 +955,7 @@ export function MessengerApp() {
       activeCallIDRef.current = incomingCall.callId
       activeCallPeerIDRef.current = incomingCall.fromUserId
       activeCallRoomIDRef.current = incomingCall.roomId
+      callCallerIDRef.current = incomingCall.fromUserId
       setCallPeerID(incomingCall.fromUserId)
       setCallPeerName(incomingCall.displayName)
       setCallError('')
@@ -964,15 +978,56 @@ export function MessengerApp() {
     }
   }
 
+  async function sendCallSystemMessage(
+    roomID: string,
+    callerID: string,
+    calleeID: string,
+    status: 'completed' | 'missed' | 'declined',
+    durationSec: number,
+    startedAt?: string,
+  ) {
+    if (!identity || !session || !roomID || !callerID || !calleeID) return
+    const payload = encodePlainMessage({
+      text: '',
+      senderName: identity.displayName,
+      senderAvatarUrl: session.principal.avatarUrl,
+      sentAt: new Date().toISOString(),
+      system: { type: 'call', callStatus: status, durationSec, callerId: callerID, calleeId: calleeID },
+    })
+    await sendEncryptedMessage({ roomId: roomID, senderId: identity.userId, token: session.accessToken, ...payload }).catch(() => undefined)
+    await appendCallLog({
+      token: session.accessToken,
+      roomId: roomID,
+      callerId: callerID,
+      calleeId: calleeID,
+      status,
+      durationSec,
+      startedAt,
+      endedAt: new Date().toISOString(),
+    }).then(() => queryClient.invalidateQueries({ queryKey: ['call-logs'] })).catch(() => undefined)
+  }
+
   function cleanupCall(notifyPeer = true, keepError = false) {
-    if (notifyPeer && identity && activeCallRoomIDRef.current && activeCallIDRef.current && activeCallPeerIDRef.current) {
+    const roomID = activeCallRoomIDRef.current
+    const peerID = activeCallPeerIDRef.current
+    const callerID = callCallerIDRef.current
+    const calleeID = callerID === identity?.userId ? peerID : identity?.userId ?? ''
+    const wasConnected = Boolean(callStartedAt)
+    const duration = callDurationSec
+    const startedAt = callStartedAt || undefined
+
+    if (notifyPeer && identity && roomID && activeCallIDRef.current && peerID) {
       sendRealtimeRaw({
         kind: 'call-hangup',
         callId: activeCallIDRef.current,
-        roomId: activeCallRoomIDRef.current,
+        roomId: roomID,
         fromUserId: identity.userId,
-        toUserId: activeCallPeerIDRef.current,
+        toUserId: peerID,
       })
+    }
+
+    if (notifyPeer && roomID && callerID && calleeID) {
+      void sendCallSystemMessage(roomID, callerID, calleeID, wasConnected ? 'completed' : 'missed', duration, startedAt)
     }
     clearCallTimeout()
     audioSourceNodeRef.current?.disconnect()
@@ -989,6 +1044,7 @@ export function MessengerApp() {
     activeCallIDRef.current = ''
     activeCallPeerIDRef.current = ''
     activeCallRoomIDRef.current = ''
+    callCallerIDRef.current = ''
     setCallState(keepError ? 'failed' : 'idle')
     setIncomingCall(null)
     if (!keepError) {
@@ -1007,15 +1063,17 @@ export function MessengerApp() {
   }
 
   function declineIncomingCall() {
-    if (incomingCall && identity) {
+    const decliningCall = incomingCall
+    if (decliningCall && identity) {
       sendRealtimeRaw({
         kind: 'call-decline',
-        callId: incomingCall.callId,
-        roomId: incomingCall.roomId,
+        callId: decliningCall.callId,
+        roomId: decliningCall.roomId,
         fromUserId: identity.userId,
-        toUserId: incomingCall.fromUserId,
+        toUserId: decliningCall.fromUserId,
         reason: 'declined',
       })
+      void sendCallSystemMessage(decliningCall.roomId, decliningCall.fromUserId, identity.userId, 'declined', 0)
     }
     cleanupCall(false)
   }
@@ -1814,6 +1872,7 @@ export function MessengerApp() {
       endCall={endCall}
       answerCall={answerCall}
       declineIncomingCall={declineIncomingCall}
+      callLogs={callLogs}
     />
   )
 }

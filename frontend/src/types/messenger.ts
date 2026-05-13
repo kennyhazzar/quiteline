@@ -45,7 +45,7 @@ export type RealtimeEvent =
   | { kind: 'call-decline'; callId: string; roomId: string; fromUserId: string; toUserId: string; reason?: 'busy' | 'declined' }
 
 export type CallState = 'idle' | 'calling' | 'ringing' | 'connecting' | 'connected' | 'failed'
-export type AppView = 'chat' | 'rooms' | 'profile' | 'contacts' | 'settings'
+export type AppView = 'chat' | 'rooms' | 'profile' | 'contacts' | 'settings' | 'calls'
 
 export const ROOM_SECRETS_KEY = 'zk.roomSecrets.v1'
 export const LOCAL_DELETED_MESSAGES_KEY = 'quietline.deletedMessages.v1'

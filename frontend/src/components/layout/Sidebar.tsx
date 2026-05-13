@@ -28,9 +28,11 @@ import {
   IconDeviceDesktop,
   IconKey,
   IconMessageCircle,
+  IconPhone,
+  IconPhoneEnd,
+  IconPhoneIncoming,
   IconPlus,
   IconQrcode,
-  IconRefresh,
   IconShieldLock,
   IconUser,
   IconUserPlus,
@@ -43,6 +45,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type {
   AccountSession,
   AuthSession,
+  CallLog,
   Friend,
   Identity,
   Room,
@@ -131,6 +134,7 @@ interface SidebarProps {
   setMobileCreateRoomOpened: (v: boolean) => void
   setMobileImportInviteOpened: (v: boolean) => void
   downloadAttachment: (msg: DecryptedMessage) => void
+  callLogs: UseQueryResult<{ calls: CallLog[] }>
   contactsResetKey?: number
   settingsResetKey?: number
   desktopSidebarWidth?: number
@@ -218,6 +222,7 @@ export function Sidebar(props: SidebarProps) {
                   </Group>
                 ),
               },
+              { value: 'calls', label: locale === 'ru' ? 'Звонки' : 'Calls' },
               { value: 'settings', label: locale === 'ru' ? 'Настройки' : 'Settings' },
             ]
           })()}
@@ -243,6 +248,17 @@ export function Sidebar(props: SidebarProps) {
           setProfileSection={(section) => {
             if (section !== 'friends') setSettingsSection(section)
           }}
+        />
+      )}
+
+      {/* Calls list */}
+      {leftView === 'calls' && (
+        <CallsView
+          callLogs={props.callLogs}
+          identity={props.identity}
+          rooms={props.rooms}
+          selectRoom={props.selectRoom}
+          locale={locale}
         />
       )}
 
@@ -341,6 +357,121 @@ export function Sidebar(props: SidebarProps) {
         </ScrollArea>
       </Card>
     </Stack>
+  )
+}
+
+function formatCallDuration(sec: number) {
+  const m = Math.floor(sec / 60).toString().padStart(2, '0')
+  const s = Math.floor(sec % 60).toString().padStart(2, '0')
+  return `${m}:${s}`
+}
+
+function CallsView({
+  callLogs,
+  identity,
+  rooms,
+  selectRoom,
+  locale,
+}: {
+  callLogs: UseQueryResult<{ calls: CallLog[] }>
+  identity: { userId: string }
+  rooms: UseQueryResult<{ rooms: Room[] }>
+  selectRoom: (room: Room) => void
+  locale: string
+}) {
+  const logs = callLogs.data?.calls ?? []
+  const roomsMap = new Map((rooms.data?.rooms ?? []).map((r) => [r.roomId, r]))
+
+  return (
+    <Card
+      withBorder
+      className="desktop-surface"
+      radius="md"
+      p="md"
+      style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+    >
+      <Text fw={800} mb="sm">{locale === 'ru' ? 'Звонки' : 'Calls'}</Text>
+      <ScrollArea type="auto" offsetScrollbars style={{ flex: 1, minHeight: 0 }}>
+        {callLogs.isLoading && (
+          <Stack gap="xs" pr="xs">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <Skeleton key={i} height={56} radius="lg" />
+            ))}
+          </Stack>
+        )}
+        {!callLogs.isLoading && logs.length === 0 && (
+          <Stack align="center" py="xl" gap="xs">
+            <Avatar radius="xl" color="gray" variant="light">
+              <IconPhone size={20} />
+            </Avatar>
+            <Text size="sm" c="dimmed" ta="center">
+              {locale === 'ru' ? 'Звонков пока нет' : 'No calls yet'}
+            </Text>
+          </Stack>
+        )}
+        <Stack gap="xs" pr="xs">
+          {logs.map((log) => {
+            const isOutgoing = log.callerId === identity.userId
+            const room = roomsMap.get(log.roomId)
+            const peerId = isOutgoing ? log.calleeId : log.callerId
+            const peerProfile = room?.memberProfiles?.find((m) => m.userId === peerId)
+            const peerName = peerProfile?.displayName
+              || room?.name
+              || (locale === 'ru' ? 'Неизвестный' : 'Unknown')
+            const callDate = new Date(log.endedAt)
+            const isCompleted = log.status === 'completed'
+            const isMissed = log.status === 'missed'
+            const statusColor = isCompleted ? 'green' : 'red'
+            const DirectionIcon = isOutgoing
+              ? IconPhone
+              : isMissed
+                ? IconPhoneEnd
+                : IconPhoneIncoming
+            const directionColor = isOutgoing ? 'blue' : isMissed ? 'red' : 'gray'
+
+            return (
+              <Card key={log.id} withBorder radius="lg" p="sm">
+                <Group gap="sm" wrap="nowrap">
+                  <ActionIcon variant="light" color={directionColor} radius="xl" size="lg" style={{ flexShrink: 0 }}>
+                    <DirectionIcon size={16} />
+                  </ActionIcon>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <Group justify="space-between" gap="xs" wrap="nowrap">
+                      <Text fw={700} size="sm" truncate>{peerName}</Text>
+                      <Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
+                        {callDate.toLocaleDateString(locale, { month: 'short', day: 'numeric' })}
+                      </Text>
+                    </Group>
+                    <Group gap="xs" wrap="nowrap" mt={2}>
+                      <Badge size="xs" color={statusColor} variant="light">
+                        {log.status === 'completed'
+                          ? (locale === 'ru' ? 'Завершён' : 'Completed')
+                          : log.status === 'missed'
+                            ? (locale === 'ru' ? 'Пропущен' : 'Missed')
+                            : (locale === 'ru' ? 'Отклонён' : 'Declined')}
+                      </Badge>
+                      {isCompleted && log.durationSec > 0 && (
+                        <Text size="xs" c="dimmed">{formatCallDuration(log.durationSec)}</Text>
+                      )}
+                    </Group>
+                  </div>
+                  {room && (
+                    <ActionIcon
+                      variant="subtle"
+                      size="sm"
+                      onClick={() => selectRoom(room)}
+                      aria-label={locale === 'ru' ? 'Перейти в чат' : 'Go to chat'}
+                    >
+                      <IconMessageCircle size={15} />
+                    </ActionIcon>
+                  )}
+                </Group>
+              </Card>
+            )
+          })}
+        </Stack>
+      </ScrollArea>
+    </Card>
   )
 }
 
@@ -930,12 +1061,7 @@ function ProfilePanel(props: SidebarProps & {
           </Button>
         </Group>
       </Card>
-      <Group justify="space-between" align="center" mb="xs">
-        <Text fw={700} size="sm">{sectionCopy.friends}</Text>
-        <ActionIcon variant="subtle" onClick={() => friends.refetch()} loading={friends.isFetching}>
-          <IconRefresh size={16} />
-        </ActionIcon>
-      </Group>
+      <Text fw={700} size="sm" mb="xs">{sectionCopy.friends}</Text>
       <Group align="flex-end" gap="xs" wrap="nowrap" mb="xs">
         <TextInput
           label={friendCodeCopy.label}

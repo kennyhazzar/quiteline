@@ -115,6 +115,19 @@ CREATE TABLE IF NOT EXISTS friendships (
 );
 CREATE INDEX IF NOT EXISTS friendships_user_a_idx ON friendships(user_a);
 CREATE INDEX IF NOT EXISTS friendships_user_b_idx ON friendships(user_b);
+
+CREATE TABLE IF NOT EXISTS call_logs (
+	id           TEXT PRIMARY KEY,
+	room_id      TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
+	caller_id    TEXT NOT NULL,
+	callee_id    TEXT NOT NULL,
+	status       TEXT NOT NULL,
+	duration_sec INT NOT NULL DEFAULT 0,
+	started_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+	ended_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS call_logs_caller_idx ON call_logs(caller_id, ended_at DESC);
+CREATE INDEX IF NOT EXISTS call_logs_callee_idx ON call_logs(callee_id, ended_at DESC);
 `
 
 func (s *PostgresStore) migrate(ctx context.Context) error {
@@ -841,4 +854,79 @@ func (s *PostgresStore) AreFriends(ctx context.Context, userID string, friendID 
 		SELECT EXISTS(SELECT 1 FROM friendships WHERE user_a = $1 AND user_b = $2 AND status = 'accepted')
 	`, userA, userB).Scan(&exists)
 	return exists, err
+}
+
+func (s *PostgresStore) UpdateRoomName(ctx context.Context, roomID string, userID string, name string) (Room, error) {
+	roomID = normalizeID(roomID)
+	name = strings.TrimSpace(name)
+	if roomID == "" || name == "" {
+		return Room{}, ErrBadRequest
+	}
+	var room Room
+	err := s.pool.QueryRow(ctx, `
+		UPDATE rooms SET name = $1
+		WHERE room_id = $2
+		  AND EXISTS (SELECT 1 FROM room_members WHERE room_id = $2 AND user_id = $3)
+		RETURNING room_id, name, room_secret, created_at
+	`, name, roomID, userID).Scan(&room.RoomID, &room.Name, &room.RoomSecret, &room.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Room{}, ErrNotFound
+	}
+	return room, err
+}
+
+func (s *PostgresStore) AppendCallLog(ctx context.Context, log CallLog) (CallLog, error) {
+	log.RoomID = normalizeID(log.RoomID)
+	log.CallerID = normalizeID(log.CallerID)
+	log.CalleeID = normalizeID(log.CalleeID)
+	log.Status = strings.TrimSpace(log.Status)
+	if log.RoomID == "" || log.CallerID == "" || log.CalleeID == "" || log.Status == "" {
+		return CallLog{}, ErrBadRequest
+	}
+	if log.ID == "" {
+		log.ID = newID()
+	}
+	if log.EndedAt.IsZero() {
+		log.EndedAt = time.Now().UTC()
+	}
+	if log.StartedAt.IsZero() {
+		log.StartedAt = log.EndedAt
+	}
+	var result CallLog
+	err := s.pool.QueryRow(ctx, `
+		INSERT INTO call_logs (id, room_id, caller_id, callee_id, status, duration_sec, started_at, ended_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id, room_id, caller_id, callee_id, status, duration_sec, started_at, ended_at
+	`, log.ID, log.RoomID, log.CallerID, log.CalleeID, log.Status, log.DurationSec, log.StartedAt, log.EndedAt).
+		Scan(&result.ID, &result.RoomID, &result.CallerID, &result.CalleeID,
+			&result.Status, &result.DurationSec, &result.StartedAt, &result.EndedAt)
+	return result, err
+}
+
+func (s *PostgresStore) ListCallLogs(ctx context.Context, userID string) ([]CallLog, error) {
+	userID = normalizeID(userID)
+	if userID == "" {
+		return nil, ErrBadRequest
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, room_id, caller_id, callee_id, status, duration_sec, started_at, ended_at
+		FROM call_logs
+		WHERE caller_id = $1 OR callee_id = $1
+		ORDER BY ended_at DESC
+		LIMIT 100
+	`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := []CallLog{}
+	for rows.Next() {
+		var cl CallLog
+		if err := rows.Scan(&cl.ID, &cl.RoomID, &cl.CallerID, &cl.CalleeID,
+			&cl.Status, &cl.DurationSec, &cl.StartedAt, &cl.EndedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, cl)
+	}
+	return result, rows.Err()
 }

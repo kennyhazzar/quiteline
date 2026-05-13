@@ -36,6 +36,7 @@ import { useEffect, useRef, useState, type PointerEvent, type RefObject } from '
 import type {
   AuthSession,
   AccountSession,
+  CallLog,
   Friend,
   Identity,
   Room,
@@ -229,6 +230,7 @@ interface AppShellLayoutProps {
   endCall: (notifyPeer?: boolean) => void
   answerCall: () => void
   declineIncomingCall: () => void
+  callLogs: UseQueryResult<{ calls: CallLog[] }>
 }
 
 export function AppShellLayout(props: AppShellLayoutProps) {

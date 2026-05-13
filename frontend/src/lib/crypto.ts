@@ -18,6 +18,12 @@ export interface PlainMessage {
   system?: {
     type: 'join' | 'leave'
     text: string
+  } | {
+    type: 'call'
+    callStatus: 'completed' | 'missed' | 'declined'
+    durationSec: number
+    callerId: string
+    calleeId: string
   }
   attachment?: EncryptedAttachment
 }

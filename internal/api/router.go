@@ -116,6 +116,21 @@ func New(deps Dependencies) http.Handler {
 	mux.HandleFunc("GET /v1/calls/ice-servers", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleCallICEServers(w, r, deps)
 	}))
+	mux.HandleFunc("GET /v1/calls", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleListCallLogs(w, r, deps)
+	}))
+	mux.HandleFunc("POST /v1/calls", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
+		handleAppendCallLog(w, r, deps)
+	}))
+	mux.HandleFunc("PATCH /v1/zk/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
+	mux.HandleFunc("PATCH /v1/chat/rooms/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
+	mux.HandleFunc("PATCH /v1/chats/", requireScope(deps, "publish", func(w http.ResponseWriter, r *http.Request) {
+		handleZKRoomSubroutes(w, r, deps)
+	}))
 	mux.HandleFunc("GET /v1/me/push-subscriptions", requireScope(deps, "topics:read", func(w http.ResponseWriter, r *http.Request) {
 		handleListPushSubscriptions(w, r, deps)
 	}))
@@ -1078,6 +1093,12 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 			writeError(w, http.StatusNotFound, "not_found")
 			return
 		}
+	case http.MethodPatch:
+		if tail == "name" {
+			handleRenameRoom(w, r, deps, roomID)
+			return
+		}
+		writeError(w, http.StatusNotFound, "not_found")
 	case http.MethodPut:
 		messageID, ok := messageSubroute(tail)
 		if !ok {
@@ -1411,6 +1432,84 @@ func handleCallICEServers(w http.ResponseWriter, _ *http.Request, deps Dependenc
 		})
 	}
 	writeJSON(w, http.StatusOK, iceServersResponse{ICEServers: servers})
+}
+
+func handleRenameRoom(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID string) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	room, err := deps.ZKStore.UpdateRoomName(r.Context(), roomID, principalFromContext(r.Context()).UserID, req.Name)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	publishRoomMembersEvent(r.Context(), deps, roomID, "chats.changed")
+	writeJSON(w, http.StatusOK, decorateRoom(r.Context(), deps, room))
+}
+
+func handleAppendCallLog(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	r.Body = http.MaxBytesReader(w, r.Body, 16*1024)
+	var req struct {
+		RoomID      string    `json:"roomId"`
+		CallerID    string    `json:"callerId"`
+		CalleeID    string    `json:"calleeId"`
+		Status      string    `json:"status"`
+		DurationSec int       `json:"durationSec"`
+		StartedAt   time.Time `json:"startedAt"`
+		EndedAt     time.Time `json:"endedAt"`
+	}
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	principal := principalFromContext(r.Context())
+	if req.CallerID != principal.UserID && req.CalleeID != principal.UserID {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	ok, err := deps.ZKStore.IsRoomMember(r.Context(), req.RoomID, principal.UserID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	if !ok {
+		writeError(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if req.EndedAt.IsZero() {
+		req.EndedAt = time.Now().UTC()
+	}
+	if req.StartedAt.IsZero() {
+		req.StartedAt = req.EndedAt
+	}
+	log, err := deps.ZKStore.AppendCallLog(r.Context(), zk.CallLog{
+		RoomID:      req.RoomID,
+		CallerID:    req.CallerID,
+		CalleeID:    req.CalleeID,
+		Status:      req.Status,
+		DurationSec: req.DurationSec,
+		StartedAt:   req.StartedAt,
+		EndedAt:     req.EndedAt,
+	})
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, log)
+}
+
+func handleListCallLogs(w http.ResponseWriter, r *http.Request, deps Dependencies) {
+	logs, err := deps.ZKStore.ListCallLogs(r.Context(), principalFromContext(r.Context()).UserID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"calls": logs})
 }
 
 func publishRoomMembersEvent(ctx context.Context, deps Dependencies, roomID string, kind string) {

@@ -37,13 +37,18 @@ import {
   IconLock,
   IconMessageCircle,
   IconPaperclip,
+  IconPencil,
+  IconPhone,
+  IconPhoneEnd,
+  IconPhoneIncoming,
   IconSend,
   IconTrash,
   IconX,
 } from '@tabler/icons-react'
+import { useMutation } from '@tanstack/react-query'
 import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query'
 import React, { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import { absoluteAvatarUrl, type AuthSession, type Friend, type Identity, type Room } from '@/lib/api'
+import { absoluteAvatarUrl, updateRoomName, type AuthSession, type Friend, type Identity, type Room } from '@/lib/api'
 import type { PlainMessage } from '@/lib/crypto'
 import { useI18n } from '@/lib/i18n'
 import type { AppView, CallState, DecryptedMessage, RealtimeEvent } from '@/types/messenger'
@@ -221,6 +226,42 @@ function buildMessageMeta(
   })
 }
 
+function CallOrSystemBubble({
+  system,
+  identity,
+  locale,
+}: {
+  system: NonNullable<PlainMessage['system']>
+  identity: { userId: string }
+  locale: string
+}) {
+  if (system.type !== 'call') {
+    return <Text size="sm" c="dimmed" ta="center">{system.text}</Text>
+  }
+  const isOutgoing = system.callerId === identity.userId
+  const isCompleted = system.callStatus === 'completed'
+  const isMissed = system.callStatus === 'missed'
+  const CallIcon = isOutgoing ? IconPhone : isMissed ? IconPhoneEnd : IconPhoneIncoming
+  const iconColor = isCompleted ? 'green' : 'red'
+  const label = isCompleted
+    ? (locale === 'ru' ? 'Звонок' : 'Call')
+    : isMissed
+      ? (locale === 'ru' ? 'Пропущенный звонок' : 'Missed call')
+      : (locale === 'ru' ? 'Звонок отклонён' : 'Call declined')
+  const mins = Math.floor(system.durationSec / 60).toString().padStart(2, '0')
+  const secs = Math.floor(system.durationSec % 60).toString().padStart(2, '0')
+  return (
+    <Group gap="xs" justify="center" wrap="nowrap">
+      <ActionIcon variant="light" color={iconColor} size="sm" radius="xl">
+        <CallIcon size={13} />
+      </ActionIcon>
+      <Text size="sm" c="dimmed">
+        {label}{isCompleted && system.durationSec > 0 ? ` · ${mins}:${secs}` : ''}
+      </Text>
+    </Group>
+  )
+}
+
 export function ChatView(props: ChatViewProps) {
   const { t, locale } = useI18n()
   const {
@@ -276,6 +317,14 @@ export function ChatView(props: ChatViewProps) {
     activeTyping,
     setMobileChatActionsOpened,
   } = props
+
+  // Rename state
+  const [renaming, setRenaming] = useState(false)
+  const [renameText, setRenameText] = useState('')
+  const renameMutation = useMutation({
+    mutationFn: (name: string) => updateRoomName({ token: props.session.accessToken, roomId: activeRoomID, name }),
+    onSuccess: () => setRenaming(false),
+  })
 
   // Scroll tracking + unread counter
   const [unreadCount, setUnreadCount] = useState(0)
@@ -623,10 +672,43 @@ export function ChatView(props: ChatViewProps) {
               </ActionIcon>
             )}
             <div style={{ minWidth: 0, flex: 1 }}>
-              {isMobile ? (
-                <Text fw={800} size="lg" truncate>{activeRoom.name}</Text>
+              {renaming ? (
+                <Group gap={6} wrap="nowrap">
+                  <TextInput
+                    autoFocus
+                    size="xs"
+                    value={renameText}
+                    onChange={(e) => setRenameText(e.currentTarget.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && renameText.trim()) renameMutation.mutate(renameText.trim())
+                      if (e.key === 'Escape') setRenaming(false)
+                    }}
+                    disabled={renameMutation.isPending}
+                    style={{ flex: 1, minWidth: 0 }}
+                  />
+                  <ActionIcon size="sm" variant="light" loading={renameMutation.isPending} onClick={() => renameText.trim() && renameMutation.mutate(renameText.trim())}>
+                    <IconCheck size={14} />
+                  </ActionIcon>
+                  <ActionIcon size="sm" variant="subtle" onClick={() => setRenaming(false)}>
+                    <IconX size={14} />
+                  </ActionIcon>
+                </Group>
               ) : (
-                <Title order={3}>{activeRoom.name}</Title>
+                <Group gap={6} wrap="nowrap" style={{ minWidth: 0 }}>
+                  {isMobile ? (
+                    <Text fw={800} size="lg" truncate style={{ flex: 1, minWidth: 0 }}>{activeRoom.name}</Text>
+                  ) : (
+                    <Title order={3} style={{ flex: 1, minWidth: 0 }} lineClamp={1}>{activeRoom.name}</Title>
+                  )}
+                  <ActionIcon
+                    variant="subtle"
+                    size="sm"
+                    aria-label={locale === 'ru' ? 'Переименовать' : 'Rename'}
+                    onClick={() => { setRenameText(activeRoom.name); setRenaming(true) }}
+                  >
+                    <IconPencil size={14} />
+                  </ActionIcon>
+                </Group>
               )}
               {isMobile ? (
                 <Box style={{ minHeight: 18, display: 'flex', alignItems: 'center', minWidth: 0 }}>
@@ -805,7 +887,7 @@ export function ChatView(props: ChatViewProps) {
                       }}
                     >
                       {msg.body?.system ? (
-                        <Text size="sm" c="dimmed" ta="center">{msg.body.system.text}</Text>
+                        <CallOrSystemBubble system={msg.body.system} identity={identity} locale={locale} />
                       ) : (
                         <>
                           <Group justify="space-between" align="flex-start" mb={4} wrap="nowrap">

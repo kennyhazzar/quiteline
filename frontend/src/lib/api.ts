@@ -682,6 +682,63 @@ export async function downloadEncryptedFile(input: {
   return res.blob()
 }
 
+export interface CallLog {
+  id: string
+  roomId: string
+  callerId: string
+  calleeId: string
+  status: 'completed' | 'missed' | 'declined'
+  durationSec: number
+  startedAt: string
+  endedAt: string
+}
+
+export async function updateRoomName(input: {
+  token: string
+  roomId: string
+  name: string
+}): Promise<Room> {
+  const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(input.roomId)}/name`, {
+    method: 'PATCH',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({ name: input.name }),
+  })
+  return readJSON(res)
+}
+
+export async function appendCallLog(input: {
+  token: string
+  roomId: string
+  callerId: string
+  calleeId: string
+  status: 'completed' | 'missed' | 'declined'
+  durationSec: number
+  startedAt?: string
+  endedAt?: string
+}): Promise<CallLog> {
+  const res = await fetch(`${BASE}/v1/calls`, {
+    method: 'POST',
+    headers: authHeaders(input.token),
+    body: JSON.stringify({
+      roomId: input.roomId,
+      callerId: input.callerId,
+      calleeId: input.calleeId,
+      status: input.status,
+      durationSec: input.durationSec,
+      startedAt: input.startedAt,
+      endedAt: input.endedAt,
+    }),
+  })
+  return readJSON(res)
+}
+
+export async function listCallLogs(token: string): Promise<{ calls: CallLog[] }> {
+  const res = await fetch(`${BASE}/v1/calls`, {
+    headers: authHeaders(token),
+  })
+  return readJSON(res)
+}
+
 function authHeaders(token: string): HeadersInit {
   return {
     'Content-Type': 'application/json',

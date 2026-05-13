@@ -74,11 +74,23 @@ type Reaction struct {
 	Count int    `json:"count"`
 }
 
+type CallLog struct {
+	ID          string    `json:"id"`
+	RoomID      string    `json:"roomId"`
+	CallerID    string    `json:"callerId"`
+	CalleeID    string    `json:"calleeId"`
+	Status      string    `json:"status"`
+	DurationSec int       `json:"durationSec"`
+	StartedAt   time.Time `json:"startedAt"`
+	EndedAt     time.Time `json:"endedAt"`
+}
+
 type Store interface {
 	UpsertIdentity(ctx context.Context, identity Identity) (Identity, error)
 	GetIdentity(ctx context.Context, userID string) (Identity, error)
 	TouchIdentity(ctx context.Context, userID string) (Identity, error)
 	CreateRoom(ctx context.Context, room Room) (Room, error)
+	UpdateRoomName(ctx context.Context, roomID string, userID string, name string) (Room, error)
 	IsRoomMember(ctx context.Context, roomID string, userID string) (bool, error)
 	ListRoomMembers(ctx context.Context, roomID string) ([]string, error)
 	AddRoomMember(ctx context.Context, roomID string, userID string) error
@@ -95,6 +107,8 @@ type Store interface {
 	RequestFriend(ctx context.Context, fromUserID string, toUserID string) error
 	RespondFriend(ctx context.Context, userID string, friendID string, accept bool) error
 	AreFriends(ctx context.Context, userID string, friendID string) (bool, error)
+	AppendCallLog(ctx context.Context, log CallLog) (CallLog, error)
+	ListCallLogs(ctx context.Context, userID string) ([]CallLog, error)
 }
 
 func messageHasPlainAttachment(msg EncryptedMessage) bool {
@@ -125,6 +139,7 @@ type MemoryStore struct {
 	roomReads    map[string]map[string]time.Time
 	messageReads map[string]map[string]time.Time
 	friends      map[string]friendEdge
+	callLogs     []CallLog
 }
 
 type friendEdge struct {
@@ -691,6 +706,71 @@ func (s *MemoryStore) AreFriends(_ context.Context, userID string, friendID stri
 	defer s.mu.RUnlock()
 	edge, ok := s.friends[friendKey(userID, friendID)]
 	return ok && edge.Status == "accepted", nil
+}
+
+func (s *MemoryStore) UpdateRoomName(_ context.Context, roomID string, userID string, name string) (Room, error) {
+	roomID = normalizeID(roomID)
+	name = strings.TrimSpace(name)
+	if roomID == "" || name == "" {
+		return Room{}, ErrBadRequest
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	room, ok := s.rooms[roomID]
+	if !ok {
+		return Room{}, ErrNotFound
+	}
+	if !hasMember(room.Members, userID) {
+		return Room{}, ErrForbidden
+	}
+	room.Name = name
+	s.rooms[roomID] = room
+	return room, nil
+}
+
+func (s *MemoryStore) AppendCallLog(_ context.Context, log CallLog) (CallLog, error) {
+	log.RoomID = normalizeID(log.RoomID)
+	log.CallerID = normalizeID(log.CallerID)
+	log.CalleeID = normalizeID(log.CalleeID)
+	log.Status = strings.TrimSpace(log.Status)
+	if log.RoomID == "" || log.CallerID == "" || log.CalleeID == "" || log.Status == "" {
+		return CallLog{}, ErrBadRequest
+	}
+	if log.ID == "" {
+		log.ID = newID()
+	}
+	if log.EndedAt.IsZero() {
+		log.EndedAt = time.Now().UTC()
+	}
+	if log.StartedAt.IsZero() {
+		log.StartedAt = log.EndedAt
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.callLogs = append(s.callLogs, log)
+	return log, nil
+}
+
+func (s *MemoryStore) ListCallLogs(_ context.Context, userID string) ([]CallLog, error) {
+	userID = normalizeID(userID)
+	if userID == "" {
+		return nil, ErrBadRequest
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]CallLog, 0)
+	for _, log := range s.callLogs {
+		if log.CallerID == userID || log.CalleeID == userID {
+			result = append(result, log)
+		}
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].EndedAt.After(result[j].EndedAt)
+	})
+	if len(result) > 100 {
+		result = result[:100]
+	}
+	return result, nil
 }
 
 func (s *MemoryStore) lastMessageAt(roomID string) time.Time {
