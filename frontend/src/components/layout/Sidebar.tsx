@@ -752,9 +752,11 @@ function ProfilePanel(props: SidebarProps & {
             <Text size="xs" c="dimmed" truncate>{props.mode === 'contacts' ? sectionCopy.friends : (locale === 'ru' ? 'Настройки' : 'Settings')}</Text>
           </div>
         </Group>
-        <Badge color={liveBadge.color} style={{ flexShrink: 0 }}>
-          {liveBadge.label}
-        </Badge>
+        {props.mode === 'contacts' && (
+          <Badge color={liveBadge.color} style={{ flexShrink: 0 }}>
+            {liveBadge.label}
+          </Badge>
+        )}
       </Group>
 
       {props.mode !== 'contacts' && profileSection !== 'overview' && (

@@ -46,7 +46,7 @@ func New(deps Dependencies) http.Handler {
 	authLimiter := newIPRateLimiter(10, time.Minute)
 
 	mux := http.NewServeMux()
-	wsHandler := ws.NewHandler(deps.Config, deps.Hub, deps.Broker, deps.Metrics, deps.Logger, deps.Auth, deps.ZKStore)
+	wsHandler := ws.NewHandler(deps.Config, deps.Hub, deps.Broker, deps.Metrics, deps.Logger, deps.Auth, deps.ZKStore, deps.ZKStore)
 
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -541,6 +541,7 @@ func handleUpdateDisplayName(w http.ResponseWriter, r *http.Request, deps Depend
 		writeError(w, http.StatusBadRequest, "invalid_display_name")
 		return
 	}
+	go publishProfileUpdatedToFriends(context.Background(), deps, principal.UserID, principal.DisplayName, principal.AvatarURL)
 	writeJSON(w, http.StatusOK, principal)
 }
 
@@ -584,6 +585,7 @@ func handleUploadAvatar(w http.ResponseWriter, r *http.Request, deps Dependencie
 		writeError(w, http.StatusBadRequest, "avatar_update_failed")
 		return
 	}
+	go publishProfileUpdatedToFriends(context.Background(), deps, principal.UserID, principal.DisplayName, principal.AvatarURL)
 	writeJSON(w, http.StatusOK, principal)
 }
 
@@ -1445,6 +1447,41 @@ func publishUserEvent(ctx context.Context, deps Dependencies, userID string, kin
 		UserID:    userID,
 		SessionID: sessionID,
 	})
+}
+
+type profileUpdatedEvent struct {
+	Kind        string `json:"kind"`
+	UserID      string `json:"userId"`
+	DisplayName string `json:"displayName"`
+	AvatarURL   string `json:"avatarUrl,omitempty"`
+	At          string `json:"at"`
+}
+
+func publishProfileUpdatedToFriends(ctx context.Context, deps Dependencies, userID string, displayName string, avatarURL string) {
+	friends, err := deps.ZKStore.ListFriends(ctx, userID)
+	if err != nil {
+		deps.Logger.Warn("list friends for profile.updated failed", "user", userID, "error", err)
+		return
+	}
+	event := profileUpdatedEvent{
+		Kind:        "profile.updated",
+		UserID:      userID,
+		DisplayName: displayName,
+		AvatarURL:   avatarURL,
+		At:          time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
+	for _, friend := range friends {
+		if friend.Status != "accepted" || friend.UserID == userID {
+			continue
+		}
+		if err := deps.Broker.Publish(ctx, message.New("user:"+friend.UserID, payload, deps.Config.NodeID)); err != nil {
+			deps.Metrics.BrokerPublishErrors.Inc()
+		}
+	}
 }
 
 func publishStateEvent(ctx context.Context, deps Dependencies, topic string, event realtimeStateEvent) {

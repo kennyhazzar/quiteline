@@ -263,6 +263,11 @@ export function MessengerApp() {
     wsRef.current.send(JSON.stringify({ type: 'publish', topic, data: event }))
   }
 
+  function sendToUserRaw(targetUserId: string, event: RealtimeEvent) {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !targetUserId) return
+    wsRef.current.send(JSON.stringify({ type: 'publish', topic: `user:${targetUserId}`, data: event }))
+  }
+
   // ─── Queries ──────────────────────────────────────────────────────────────
   const health = useQuery({ queryKey: ['health'], queryFn: fetchHealth, refetchInterval: 60000, staleTime: 30000 })
   const rooms = useQuery({
@@ -323,6 +328,8 @@ export function MessengerApp() {
     () => (friends.data?.friends ?? []).filter((friend) => friend.status === 'accepted'),
     [friends.data?.friends],
   )
+  const acceptedFriendsRef = useRef(acceptedFriends)
+  useEffect(() => { acceptedFriendsRef.current = acceptedFriends }, [acceptedFriends])
 
   // ─── Messages ─────────────────────────────────────────────────────────────
   const messages = useMessages({
@@ -427,19 +434,38 @@ export function MessengerApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [memberIdentities.data])
 
+  // ─── Presence fan-out to friends on connect ───────────────────────────────
+  useEffect(() => {
+    if (liveStatus !== 'connected' || !identity) return
+    const event = {
+      kind: 'presence' as const,
+      userId: identity.userId,
+      displayName: identity.displayName,
+      status: 'online' as const,
+      lastSeenAt: new Date().toISOString(),
+      requestEcho: true,
+    }
+    for (const friend of acceptedFriendsRef.current) {
+      sendToUserRaw(friend.userId, event)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveStatus, identity?.userId, acceptedFriends.length])
+
   // ─── Beforeunload presence offline ────────────────────────────────────────
   useEffect(() => {
     if (!identity) return
     const handleClose = () => {
-      if (activeRoomID) {
-        sendRealtimeRaw({
-          kind: 'presence',
-          userId: identity.userId,
-          displayName: identity.displayName,
-          status: 'offline',
-          lastSeenAt: new Date().toISOString(),
-        })
+      const offlineEvent = {
+        kind: 'presence' as const,
+        userId: identity.userId,
+        displayName: identity.displayName,
+        status: 'offline' as const,
+        lastSeenAt: new Date().toISOString(),
       }
+      for (const friend of acceptedFriendsRef.current) {
+        sendToUserRaw(friend.userId, offlineEvent)
+      }
+      if (activeRoomID) sendRealtimeRaw(offlineEvent)
     }
     window.addEventListener('beforeunload', handleClose)
     return () => window.removeEventListener('beforeunload', handleClose)
@@ -519,7 +545,31 @@ export function MessengerApp() {
         ...prev,
         [event.userId]: { displayName: event.displayName, status: event.status, lastSeenAt: event.lastSeenAt },
       }))
+      if (event.requestEcho && identity) {
+        sendToUserRaw(event.userId, {
+          kind: 'presence',
+          userId: identity.userId,
+          displayName: identity.displayName,
+          status: 'online',
+          lastSeenAt: new Date().toISOString(),
+        })
+      }
       if (event.status === 'offline') notifyChat(t('userLeft'), event.displayName)
+      return
+    }
+    if (event.kind === 'profile.updated') {
+      if (event.userId === currentUserID) return
+      setPresence((prev) => ({
+        ...prev,
+        [event.userId]: {
+          ...prev[event.userId],
+          displayName: event.displayName,
+          status: prev[event.userId]?.status ?? 'offline',
+          lastSeenAt: prev[event.userId]?.lastSeenAt ?? new Date().toISOString(),
+        },
+      }))
+      setAvatarVersion(Date.now())
+      void queryClient.invalidateQueries({ queryKey: ['chat-rooms'] })
       return
     }
     if (event.kind === 'chats.changed' || event.kind === 'rooms.changed') {

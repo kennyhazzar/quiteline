@@ -26,13 +26,18 @@ type Handler struct {
 	auth     *auth.Service
 	upgrader websocket.Upgrader
 	rooms    RoomAuthorizer
+	friends  FriendChecker
 }
 
 type RoomAuthorizer interface {
 	IsRoomMember(ctx context.Context, roomID string, userID string) (bool, error)
 }
 
-func NewHandler(cfg config.Config, hub *Hub, broker broker.Broker, metrics *metrics.Registry, logger *slog.Logger, authService *auth.Service, rooms RoomAuthorizer) *Handler {
+type FriendChecker interface {
+	AreFriends(ctx context.Context, userID string, friendID string) (bool, error)
+}
+
+func NewHandler(cfg config.Config, hub *Hub, broker broker.Broker, metrics *metrics.Registry, logger *slog.Logger, authService *auth.Service, rooms RoomAuthorizer, friends FriendChecker) *Handler {
 	return &Handler{
 		cfg:     cfg,
 		hub:     hub,
@@ -41,6 +46,7 @@ func NewHandler(cfg config.Config, hub *Hub, broker broker.Broker, metrics *metr
 		logger:  logger,
 		auth:    authService,
 		rooms:   rooms,
+		friends: friends,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -192,7 +198,26 @@ func (h *Handler) authorizePublishTopic(ctx context.Context, principal auth.Prin
 		return true
 	}
 	targetUserID, ok := userIDFromTopic(topic)
-	if !ok || targetUserID == "" || h.rooms == nil || principal.UserID == "" {
+	if !ok || targetUserID == "" || principal.UserID == "" {
+		return false
+	}
+
+	var base struct {
+		Kind string `json:"kind"`
+	}
+	if err := json.Unmarshal(data, &base); err != nil {
+		return false
+	}
+
+	// Allow presence/profile events to friends' user topics
+	if (base.Kind == "presence" || base.Kind == "profile.updated") && h.friends != nil {
+		areFriends, err := h.friends.AreFriends(ctx, principal.UserID, targetUserID)
+		if err == nil && areFriends {
+			return true
+		}
+	}
+
+	if h.rooms == nil {
 		return false
 	}
 	var signal callSignal

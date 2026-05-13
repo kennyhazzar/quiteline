@@ -28,7 +28,8 @@ export interface MessageDraft {
 
 export type RealtimeEvent =
   | { kind: 'typing'; userId: string; displayName: string; typing: boolean; at: string }
-  | { kind: 'presence'; userId: string; displayName: string; status: 'online' | 'offline'; lastSeenAt: string }
+  | { kind: 'presence'; userId: string; displayName: string; status: 'online' | 'offline'; lastSeenAt: string; requestEcho?: boolean }
+  | { kind: 'profile.updated'; userId: string; displayName: string; avatarUrl?: string }
   | { kind: 'chats.changed'; roomId?: string; userId?: string; at: string }
   | { kind: 'rooms.changed'; roomId?: string; userId?: string; at: string }
   | { kind: 'friends.changed'; userId?: string; at: string }
