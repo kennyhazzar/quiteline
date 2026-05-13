@@ -36,8 +36,8 @@ export type RealtimeEvent =
   | { kind: 'session.revoked'; userId?: string; sessionId?: string; at: string }
   | { kind: 'message.read'; roomId: string; userId: string; at: string }
   | { kind: 'message.created'; roomId: string; messageId: string; senderId: string; at: string }
-  | { kind: 'call-offer'; callId: string; roomId: string; fromUserId: string; toUserId: string; displayName: string; offer: RTCSessionDescriptionInit }
-  | { kind: 'call-answer'; callId: string; roomId: string; fromUserId: string; toUserId: string; answer: RTCSessionDescriptionInit }
+  | { kind: 'call-offer'; callId: string; roomId: string; fromUserId: string; toUserId: string; displayName: string; offer: RTCSessionDescriptionInit; candidates?: RTCIceCandidateInit[] }
+  | { kind: 'call-answer'; callId: string; roomId: string; fromUserId: string; toUserId: string; answer: RTCSessionDescriptionInit; candidates?: RTCIceCandidateInit[] }
   | { kind: 'call-ice'; callId: string; roomId: string; fromUserId: string; toUserId: string; candidate: RTCIceCandidateInit }
   | { kind: 'call-hangup'; callId: string; roomId: string; fromUserId: string; toUserId: string }
   | { kind: 'call-decline'; callId: string; roomId: string; fromUserId: string; toUserId: string; reason?: 'busy' | 'declined' }

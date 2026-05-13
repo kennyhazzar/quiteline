@@ -154,6 +154,7 @@ export function MessengerApp() {
   const activeCallRoomIDRef = useRef('')
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const earlyIceByCallIDRef = useRef<Record<string, RTCIceCandidateInit[]>>({})
+  const localIceCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const localIceTypesRef = useRef<Set<string>>(new Set())
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
@@ -747,6 +748,13 @@ export function MessengerApp() {
     }
   }
 
+  async function addRemoteCandidates(peer: RTCPeerConnection, candidates?: RTCIceCandidateInit[]) {
+    if (!candidates?.length) return
+    pendingIceCandidatesRef.current.push(...candidates)
+    addCallDiagnostic(`ICE bundled: ${candidates.length}`)
+    await flushPendingIce(peer)
+  }
+
   function waitForInitialIce(peer: RTCPeerConnection, requireRelay: boolean, timeoutMs = 8000) {
     if (!requireRelay && peer.iceGatheringState === 'complete') return Promise.resolve()
     if (requireRelay && localIceTypesRef.current.has('relay')) return Promise.resolve()
@@ -788,6 +796,8 @@ export function MessengerApp() {
     activeCallIDRef.current = callId
     activeCallPeerIDRef.current = targetUserId
     activeCallRoomIDRef.current = roomID
+    localIceCandidatesRef.current = []
+    localIceTypesRef.current = new Set()
     pendingIceCandidatesRef.current = earlyIceByCallIDRef.current[callId] ?? []
     delete earlyIceByCallIDRef.current[callId]
     if (pendingIceCandidatesRef.current.length > 0) {
@@ -800,6 +810,7 @@ export function MessengerApp() {
       }
       const type = iceCandidateType(event.candidate)
       if (type) localIceTypesRef.current.add(type)
+      localIceCandidatesRef.current.push(event.candidate.toJSON())
       addCallDiagnostic(`ICE local: ${describeIceCandidate(event.candidate)}`)
       if (!identity || !activeCallRoomIDRef.current || !activeCallPeerIDRef.current) return
       sendRealtimeRaw({
@@ -898,6 +909,7 @@ export function MessengerApp() {
         toUserId: target.userId,
         displayName: identity.displayName,
         offer: peer.localDescription?.toJSON() ?? offer,
+        candidates: localIceCandidatesRef.current,
       })
     } catch (err) {
       setCallError(err instanceof Error ? err.message : 'call_failed')
@@ -915,6 +927,7 @@ export function MessengerApp() {
       const peer = await ensurePeer(incomingCall.callId, incomingCall.fromUserId, incomingCall.roomId)
       await peer.setRemoteDescription(incomingCall.offer)
       addCallDiagnostic('Remote offer accepted')
+      await addRemoteCandidates(peer, incomingCall.candidates)
       await flushPendingIce(peer)
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
@@ -933,6 +946,7 @@ export function MessengerApp() {
         fromUserId: identity.userId,
         toUserId: incomingCall.fromUserId,
         answer: peer.localDescription?.toJSON() ?? answer,
+        candidates: localIceCandidatesRef.current,
       })
       addCallDiagnostic('Answer sent')
       setIncomingCall(null)
@@ -963,6 +977,7 @@ export function MessengerApp() {
     activeCallRoomIDRef.current = ''
     pendingIceCandidatesRef.current = []
     earlyIceByCallIDRef.current = {}
+    localIceCandidatesRef.current = []
     localIceTypesRef.current = new Set()
     setCallState(keepError ? 'failed' : 'idle')
     setIncomingCall(null)
@@ -1046,6 +1061,7 @@ export function MessengerApp() {
       clearCallTimeout()
       await peerRef.current.setRemoteDescription(event.answer)
       addCallDiagnostic('Remote answer accepted')
+      await addRemoteCandidates(peerRef.current, event.candidates)
       await flushPendingIce(peerRef.current)
       setCallState('connecting')
       armConnectionTimeout(event.callId)

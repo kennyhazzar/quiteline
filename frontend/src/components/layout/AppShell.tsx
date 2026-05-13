@@ -626,6 +626,18 @@ function CallPanelModal({
   const isIncoming = callState === 'ringing' && Boolean(incomingCall)
   const isActive = callState === 'connected'
   const isFailed = callState === 'failed'
+  const copyCallDiagnostics = () => {
+    const header = [
+      'Quietline call diagnostics',
+      `state: ${callState}`,
+      `peer: ${peerName}`,
+      `status: ${callStatus || '-'}`,
+      `error: ${callError || '-'}`,
+      `at: ${new Date().toISOString()}`,
+    ]
+    const body = [...header, '', ...callDiagnostics].join('\n')
+    void navigator.clipboard?.writeText(body)
+  }
   const microphoneOptions = audioInputDevices.map((device, index) => ({
     value: device.deviceId,
     label: device.label || (locale === 'ru' ? `Микрофон ${index + 1}` : `Microphone ${index + 1}`),
@@ -721,9 +733,19 @@ function CallPanelModal({
         )}
         {callDiagnostics.length > 0 && (
           <Card withBorder radius="lg" p="sm">
-            <Text size="xs" fw={800} mb={6}>
+            <Group justify="space-between" align="center" mb={6} gap="xs">
+              <Text size="xs" fw={800}>
               {locale === 'ru' ? 'Диагностика соединения' : 'Connection diagnostics'}
             </Text>
+              <Button
+                size="compact-xs"
+                variant="subtle"
+                leftSection={<IconCopy size={14} />}
+                onClick={copyCallDiagnostics}
+              >
+                {locale === 'ru' ? 'Скопировать' : 'Copy'}
+              </Button>
+            </Group>
             <Stack gap={3}>
               {callDiagnostics.map((item) => (
                 <Text key={item} size="xs" c="dimmed" style={{ fontFamily: 'var(--font-geist-mono), monospace' }}>
