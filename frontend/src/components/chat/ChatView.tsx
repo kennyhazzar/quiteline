@@ -294,7 +294,7 @@ export function ChatView(props: ChatViewProps) {
   const loadingHistoryRef = useRef(false)
   const historyPaginationEnabledRef = useRef(false)
   const bottomScrollTimersRef = useRef<number[]>([])
-  const historyScrollSnapshotRef = useRef<{ height: number; top: number; length: number } | null>(null)
+  const historyScrollSnapshotRef = useRef<{ height: number; top: number; length: number; anchorId: string; anchorViewportOffset: number } | null>(null)
   const paginationArmedRef = useRef(true)
   const lastScrollTopRef = useRef(0)
   const suppressPaginationUntilRef = useRef(0)
@@ -420,10 +420,21 @@ export function ChatView(props: ChatViewProps) {
     lastHistoryLoadAtRef.current = now
     const el = messagesViewportRef.current
     if (el) {
+      // Anchor-based restore: record the first visible message and its viewport offset.
+      // This is robust against grouping height changes at the load boundary.
+      const anchorId = visibleMessages[0]?.id ?? ''
+      const anchorEl = anchorId
+        ? (el.querySelector(`[data-message-id="${anchorId}"]`) as HTMLElement | null)
+        : null
+      const anchorViewportOffset = anchorEl
+        ? anchorEl.getBoundingClientRect().top - el.getBoundingClientRect().top
+        : 0
       historyScrollSnapshotRef.current = {
         height: el.scrollHeight,
         top: el.scrollTop,
         length: visibleMessages.length,
+        anchorId,
+        anchorViewportOffset,
       }
     } else {
       historyScrollSnapshotRef.current = null
@@ -441,7 +452,20 @@ export function ChatView(props: ChatViewProps) {
     const el = messagesViewportRef.current
     if (!snapshot || !el || isLoadingMoreMessages) return
     if (visibleMessages.length <= snapshot.length && hasMoreMessages) return
-    const nextTop = el.scrollHeight - snapshot.height + snapshot.top
+
+    let nextTop: number
+    const anchorEl = snapshot.anchorId
+      ? (el.querySelector(`[data-message-id="${snapshot.anchorId}"]`) as HTMLElement | null)
+      : null
+    if (anchorEl) {
+      // anchorContentPos is the anchor's absolute position in the scroll content,
+      // independent of scrollTop. We want it at the same viewport offset as before.
+      const anchorContentPos = anchorEl.getBoundingClientRect().top - el.getBoundingClientRect().top + el.scrollTop
+      nextTop = anchorContentPos - snapshot.anchorViewportOffset
+    } else {
+      nextTop = el.scrollHeight - snapshot.height + snapshot.top
+    }
+
     el.scrollTop = nextTop
     lastScrollTopRef.current = nextTop
     historyScrollSnapshotRef.current = null
