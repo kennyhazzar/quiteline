@@ -702,13 +702,17 @@ export function MessengerApp() {
       addCallDiagnostic('Audio playback: no audio element')
       return
     }
-    const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus' : 'audio/webm'
-    if (typeof MediaSource === 'undefined' || !MediaSource.isTypeSupported(mimeType)) {
-      addCallDiagnostic(`Audio playback: MediaSource not supported (${mimeType})`)
+    if (typeof MediaSource === 'undefined') {
+      addCallDiagnostic('Audio playback: MediaSource not available')
       return
     }
-    addCallDiagnostic(`Audio playback setup (${mimeType})`)
+    const candidates = ['audio/webm;codecs=opus', 'video/webm;codecs=opus', 'audio/webm', 'video/webm']
+    const mseMime = candidates.find((m) => MediaSource.isTypeSupported(m)) ?? ''
+    if (!mseMime) {
+      addCallDiagnostic(`Audio playback: no MSE codec (${candidates.map((m) => `${m}=${MediaSource.isTypeSupported(m)}`).join(', ')})`)
+      return
+    }
+    addCallDiagnostic(`Audio playback setup (${mseMime})`)
     const mediaSource = new MediaSource()
     mediaSourceRef.current = mediaSource
     const url = URL.createObjectURL(mediaSource)
@@ -716,7 +720,7 @@ export function MessengerApp() {
     audioChunkQueueRef.current = []
     mediaSource.addEventListener('sourceopen', () => {
       try {
-        const sourceBuffer = mediaSource.addSourceBuffer(mimeType)
+        const sourceBuffer = mediaSource.addSourceBuffer(mseMime)
         sourceBuffer.mode = 'sequence'
         audioSourceBufferRef.current = sourceBuffer
         addCallDiagnostic('Audio source ready')
