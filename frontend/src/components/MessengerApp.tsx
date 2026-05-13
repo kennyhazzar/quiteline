@@ -154,6 +154,7 @@ export function MessengerApp() {
   const activeCallRoomIDRef = useRef('')
   const pendingIceCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const earlyIceByCallIDRef = useRef<Record<string, RTCIceCandidateInit[]>>({})
+  const localIceTypesRef = useRef<Set<string>>(new Set())
   const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null)
   const urlStateReadyRef = useRef(false)
@@ -686,6 +687,18 @@ export function MessengerApp() {
     return [type ? `typ ${type}` : 'candidate', protocol?.toUpperCase()].filter(Boolean).join(' ')
   }
 
+  function iceCandidateType(candidate: RTCIceCandidate | RTCIceCandidateInit) {
+    const raw = 'candidate' in candidate ? candidate.candidate : ''
+    return raw?.match(/\btyp\s+(\w+)/)?.[1] ?? ''
+  }
+
+  function hasTurnIceServer(iceServers: RTCIceServer[]) {
+    return iceServers.some((server) => {
+      const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
+      return urls.some((url) => String(url).startsWith('turn:') || String(url).startsWith('turns:'))
+    })
+  }
+
   function clearCallTimeout() {
     if (!callTimeoutRef.current) return
     clearTimeout(callTimeoutRef.current)
@@ -734,8 +747,9 @@ export function MessengerApp() {
     }
   }
 
-  function waitForIceGatheringComplete(peer: RTCPeerConnection, timeoutMs = 2500) {
-    if (peer.iceGatheringState === 'complete') return Promise.resolve()
+  function waitForInitialIce(peer: RTCPeerConnection, requireRelay: boolean, timeoutMs = 8000) {
+    if (!requireRelay && peer.iceGatheringState === 'complete') return Promise.resolve()
+    if (requireRelay && localIceTypesRef.current.has('relay')) return Promise.resolve()
     return new Promise<void>((resolve) => {
       let done = false
       const finish = () => {
@@ -743,26 +757,34 @@ export function MessengerApp() {
         done = true
         window.clearTimeout(timer)
         peer.removeEventListener('icegatheringstatechange', handleChange)
+        peer.removeEventListener('icecandidate', handleCandidate)
         resolve()
       }
       const handleChange = () => {
         if (peer.iceGatheringState === 'complete') finish()
       }
+      const handleCandidate = (event: RTCPeerConnectionIceEvent) => {
+        if (!requireRelay) {
+          if (event.candidate) finish()
+          return
+        }
+        if (event.candidate && iceCandidateType(event.candidate) === 'relay') finish()
+      }
       const timer = window.setTimeout(finish, timeoutMs)
       peer.addEventListener('icegatheringstatechange', handleChange)
+      peer.addEventListener('icecandidate', handleCandidate)
     })
   }
 
   async function ensurePeer(callId: string, targetUserId: string, roomID: string) {
     if (peerRef.current) return peerRef.current
     const iceServers = await loadCallIceServers()
+    const usesTurn = hasTurnIceServer(iceServers)
     const peer = new RTCPeerConnection({
       iceServers,
-      iceTransportPolicy: iceServers.some((server) => {
-        const urls = Array.isArray(server.urls) ? server.urls : [server.urls]
-        return urls.some((url) => String(url).startsWith('turn:') || String(url).startsWith('turns:'))
-      }) ? 'relay' : 'all',
+      iceTransportPolicy: usesTurn ? 'relay' : 'all',
     })
+    addCallDiagnostic(`ICE policy: ${usesTurn ? 'relay' : 'all'}`)
     activeCallIDRef.current = callId
     activeCallPeerIDRef.current = targetUserId
     activeCallRoomIDRef.current = roomID
@@ -776,6 +798,8 @@ export function MessengerApp() {
         addCallDiagnostic('ICE gathering complete')
         return
       }
+      const type = iceCandidateType(event.candidate)
+      if (type) localIceTypesRef.current.add(type)
       addCallDiagnostic(`ICE local: ${describeIceCandidate(event.candidate)}`)
       if (!identity || !activeCallRoomIDRef.current || !activeCallPeerIDRef.current) return
       sendRealtimeRaw({
@@ -857,7 +881,8 @@ export function MessengerApp() {
       const offer = await peer.createOffer()
       await peer.setLocalDescription(offer)
       addCallDiagnostic('Waiting for local ICE')
-      await waitForIceGatheringComplete(peer)
+      await waitForInitialIce(peer, peer.getConfiguration().iceTransportPolicy === 'relay')
+      addCallDiagnostic(`Initial ICE ready: ${Array.from(localIceTypesRef.current).join(', ') || 'none'}`)
       setCallPeerID(target.userId)
       setCallPeerName(target.displayName)
       setCallError('')
@@ -894,7 +919,8 @@ export function MessengerApp() {
       const answer = await peer.createAnswer()
       await peer.setLocalDescription(answer)
       addCallDiagnostic('Waiting for local ICE')
-      await waitForIceGatheringComplete(peer)
+      await waitForInitialIce(peer, peer.getConfiguration().iceTransportPolicy === 'relay')
+      addCallDiagnostic(`Initial ICE ready: ${Array.from(localIceTypesRef.current).join(', ') || 'none'}`)
       setCallPeerID(incomingCall.fromUserId)
       setCallState('connecting')
       setCallPeerName(incomingCall.displayName)
@@ -937,6 +963,7 @@ export function MessengerApp() {
     activeCallRoomIDRef.current = ''
     pendingIceCandidatesRef.current = []
     earlyIceByCallIDRef.current = {}
+    localIceTypesRef.current = new Set()
     setCallState(keepError ? 'failed' : 'idle')
     setIncomingCall(null)
     if (!keepError) {
