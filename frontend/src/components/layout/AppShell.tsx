@@ -269,9 +269,10 @@ export function AppShellLayout(props: AppShellLayoutProps) {
   const navCopy = {
     contacts: locale === 'ru' ? 'Контакты' : 'Contacts',
     chats: locale === 'ru' ? 'Чаты' : 'Chats',
+    calls: locale === 'ru' ? 'Звонки' : 'Calls',
     settings: locale === 'ru' ? 'Настройки' : 'Settings',
   }
-  function openMobileTab(value: 'contacts' | 'rooms' | 'settings') {
+  function openMobileTab(value: 'contacts' | 'rooms' | 'calls' | 'settings') {
     const current = mobileView === 'chat' ? 'rooms' : mobileView
     if (value === 'rooms' && current === 'rooms') {
       closeChat()
@@ -346,7 +347,9 @@ export function AppShellLayout(props: AppShellLayoutProps) {
                     ? navCopy.chats
                     : mobileView === 'contacts'
                       ? navCopy.contacts
-                      : navCopy.settings
+                      : mobileView === 'calls'
+                        ? navCopy.calls
+                        : navCopy.settings
                   : t('encryptedBadge')}
               </Text>
             </div>
@@ -403,6 +406,7 @@ export function AppShellLayout(props: AppShellLayoutProps) {
             {([
               { value: 'contacts', label: navCopy.contacts, icon: <IconUsers size={18} /> },
               { value: 'rooms', label: navCopy.chats, icon: <IconMessageCircle size={18} /> },
+              { value: 'calls', label: navCopy.calls, icon: <IconPhone size={18} /> },
               { value: 'settings', label: navCopy.settings, icon: <IconSettings size={18} /> },
             ] as const).map((item) => (
               <button
