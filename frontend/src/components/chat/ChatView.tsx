@@ -19,6 +19,7 @@ import {
   Skeleton,
   Stack,
   Text,
+  Textarea,
   TextInput,
   Title,
 } from '@mantine/core'
@@ -95,7 +96,8 @@ interface ChatViewProps {
   messageSearch: string
   setMessageSearch: (v: string) => void
   messagesViewportRef: RefObject<HTMLDivElement | null>
-  messageInputRef: RefObject<HTMLInputElement | null>
+  messageInputRef: RefObject<HTMLTextAreaElement | null>
+  onNavigateToMessage: (messageId: string) => void
   hasMoreMessages: boolean
   isLoadingMoreMessages: boolean
   loadMoreMessages: () => Promise<void>
@@ -316,6 +318,7 @@ export function ChatView(props: ChatViewProps) {
     copyAppURL,
     activeTyping,
     setMobileChatActionsOpened,
+    onNavigateToMessage,
   } = props
 
   // Rename state
@@ -372,7 +375,7 @@ export function ChatView(props: ChatViewProps) {
     }
   }
 
-  function imageFileFromClipboard(event: React.ClipboardEvent<HTMLInputElement>) {
+  function imageFileFromClipboard(event: React.ClipboardEvent<HTMLTextAreaElement>) {
     const item = Array.from(event.clipboardData.items).find((entry) => (
       entry.kind === 'file' && entry.type.startsWith('image/')
     ))
@@ -386,7 +389,7 @@ export function ChatView(props: ChatViewProps) {
     })
   }
 
-  function handleMessagePaste(event: React.ClipboardEvent<HTMLInputElement>) {
+  function handleMessagePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
     if (!activeRoomID || (sendMutation as UseMutationResult<unknown, Error, unknown>).isPending) return
     const file = imageFileFromClipboard(event)
     if (!file) return
@@ -552,11 +555,18 @@ export function ChatView(props: ChatViewProps) {
   }
 
   function replyToMessage(msg: DecryptedMessage) {
+    // On iOS focus must be called synchronously inside the user-gesture handler
+    if (isMobile) messageInputRef.current?.focus()
     setReplyTarget(msg)
-    window.requestAnimationFrame(() => {
-      messageInputRef.current?.focus()
-    })
+    if (!isMobile) window.requestAnimationFrame(() => messageInputRef.current?.focus())
   }
+
+  // Also focus when replyTarget is set from outside (e.g. swipe-to-reply)
+  useEffect(() => {
+    if (!replyTarget || !isMobile) return
+    const timer = window.setTimeout(() => messageInputRef.current?.focus(), 50)
+    return () => window.clearTimeout(timer)
+  }, [replyTarget, isMobile, messageInputRef])
 
   function renderMessageStatus(msg: DecryptedMessage) {
     if (!identity || msg.senderId !== identity.userId || msg.body?.system) return null
@@ -1013,7 +1023,16 @@ export function ChatView(props: ChatViewProps) {
                           ) : (
                             <Stack gap="xs">
                               {msg.body?.replyTo && (
-                                <Card withBorder radius="md" p="xs" style={{ borderLeft: '3px solid var(--mantine-color-blue-5)' }}>
+                                <Card
+                                  withBorder
+                                  radius="md"
+                                  p="xs"
+                                  style={{
+                                    borderLeft: '3px solid var(--mantine-color-blue-5)',
+                                    cursor: msg.body.replyTo.id ? 'pointer' : undefined,
+                                  }}
+                                  onClick={msg.body.replyTo.id ? () => onNavigateToMessage(msg.body!.replyTo!.id) : undefined}
+                                >
                                   <Text size="xs" fw={700}>{msg.body.replyTo.senderName}</Text>
                                   <Text size="xs" c="dimmed" lineClamp={2}>{msg.body.replyTo.text}</Text>
                                 </Card>
@@ -1156,26 +1175,41 @@ export function ChatView(props: ChatViewProps) {
                   </ActionIcon>
                 )}
               </FileButton>
-              <TextInput
-                ref={messageInputRef as React.RefObject<HTMLInputElement>}
+              <Textarea
+                ref={messageInputRef as React.RefObject<HTMLTextAreaElement>}
                 aria-label={t('message')}
                 placeholder={activeRoomID ? t('typeMessage') : t('unlockFirst')}
+                autosize
+                minRows={1}
+                maxRows={6}
                 onChange={(event) => updateMessageText(event.currentTarget.value)}
                 onPaste={handleMessagePaste}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault()
-                    submitMessage()
+                  if (event.key === 'Enter') {
+                    if (isMobile) {
+                      // Mobile: Enter = newline (default), send only via button
+                      return
+                    }
+                    // Desktop: Enter = send, Shift+Enter = newline
+                    if (!event.shiftKey) {
+                      event.preventDefault()
+                      submitMessage()
+                      window.requestAnimationFrame(() => messageInputRef.current?.focus())
+                    }
                   }
                 }}
                 disabled={!activeRoomID}
                 style={{ flex: 1, minWidth: 0 }}
-                styles={{ input: { fontSize: isMobile ? 16 : undefined } }}
+                styles={{ input: { fontSize: isMobile ? 16 : undefined, resize: 'none' } }}
               />
               <ActionIcon
                 variant="filled"
                 size="lg"
-                onClick={submitMessage}
+                onClick={() => {
+                  submitMessage()
+                  // Refocus to keep keyboard open on mobile
+                  window.requestAnimationFrame(() => messageInputRef.current?.focus())
+                }}
                 loading={(sendMutation as UseMutationResult<unknown, Error, unknown>).isPending}
                 disabled={!activeRoomID || (sendMutation as UseMutationResult<unknown, Error, unknown>).isPending}
                 aria-label={t('send')}

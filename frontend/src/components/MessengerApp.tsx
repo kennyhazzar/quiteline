@@ -1809,6 +1809,13 @@ export function MessengerApp() {
       attachmentsOpened={attachmentsOpened}
       setAttachmentsOpened={setAttachmentsOpened}
       highlightedMessageID={highlightedMessageID}
+      onNavigateToMessage={(messageId: string) => {
+        setHighlightedMessageID(messageId)
+        window.setTimeout(
+          () => setHighlightedMessageID((cur) => (cur === messageId ? '' : cur)),
+          2500,
+        )
+      }}
       messageSearch={messages.messageSearch}
       setMessageSearch={messages.setMessageSearch}
       messagesViewportRef={messages.messagesViewportRef}

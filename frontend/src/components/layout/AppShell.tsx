@@ -169,10 +169,11 @@ interface AppShellLayoutProps {
   attachmentsOpened: boolean
   setAttachmentsOpened: (v: boolean) => void
   highlightedMessageID: string
+  onNavigateToMessage: (messageId: string) => void
   messageSearch: string
   setMessageSearch: (v: string) => void
   messagesViewportRef: RefObject<HTMLDivElement | null>
-  messageInputRef: RefObject<HTMLInputElement | null>
+  messageInputRef: RefObject<HTMLTextAreaElement | null>
   hasMoreMessages: boolean
   isLoadingMoreMessages: boolean
   loadMoreMessages: () => Promise<void>

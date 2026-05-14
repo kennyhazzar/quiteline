@@ -81,7 +81,7 @@ export function useMessages(opts: {
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false)
   const [isDecryptingMessages, setIsDecryptingMessages] = useState(false)
 
-  const messageInputRef = useRef<HTMLInputElement | null>(null)
+  const messageInputRef = useRef<HTMLTextAreaElement | null>(null)
   const messageTextRef = useRef('')
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
