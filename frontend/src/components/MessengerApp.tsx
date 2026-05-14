@@ -515,10 +515,17 @@ export function MessengerApp() {
 
   useEffect(() => {
     if (!activeRoomID || !highlightedMessageID || messages.visibleMessages.length === 0) return
+    const msgId = highlightedMessageID
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
-        const target = document.getElementById(`message-${highlightedMessageID}`)
-        target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        const target = document.getElementById(`message-${msgId}`)
+        if (!target) return
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' })
+        // Clear highlight only after the element is actually in view.
+        // This allows context mode to load and the scroll to happen before clearing.
+        window.setTimeout(() => {
+          setHighlightedMessageID((cur) => (cur === msgId ? '' : cur))
+        }, 2500)
       })
     })
   }, [activeRoomID, highlightedMessageID, messages.visibleMessages.length, messages.isInContextMode])
@@ -1811,10 +1818,6 @@ export function MessengerApp() {
       highlightedMessageID={highlightedMessageID}
       onNavigateToMessage={(messageId: string) => {
         setHighlightedMessageID(messageId)
-        window.setTimeout(
-          () => setHighlightedMessageID((cur) => (cur === messageId ? '' : cur)),
-          2500,
-        )
       }}
       isInContextMode={messages.isInContextMode}
       onExitContextMode={() => {
