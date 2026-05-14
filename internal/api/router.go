@@ -1065,11 +1065,18 @@ func handleZKRoomSubroutes(w http.ResponseWriter, r *http.Request, deps Dependen
 	}
 	switch r.Method {
 	case http.MethodGet:
-		switch tail {
-		case "messages":
+		switch {
+		case tail == "messages":
 			handleListEncryptedMessages(w, r, deps, roomID)
-		case "attachments":
+		case tail == "attachments":
 			handleListRoomAttachments(w, r, deps, roomID)
+		case strings.HasPrefix(tail, "messages/") && strings.HasSuffix(tail, "/context"):
+			messageID := strings.TrimSuffix(strings.TrimPrefix(tail, "messages/"), "/context")
+			if messageID == "" || strings.ContainsAny(messageID, " \t\r\n/") {
+				writeError(w, http.StatusNotFound, "not_found")
+				return
+			}
+			handleMessageContext(w, r, deps, roomID, messageID)
 		default:
 			writeError(w, http.StatusNotFound, "not_found")
 			return
@@ -1215,6 +1222,31 @@ func handleListEncryptedMessages(w http.ResponseWriter, r *http.Request, deps De
 	}
 	const pageSize = 50
 	messages, err := deps.ZKStore.ListMessages(r.Context(), roomID, pageSize+1, before)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	hasMore := len(messages) > pageSize
+	if hasMore {
+		messages = messages[1:]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"messages": messages, "hasMore": hasMore})
+}
+
+func handleMessageContext(w http.ResponseWriter, r *http.Request, deps Dependencies, roomID, messageID string) {
+	if !requireRoomMember(w, r, deps, roomID) {
+		return
+	}
+	createdAt, err := deps.ZKStore.GetMessageCreatedAt(r.Context(), roomID, messageID)
+	if err != nil {
+		writeStoreError(w, err)
+		return
+	}
+	const pageSize = 30
+	// Fetch pageSize+1 messages ending at (and including) the target message.
+	// Adding 1µs to createdAt makes the strict-less-than condition include the target.
+	before := createdAt.Add(time.Microsecond)
+	messages, err := deps.ZKStore.ListMessages(r.Context(), roomID, pageSize+1, &before)
 	if err != nil {
 		writeStoreError(w, err)
 		return

@@ -170,6 +170,8 @@ interface AppShellLayoutProps {
   setAttachmentsOpened: (v: boolean) => void
   highlightedMessageID: string
   onNavigateToMessage: (messageId: string) => void
+  isInContextMode: boolean
+  onExitContextMode: () => void
   messageSearch: string
   setMessageSearch: (v: string) => void
   messagesViewportRef: RefObject<HTMLDivElement | null>

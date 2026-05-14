@@ -691,6 +691,15 @@ func (s *PostgresStore) ListMessages(ctx context.Context, roomID string, limit i
 	return msgs, rows.Err()
 }
 
+func (s *PostgresStore) GetMessageCreatedAt(ctx context.Context, roomID, messageID string) (time.Time, error) {
+	var createdAt time.Time
+	err := s.pool.QueryRow(ctx,
+		`SELECT created_at FROM messages WHERE room_id = $1 AND id = $2`,
+		normalizeID(roomID), messageID,
+	).Scan(&createdAt)
+	return createdAt, err
+}
+
 func (s *PostgresStore) ListAttachmentMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error) {
 	roomID = normalizeID(roomID)
 	if limit <= 0 || limit > 1000 {

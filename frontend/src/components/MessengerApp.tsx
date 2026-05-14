@@ -521,7 +521,7 @@ export function MessengerApp() {
         target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
       })
     })
-  }, [activeRoomID, highlightedMessageID, messages.visibleMessages.length])
+  }, [activeRoomID, highlightedMessageID, messages.visibleMessages.length, messages.isInContextMode])
 
   // ─── Mark room read ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -1815,6 +1815,11 @@ export function MessengerApp() {
           () => setHighlightedMessageID((cur) => (cur === messageId ? '' : cur)),
           2500,
         )
+      }}
+      isInContextMode={messages.isInContextMode}
+      onExitContextMode={() => {
+        messages.exitContextMode()
+        setHighlightedMessageID('')
       }}
       messageSearch={messages.messageSearch}
       setMessageSearch={messages.setMessageSearch}

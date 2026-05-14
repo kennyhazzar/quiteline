@@ -102,6 +102,7 @@ type Store interface {
 	DeleteMessageForAll(ctx context.Context, roomID string, messageID string, userID string) (EncryptedMessage, error)
 	ToggleMessageReaction(ctx context.Context, roomID string, messageID string, userID string, emoji string) (EncryptedMessage, error)
 	ListMessages(ctx context.Context, roomID string, limit int, before *time.Time) ([]EncryptedMessage, error)
+	GetMessageCreatedAt(ctx context.Context, roomID string, messageID string) (time.Time, error)
 	ListAttachmentMessages(ctx context.Context, roomID string, limit int) ([]EncryptedMessage, error)
 	ListFriends(ctx context.Context, userID string) ([]Friend, error)
 	RequestFriend(ctx context.Context, fromUserID string, toUserID string) error
@@ -553,6 +554,18 @@ func (s *MemoryStore) ListMessages(_ context.Context, roomID string, limit int, 
 		s.decorateReadState(&result[i])
 	}
 	return result, nil
+}
+
+func (s *MemoryStore) GetMessageCreatedAt(_ context.Context, roomID, messageID string) (time.Time, error) {
+	roomID = normalizeID(roomID)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, m := range s.messages[roomID] {
+		if m.ID == messageID {
+			return m.CreatedAt, nil
+		}
+	}
+	return time.Time{}, ErrNotFound
 }
 
 func (s *MemoryStore) ListAttachmentMessages(_ context.Context, roomID string, limit int) ([]EncryptedMessage, error) {

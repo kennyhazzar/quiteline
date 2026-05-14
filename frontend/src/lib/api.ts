@@ -570,6 +570,19 @@ export async function fetchMessages(
   return { messages: page.messages ?? [], hasMore: Boolean(page.hasMore) }
 }
 
+export async function fetchMessageContext(
+  roomId: string,
+  messageId: string,
+  token: string,
+): Promise<{ messages: EncryptedMessage[]; hasMore: boolean }> {
+  const res = await fetch(
+    `${BASE}/v1/chat/rooms/${encodeURIComponent(roomId)}/messages/${encodeURIComponent(messageId)}/context`,
+    { headers: authHeaders(token) },
+  )
+  const page = await readJSON<{ messages?: EncryptedMessage[]; hasMore?: boolean }>(res)
+  return { messages: page.messages ?? [], hasMore: Boolean(page.hasMore) }
+}
+
 export async function fetchAttachmentMessages(roomId: string, token: string): Promise<{ messages: EncryptedMessage[] }> {
   const res = await fetch(`${BASE}/v1/chat/rooms/${encodeURIComponent(roomId)}/attachments`, {
     headers: authHeaders(token),

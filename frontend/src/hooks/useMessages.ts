@@ -7,6 +7,7 @@ import {
   AuthError,
   downloadEncryptedFile,
   fetchAttachmentMessages,
+  fetchMessageContext,
   fetchMessages,
   toggleMessageReaction,
   deleteEncryptedMessageForAll,
@@ -80,8 +81,13 @@ export function useMessages(opts: {
   const [hasMoreMessages, setHasMoreMessages] = useState(false)
   const [isLoadingMoreMessages, setIsLoadingMoreMessages] = useState(false)
   const [isDecryptingMessages, setIsDecryptingMessages] = useState(false)
+  const [contextMessages, setContextMessages] = useState<EncryptedMessage[]>([])
+  const [contextHasMore, setContextHasMore] = useState(false)
+  const [isInContextMode, setIsInContextMode] = useState(false)
 
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null)
+  const isInContextModeRef = useRef(false)
+  isInContextModeRef.current = isInContextMode
   const messageTextRef = useRef('')
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -115,6 +121,9 @@ export function useMessages(opts: {
     setHasMoreMessages(false)
     setIsLoadingMoreMessages(false)
     setAttachmentMessages([])
+    setContextMessages([])
+    setContextHasMore(false)
+    setIsInContextMode(false)
     highlightedLoaderRef.current = ''
     decryptCacheRef.current.clear()
   }, [activeRoomID, session?.accessToken])
@@ -143,7 +152,34 @@ export function useMessages(opts: {
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
   }
 
+  function exitContextMode() {
+    setContextMessages([])
+    setContextHasMore(false)
+    setIsInContextMode(false)
+    isInContextModeRef.current = false
+    highlightedLoaderRef.current = ''
+  }
+
   async function loadMoreMessages() {
+    if (isInContextMode) {
+      // In context mode: load pages older than the context window's oldest message
+      if (!session || !activeRoomID || isLoadingMoreMessages || !contextHasMore) return
+      const oldestContextAt = contextMessages[0]?.createdAt
+      if (!oldestContextAt) return
+      setIsLoadingMoreMessages(true)
+      try {
+        const page = await fetchMessages(activeRoomID, session.accessToken, oldestContextAt)
+        setContextMessages((prev) => mergeMessagePages(page.messages, prev))
+        setContextHasMore(page.hasMore)
+      } catch (err) {
+        if (err instanceof AuthError) handleAuthExpired()
+        else handleRequestError(err as Error, t('roomError'))
+      } finally {
+        setIsLoadingMoreMessages(false)
+      }
+      return
+    }
+    // Normal mode
     if (!session || !activeRoomID || !oldestPagedMessageAt || isLoadingMoreMessages || !hasMoreMessages) return
     setIsLoadingMoreMessages(true)
     try {
@@ -159,8 +195,10 @@ export function useMessages(opts: {
   }
 
   useEffect(() => {
-    if (!session || !activeRoomID || !highlightedMessageID || !hasMoreMessages || isLoadingMoreMessages) return
+    if (!session || !activeRoomID || !highlightedMessageID || isLoadingMoreMessages) return
+    // If message is already in any loaded source, no fetch needed
     if (pagedMessages.some((msg) => msg.id === highlightedMessageID)) return
+    if (contextMessages.some((msg) => msg.id === highlightedMessageID)) return
     const loaderKey = `${activeRoomID}:${highlightedMessageID}`
     if (highlightedLoaderRef.current === loaderKey) return
     highlightedLoaderRef.current = loaderKey
@@ -168,50 +206,35 @@ export function useMessages(opts: {
     const accessToken = session.accessToken
 
     let cancelled = false
-    async function loadUntilHighlighted() {
-      let cursor = oldestPagedMessageAt
-      let nextHasMore = hasMoreMessages
-      let guard = 0
+    async function fetchContext() {
       setIsLoadingMoreMessages(true)
       try {
-        while (!cancelled && cursor && nextHasMore && guard < 20) {
-          const page = await fetchMessages(roomID, accessToken, cursor)
-          if (page.messages.length === 0) {
-            nextHasMore = false
-            setHasMoreMessages(false)
-            break
-          }
-          setOlderMessages((prev) => mergeMessagePages(prev, page.messages))
-          if (page.messages.some((msg) => msg.id === highlightedMessageID)) {
-            setHasMoreMessages(page.hasMore)
-            break
-          }
-          cursor = page.messages.reduce(
-            (oldest, msg) => (!oldest || Date.parse(msg.createdAt) < Date.parse(oldest) ? msg.createdAt : oldest),
-            '',
-          )
-          nextHasMore = page.hasMore
-          setHasMoreMessages(page.hasMore)
-          guard += 1
+        const page = await fetchMessageContext(roomID, highlightedMessageID ?? '', accessToken)
+        if (!cancelled) {
+          // Enter context mode: show the 30-message window around the target.
+          // This replaces (not merges) any previous context window.
+          setContextMessages(page.messages)
+          setContextHasMore(page.hasMore)
+          setIsInContextMode(true)
+          isInContextModeRef.current = true
         }
       } catch (err) {
         if (err instanceof AuthError) handleAuthExpired()
         else handleRequestError(err as Error, t('roomError'))
+        if (!cancelled) highlightedLoaderRef.current = ''
       } finally {
         if (!cancelled) setIsLoadingMoreMessages(false)
       }
     }
-    void loadUntilHighlighted()
-    return () => {
-      cancelled = true
-    }
+    void fetchContext()
+    return () => { cancelled = true }
   }, [
     activeRoomID,
+    contextMessages,
     handleAuthExpired,
     handleRequestError,
-    hasMoreMessages,
     highlightedMessageID,
-    oldestPagedMessageAt,
+    isLoadingMoreMessages,
     pagedMessages,
     session,
     t,
@@ -230,14 +253,19 @@ export function useMessages(opts: {
         byID.set(msg.id, msg)
       }
     }
-    for (const msg of pagedMessages) {
+    // In context mode: show only the context window — avoids a gap between old context and
+    // latest messages. Live messages are excluded (they'd appear out-of-order across the gap).
+    const sourceMessages = isInContextMode ? contextMessages : pagedMessages
+    for (const msg of sourceMessages) {
       if (msg.roomId === activeRoomID) put(msg)
     }
-    for (const msg of liveMessages) {
-      if (msg.roomId === activeRoomID) put(msg)
+    if (!isInContextMode) {
+      for (const msg of liveMessages) {
+        if (msg.roomId === activeRoomID) put(msg)
+      }
     }
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  }, [activeRoomID, liveMessages, pagedMessages])
+  }, [activeRoomID, contextMessages, isInContextMode, liveMessages, pagedMessages])
 
   const encryptedAttachmentMessages = useMemo(() => {
     const byID = new Map<string, EncryptedMessage>()
@@ -473,6 +501,14 @@ export function useMessages(opts: {
       return { clientId: draft.clientId, message }
     },
     onSuccess: ({ clientId, message }) => {
+      // Sending a message exits context mode so the new message is visible in the live feed
+      if (isInContextModeRef.current) {
+        setContextMessages([])
+        setContextHasMore(false)
+        setIsInContextMode(false)
+        isInContextModeRef.current = false
+        highlightedLoaderRef.current = ''
+      }
       // Replace local clientId with real server ID so the pending bubble stays
       // visible while async decryption runs; displayMessages will overwrite it
       // (decryptedMessages wins by ID) with no gap or flicker.
@@ -769,7 +805,9 @@ export function useMessages(opts: {
     messageTextRef,
     messagesViewportRef,
     readMarksRef,
-    hasMoreMessages,
+    hasMoreMessages: isInContextMode ? contextHasMore : hasMoreMessages,
+    isInContextMode,
+    exitContextMode,
     isLoadingMoreMessages,
     loadMoreMessages,
     sendMutation,

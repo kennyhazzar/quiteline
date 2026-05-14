@@ -93,11 +93,13 @@ interface ChatViewProps {
   attachmentsOpened: boolean
   setAttachmentsOpened: (v: boolean) => void
   highlightedMessageID: string
+  onNavigateToMessage: (messageId: string) => void
+  isInContextMode: boolean
+  onExitContextMode: () => void
   messageSearch: string
   setMessageSearch: (v: string) => void
   messagesViewportRef: RefObject<HTMLDivElement | null>
   messageInputRef: RefObject<HTMLTextAreaElement | null>
-  onNavigateToMessage: (messageId: string) => void
   hasMoreMessages: boolean
   isLoadingMoreMessages: boolean
   loadMoreMessages: () => Promise<void>
@@ -319,6 +321,8 @@ export function ChatView(props: ChatViewProps) {
     activeTyping,
     setMobileChatActionsOpened,
     onNavigateToMessage,
+    isInContextMode,
+    onExitContextMode,
   } = props
 
   // Rename state
@@ -1135,6 +1139,36 @@ export function ChatView(props: ChatViewProps) {
               </Box>
             )}
           </Box>
+
+          {/* Context mode banner — shown when viewing old messages after reply navigation */}
+          {isInContextMode && (
+            <Group
+              justify="space-between"
+              align="center"
+              px="sm"
+              py={6}
+              style={{
+                background: 'light-dark(var(--mantine-color-blue-0), rgba(34,139,230,0.12))',
+                borderTop: '1px solid light-dark(var(--mantine-color-blue-2), rgba(34,139,230,0.3))',
+                flexShrink: 0,
+              }}
+            >
+              <Text size="xs" c="blue">
+                {locale === 'ru' ? 'Просмотр истории сообщений' : 'Viewing message history'}
+              </Text>
+              <Button
+                size="compact-xs"
+                variant="light"
+                color="blue"
+                onClick={() => {
+                  onExitContextMode()
+                  scrollMessagesToBottom('smooth')
+                }}
+              >
+                {locale === 'ru' ? 'К последним' : 'Jump to latest'}
+              </Button>
+            </Group>
+          )}
 
           {/* Composer */}
           <Stack className={isMobile ? 'mobile-composer' : 'composer-bar'} gap={6} mt="auto">
