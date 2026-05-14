@@ -207,12 +207,14 @@ export function AuthPage(props: AuthPageProps) {
         {/* Form card */}
         <Card className="auth-card" withBorder>
           <Stack gap="md">
-            <div>
-              <Title order={2}>{authMode === 'register' ? t('createAccount') : t('login')}</Title>
-              <Text size="sm" c="dimmed">
-                {authMode === 'register' ? t('passwordHint') : t('quietlineIntro')}
-              </Text>
-            </div>
+            {!isMobile && (
+              <div>
+                <Title order={2}>{authMode === 'register' ? t('createAccount') : t('login')}</Title>
+                <Text size="sm" c="dimmed">
+                  {authMode === 'register' ? t('passwordHint') : t('quietlineIntro')}
+                </Text>
+              </div>
+            )}
             {form}
           </Stack>
         </Card>
