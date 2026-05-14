@@ -355,6 +355,16 @@ export function useMessages(opts: {
     }
   }, [activeSecret, encryptedAttachmentMessages])
 
+  // Drop pending messages whose server ID now appears in decryptedMessages
+  useEffect(() => {
+    if (pendingMessages.length === 0) return
+    const decryptedIds = new Set(decryptedMessages.map((m) => m.id))
+    setPendingMessages((prev) => {
+      const next = prev.filter((m) => !(m.status === 'sent' && decryptedIds.has(m.id)))
+      return next.length === prev.length ? prev : next
+    })
+  }, [decryptedMessages])
+
   const displayMessages = useMemo(() => {
     const byID = new Map<string, DecryptedMessage>()
     for (const msg of pendingMessages) {
@@ -422,8 +432,17 @@ export function useMessages(opts: {
       return { clientId: draft.clientId, message }
     },
     onSuccess: ({ clientId, message }) => {
-      setPendingMessages((prev) => prev.filter((item) => item.id !== clientId))
-      setLiveMessages((prev) => [...prev, message].slice(-200))
+      // Replace local clientId with real server ID so the pending bubble stays
+      // visible while async decryption runs; displayMessages will overwrite it
+      // (decryptedMessages wins by ID) with no gap or flicker.
+      setPendingMessages((prev) =>
+        prev.map((item) => (item.id === clientId ? { ...item, id: message.id, status: 'sent' as const } : item)),
+      )
+      setLiveMessages((prev) => {
+        // WS may have already added this message; avoid duplicating in liveMessages
+        if (prev.some((m) => m.id === message.id)) return prev
+        return [...prev, message].slice(-200)
+      })
       void queryClient.invalidateQueries({ queryKey: ['chat-attachments', message.roomId] })
       if (identity) {
         sendRealtime({
