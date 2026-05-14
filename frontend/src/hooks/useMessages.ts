@@ -87,6 +87,8 @@ export function useMessages(opts: {
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const readMarksRef = useRef<Record<string, number>>({})
   const highlightedLoaderRef = useRef('')
+  // Cache: id → { cacheKey, decrypted } — avoids re-decrypting unchanged messages
+  const decryptCacheRef = useRef<Map<string, { cacheKey: string; decrypted: DecryptedMessage }>>(new Map())
 
   const history = useQuery({
     queryKey: ['chat-messages', activeRoomID, session?.accessToken],
@@ -114,6 +116,7 @@ export function useMessages(opts: {
     setIsLoadingMoreMessages(false)
     setAttachmentMessages([])
     highlightedLoaderRef.current = ''
+    decryptCacheRef.current.clear()
   }, [activeRoomID, session?.accessToken])
 
   useEffect(() => {
@@ -252,11 +255,35 @@ export function useMessages(opts: {
   }, [activeRoomID, attachmentHistory.data?.messages, liveMessages])
 
   useEffect(() => {
+    if (encryptedMessages.length === 0) {
+      setDecryptedMessages([])
+      setIsDecryptingMessages(false)
+      return
+    }
+
+    const cache = decryptCacheRef.current
+
+    // Messages whose ciphertext/metadata changed since last decryption
+    const toDecrypt = encryptedMessages.filter((msg) => {
+      const cacheKey = `${messageVersion(msg)}:${reactionSignature(msg)}:${msg.read ? 1 : 0}:${identity?.userId}`
+      return cache.get(msg.id)?.cacheKey !== cacheKey
+    })
+
+    if (toDecrypt.length === 0) {
+      // All messages already cached — build result synchronously from stable references
+      const next = encryptedMessages.map((msg) => cache.get(msg.id)?.decrypted).filter(Boolean) as DecryptedMessage[]
+      setDecryptedMessages(next)
+      setIsDecryptingMessages(false)
+      return
+    }
+
+    // Only show the global spinner for the initial load (nothing decrypted yet)
+    if (cache.size === 0) setIsDecryptingMessages(true)
+
     let cancelled = false
-    setIsDecryptingMessages(encryptedMessages.length > 0)
     async function run() {
-      const next = await Promise.all(
-        encryptedMessages.map(async (msg) => {
+      const freshlyDecrypted = await Promise.all(
+        toDecrypt.map(async (msg) => {
           const status: DecryptedMessage['status'] =
             msg.senderId === identity?.userId ? (msg.read ? 'read' : 'sent') : undefined
           try {
@@ -300,19 +327,19 @@ export function useMessages(opts: {
         }),
       )
       if (!cancelled) {
+        for (let i = 0; i < toDecrypt.length; i++) {
+          const msg = toDecrypt[i]
+          const cacheKey = `${messageVersion(msg)}:${reactionSignature(msg)}:${msg.read ? 1 : 0}:${identity?.userId}`
+          cache.set(msg.id, { cacheKey, decrypted: freshlyDecrypted[i] })
+        }
+        // Compose result using stable cached references — unchanged messages keep same object identity
+        const next = encryptedMessages.map((msg) => cache.get(msg.id)?.decrypted).filter(Boolean) as DecryptedMessage[]
         setDecryptedMessages(next)
         setIsDecryptingMessages(false)
       }
     }
-    if (encryptedMessages.length === 0) {
-      setDecryptedMessages([])
-      setIsDecryptingMessages(false)
-    } else {
-      run()
-    }
-    return () => {
-      cancelled = true
-    }
+    void run()
+    return () => { cancelled = true }
   }, [activeSecret, encryptedMessages, identity?.userId])
 
   useEffect(() => {
@@ -367,14 +394,28 @@ export function useMessages(opts: {
 
   const displayMessages = useMemo(() => {
     const byID = new Map<string, DecryptedMessage>()
+
+    // Build set of sentAt timestamps for our own confirmed (decrypted) messages.
+    // Used to suppress the matching pending bubble the moment the server version arrives,
+    // preventing a window where both coexist in the list.
+    const confirmedSentAts = new Set<string>()
+    for (const msg of decryptedMessages) {
+      if (msg.senderId === identity?.userId && msg.body?.sentAt) {
+        confirmedSentAts.add(msg.body.sentAt)
+      }
+    }
+
     for (const msg of pendingMessages) {
-      if (msg.roomId === activeRoomID && !localDeletedMessageIDs[msg.id]) byID.set(msg.id, msg)
+      if (msg.roomId !== activeRoomID || localDeletedMessageIDs[msg.id]) continue
+      // Suppress pending if its decrypted counterpart (matched by sentAt) is already present
+      if (msg.body?.sentAt && confirmedSentAts.has(msg.body.sentAt)) continue
+      byID.set(msg.id, msg)
     }
     for (const msg of decryptedMessages) {
       if (msg.roomId === activeRoomID && !localDeletedMessageIDs[msg.id]) byID.set(msg.id, msg)
     }
     return [...byID.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-  }, [activeRoomID, decryptedMessages, localDeletedMessageIDs, pendingMessages])
+  }, [activeRoomID, decryptedMessages, localDeletedMessageIDs, pendingMessages, identity?.userId])
 
   const visibleMessages = useMemo(() => {
     const query = messageSearch.trim().toLowerCase()
