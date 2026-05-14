@@ -88,6 +88,12 @@ export function useMessages(opts: {
   const messageInputRef = useRef<HTMLTextAreaElement | null>(null)
   const isInContextModeRef = useRef(false)
   isInContextModeRef.current = isInContextMode
+  // Refs for values used in the highlightedMessageID effect that must NOT be deps
+  // (putting them in deps would trigger cleanup and cancel the in-flight fetch).
+  const isLoadingMoreMessagesRef = useRef(false)
+  isLoadingMoreMessagesRef.current = isLoadingMoreMessages
+  const contextMessagesRef = useRef<EncryptedMessage[]>([])
+  contextMessagesRef.current = contextMessages
   const messageTextRef = useRef('')
   const messagesViewportRef = useRef<HTMLDivElement | null>(null)
   const typingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -195,10 +201,12 @@ export function useMessages(opts: {
   }
 
   useEffect(() => {
-    if (!session || !activeRoomID || !highlightedMessageID || isLoadingMoreMessages) return
-    // If message is already in any loaded source, no fetch needed
+    if (!session || !activeRoomID || !highlightedMessageID) return
+    // Use refs so that changes to isLoadingMoreMessages / contextMessages don't
+    // re-run this effect (which would fire the cleanup and cancel the in-flight fetch).
+    if (isLoadingMoreMessagesRef.current) return
     if (pagedMessages.some((msg) => msg.id === highlightedMessageID)) return
-    if (contextMessages.some((msg) => msg.id === highlightedMessageID)) return
+    if (contextMessagesRef.current.some((msg) => msg.id === highlightedMessageID)) return
     const loaderKey = `${activeRoomID}:${highlightedMessageID}`
     if (highlightedLoaderRef.current === loaderKey) return
     highlightedLoaderRef.current = loaderKey
@@ -230,11 +238,9 @@ export function useMessages(opts: {
     return () => { cancelled = true }
   }, [
     activeRoomID,
-    contextMessages,
     handleAuthExpired,
     handleRequestError,
     highlightedMessageID,
-    isLoadingMoreMessages,
     pagedMessages,
     session,
     t,
