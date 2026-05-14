@@ -331,6 +331,7 @@ export function ChatView(props: ChatViewProps) {
   const [showScrollBtn, setShowScrollBtn] = useState(false)
   const [imageViewer, setImageViewer] = useState<{ src: string; name: string } | null>(null)
   const [pendingImagePreviewID, setPendingImagePreviewID] = useState('')
+  const [newMessageIds, setNewMessageIds] = useState<ReadonlySet<string>>(new Set())
   const isNearBottomRef = useRef(true)
   const previousMessageIDsRef = useRef<string[]>([])
   const initializedRoomRef = useRef('')
@@ -342,6 +343,9 @@ export function ChatView(props: ChatViewProps) {
   const lastScrollTopRef = useRef(0)
   const suppressPaginationUntilRef = useRef(0)
   const lastHistoryLoadAtRef = useRef(0)
+  // Tracks sentAt values already animated to avoid re-animating pending→confirmed transition
+  const animatedSentAtsRef = useRef<Set<string>>(new Set())
+  const newMsgTimersRef = useRef<number[]>([])
 
   function clearBottomScrollTimers() {
     for (const timer of bottomScrollTimersRef.current) window.clearTimeout(timer)
@@ -395,6 +399,7 @@ export function ChatView(props: ChatViewProps) {
   useEffect(() => {
     setUnreadCount(0)
     setShowScrollBtn(false)
+    setNewMessageIds(new Set())
     isNearBottomRef.current = true
     previousMessageIDsRef.current = []
     initializedRoomRef.current = ''
@@ -405,6 +410,9 @@ export function ChatView(props: ChatViewProps) {
     lastScrollTopRef.current = 0
     suppressPaginationUntilRef.current = 0
     lastHistoryLoadAtRef.current = 0
+    animatedSentAtsRef.current.clear()
+    for (const t of newMsgTimersRef.current) window.clearTimeout(t)
+    newMsgTimersRef.current = []
     clearBottomScrollTimers()
   }, [activeRoomID])
 
@@ -442,6 +450,26 @@ export function ChatView(props: ChatViewProps) {
     if (previousLastIndex < 0) return
     const appendedMessages = visibleMessages.slice(previousLastIndex + 1)
     if (appendedMessages.length === 0) return
+
+    // Animate only messages that haven't been animated yet (avoid re-animating pending→confirmed)
+    const toAnimate = appendedMessages.filter((msg) => {
+      const sentAt = msg.body?.sentAt
+      if (sentAt && animatedSentAtsRef.current.has(sentAt)) return false
+      if (sentAt) animatedSentAtsRef.current.add(sentAt)
+      return true
+    })
+    if (toAnimate.length > 0) {
+      const ids = new Set(toAnimate.map((m) => m.id))
+      setNewMessageIds((prev) => new Set([...prev, ...ids]))
+      const timer = window.setTimeout(() => {
+        setNewMessageIds((prev) => {
+          const next = new Set(prev)
+          for (const id of ids) next.delete(id)
+          return next
+        })
+      }, 400)
+      newMsgTimersRef.current.push(timer)
+    }
 
     if (isNearBottomRef.current) {
       scrollMessagesToBottom()
@@ -878,7 +906,10 @@ export function ChatView(props: ChatViewProps) {
                       id={`message-${msg.id}`}
                       data-message-id={msg.id}
                       withBorder={!isMobile}
-                      className={!msg.body?.system ? 'message-bubble' : undefined}
+                      className={[
+                        !msg.body?.system ? 'message-bubble' : undefined,
+                        newMessageIds.has(msg.id) ? 'message-new' : undefined,
+                      ].filter(Boolean).join(' ') || undefined}
                       radius={!msg.body?.system ? 'lg' : 'sm'}
                       p={isMobile ? 'sm' : 'sm'}
                       style={{
