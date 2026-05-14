@@ -172,52 +172,39 @@ export function AuthPage(props: AuthPageProps) {
     </Stack>
   )
 
-  // ─── Mobile layout ────────────────────────────────────────────────────────
-  if (isMobile) {
-    return (
-      <Box className="auth-mobile-page">
-        <Stack className="auth-mobile-brand" align="center" justify="center" gap="xs">
-          <Box className="auth-mobile-icon">
-            <IconShieldCheck size={36} stroke={1.6} color="white" />
-          </Box>
-          <Text className="auth-mobile-wordmark">Quietline</Text>
-          <Text size="sm" c="dimmed" ta="center" maw={260} lh={1.45}>
-            {t('quietlineIntro')}
-          </Text>
-        </Stack>
-
-        <Box className="auth-mobile-sheet">
-          <Box className="auth-mobile-handle" />
-          <Stack gap={4} mb="lg">
-            <Text fw={700} size="xl">
-              {authMode === 'register' ? t('createAccount') : t('login')}
-            </Text>
-            {authMode === 'register' && (
-              <Text size="sm" c="dimmed">{t('passwordHint')}</Text>
-            )}
-          </Stack>
-          {form}
-        </Box>
-      </Box>
-    )
-  }
-
-  // ─── Desktop layout ───────────────────────────────────────────────────────
   return (
     <Box className="auth-page">
       <Group className="auth-shell" align="stretch" wrap="nowrap">
-        <Stack className="auth-copy" justify="space-between">
-          <div>
-            <Badge variant="light" color="blue" mb="md">{t('encryptedBadge')}</Badge>
-            <Title order={1} className="auth-title">Quietline</Title>
-            <Text c="dimmed" size="lg" maw={520}>{t('quietlineIntro')}</Text>
+
+        {/* Brand / copy section */}
+        <Stack
+          className="auth-copy"
+          justify={isMobile ? 'center' : 'space-between'}
+          align={isMobile ? 'center' : 'flex-start'}
+          gap={isMobile ? 'xs' : 'md'}
+        >
+          <div style={{ textAlign: isMobile ? 'center' : 'left' }}>
+            {isMobile ? (
+              <Box className="auth-brand-icon">
+                <IconShieldCheck size={32} stroke={1.6} />
+              </Box>
+            ) : (
+              <Badge variant="light" color="blue" mb="md">{t('encryptedBadge')}</Badge>
+            )}
+            <Title order={isMobile ? 2 : 1} className="auth-title">Quietline</Title>
+            <Text c="dimmed" size={isMobile ? 'sm' : 'lg'} maw={isMobile ? 270 : 520} lh={1.45}>
+              {t('quietlineIntro')}
+            </Text>
           </div>
-          <Stack gap="xs">
-            <Text fw={700}>{t('authFeatureTitle')}</Text>
-            <Text size="sm" c="dimmed">{t('authFeatureText')}</Text>
-          </Stack>
+          {!isMobile && (
+            <Stack gap="xs">
+              <Text fw={700}>{t('authFeatureTitle')}</Text>
+              <Text size="sm" c="dimmed">{t('authFeatureText')}</Text>
+            </Stack>
+          )}
         </Stack>
 
+        {/* Form card */}
         <Card className="auth-card" withBorder>
           <Stack gap="md">
             <div>
@@ -229,6 +216,7 @@ export function AuthPage(props: AuthPageProps) {
             {form}
           </Stack>
         </Card>
+
       </Group>
     </Box>
   )

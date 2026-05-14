@@ -128,6 +128,19 @@ body {
   min-height: 44px;
 }
 
+.auth-brand-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: light-dark(rgba(34, 139, 230, 0.12), rgba(34, 139, 230, 0.18));
+  border: 1px solid light-dark(rgba(34, 139, 230, 0.22), rgba(34, 139, 230, 0.3));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 8px;
+  color: light-dark(var(--mantine-color-blue-6), var(--mantine-color-blue-4));
+}
+
 .app-workspace {
   height: 100dvh;
   min-height: 100dvh;
@@ -486,77 +499,4 @@ body {
     background: light-dark(var(--mantine-color-blue-0), rgba(34, 139, 230, 0.14));
   }
 
-  /* ── Mobile auth page ──────────────────────────────────────────────────── */
-
-  .auth-mobile-page {
-    display: flex;
-    flex-direction: column;
-    height: 100dvh;
-    min-height: 100dvh;
-    overflow: hidden;
-    background: linear-gradient(
-      160deg,
-      light-dark(#1971c2, #1864ab) 0%,
-      light-dark(#1c7ed6, #1971c2) 38%,
-      light-dark(#228be6, #1c7ed6) 62%,
-      light-dark(#339af0, #228be6) 100%
-    );
-  }
-
-  [data-mantine-color-scheme='dark'] .auth-mobile-page {
-    background: linear-gradient(160deg, #0c1445 0%, #102060 38%, #1864ab 100%);
-  }
-
-  .auth-mobile-brand {
-    flex: 1 1 0;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: max(env(safe-area-inset-top), 28px) 24px 24px;
-  }
-
-  .auth-mobile-brand .mantine-Text-root {
-    color: rgba(255, 255, 255, 0.82) !important;
-  }
-
-  .auth-mobile-icon {
-    width: 72px;
-    height: 72px;
-    border-radius: 20px;
-    background: rgba(255, 255, 255, 0.18);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 4px;
-  }
-
-  .auth-mobile-wordmark {
-    font-size: 34px !important;
-    font-weight: 800 !important;
-    letter-spacing: -0.5px;
-    color: #fff !important;
-    line-height: 1 !important;
-  }
-
-  .auth-mobile-sheet {
-    flex: 0 0 auto;
-    border-radius: 28px 28px 0 0;
-    padding: 12px 24px max(env(safe-area-inset-bottom), 28px);
-    background: light-dark(#ffffff, var(--mantine-color-dark-7));
-    box-shadow: 0 -12px 40px rgba(0, 0, 0, 0.22);
-    overflow-y: auto;
-    max-height: 75dvh;
-  }
-
-  .auth-mobile-handle {
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
-    background: light-dark(var(--mantine-color-gray-3), var(--mantine-color-dark-4));
-    margin: 0 auto 20px;
-  }
 }
