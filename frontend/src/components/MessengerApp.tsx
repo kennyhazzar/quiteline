@@ -516,19 +516,29 @@ export function MessengerApp() {
   useEffect(() => {
     if (!activeRoomID || !highlightedMessageID || messages.visibleMessages.length === 0) return
     const msgId = highlightedMessageID
-    window.requestAnimationFrame(() => {
-      window.requestAnimationFrame(() => {
-        const target = document.getElementById(`message-${msgId}`)
-        if (!target) return
+    // Retry until the element appears in the DOM (decryption is async — may take
+    // a few frames after visibleMessages updates before the card is rendered).
+    let attempts = 0
+    function tryScroll() {
+      const target = document.getElementById(`message-${msgId}`)
+      if (target) {
         target.scrollIntoView({ block: 'center', behavior: 'smooth' })
-        // Clear highlight only after the element is actually in view.
-        // This allows context mode to load and the scroll to happen before clearing.
         window.setTimeout(() => {
           setHighlightedMessageID((cur) => (cur === msgId ? '' : cur))
         }, 2500)
-      })
-    })
-  }, [activeRoomID, highlightedMessageID, messages.visibleMessages.length, messages.isInContextMode])
+        return
+      }
+      if (attempts < 20) {
+        attempts++
+        window.setTimeout(tryScroll, 50)
+      }
+    }
+    window.requestAnimationFrame(() => window.requestAnimationFrame(tryScroll))
+    // Use the visibleMessages reference (not .length) so the effect re-fires when the
+    // context window finishes decrypting and the DOM is updated — even if the message
+    // count happens to be the same before and after entering context mode.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRoomID, highlightedMessageID, messages.visibleMessages, messages.isInContextMode])
 
   // ─── Mark room read ───────────────────────────────────────────────────────
   useEffect(() => {
